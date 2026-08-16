@@ -32,11 +32,17 @@ import requests
 
 from fpl_model.tactics.spatial import normalise_points
 
-DEFAULT_BASE_URL = "https://www.sofascore.com/api/v1"
+# Prefer the dedicated API hostname. Some networks currently present a TLS
+# certificate mismatch for www.sofascore.com when it is used as an API host.
+DEFAULT_BASE_URL = "https://api.sofascore.com/api/v1"
 
 
 class SofaScoreCoverageError(RuntimeError):
     """Raised when an event/player lacks the requested provider coverage."""
+
+
+class SofaScoreTransportError(RuntimeError):
+    """Raised when the provider cannot be reached safely over HTTPS."""
 
 
 @dataclass(slots=True)
@@ -57,16 +63,42 @@ class SofaScoreExperimentalClient:
     def _get_json(self, path: str) -> dict[str, Any]:
         self._throttle()
         url = f"{self.base_url.rstrip('/')}/{path.lstrip('/')}"
-        response = self.session.get(
-            url,
-            timeout=self.timeout_seconds,
-            headers={"User-Agent": self.user_agent, "Accept": "application/json"},
-        )
-        self._last_request_at = monotonic()
+
+        try:
+            response = self.session.get(
+                url,
+                timeout=self.timeout_seconds,
+                headers={"User-Agent": self.user_agent, "Accept": "application/json"},
+            )
+        except requests.exceptions.SSLError as exc:
+            raise SofaScoreTransportError(
+                "TLS verification failed while connecting to SofaScore. "
+                f"Requested URL: {url}. Do not disable certificate verification. "
+                "Try the dedicated API host or inspect local DNS/proxy/TLS interception."
+            ) from exc
+        except requests.exceptions.RequestException as exc:
+            raise SofaScoreTransportError(
+                f"Could not reach SofaScore at {url}: {exc}"
+            ) from exc
+        finally:
+            self._last_request_at = monotonic()
 
         if response.status_code == 404:
             raise SofaScoreCoverageError(f"No SofaScore coverage for {path}")
-        response.raise_for_status()
+        if response.status_code == 403:
+            raise SofaScoreTransportError(
+                "SofaScore returned HTTP 403 for direct API access. "
+                "This usually means this transport path is blocked from the current network; "
+                "do not add anti-bot bypass logic."
+            )
+
+        try:
+            response.raise_for_status()
+        except requests.exceptions.RequestException as exc:
+            raise SofaScoreTransportError(
+                f"SofaScore HTTP request failed for {url}: {exc}"
+            ) from exc
+
         payload = response.json()
         if not isinstance(payload, dict):
             raise ValueError(f"Expected JSON object from {path}")
