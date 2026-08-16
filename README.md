@@ -1,1 +1,145 @@
-# fpl_model
+# FPL Model
+
+An explainable Fantasy Premier League projection engine built around auditable expected-points components, contextual adjustments, and reproducible data pipelines.
+
+## Project goal
+
+The first objective is **not** to build a black-box ML predictor. We will first reproduce the Benchwarmers 2026/27 spreadsheet model in Python, component by component, then test whether additional contextual features improve out-of-sample predictions.
+
+Planned contextual layers include:
+
+- promoted-team / league-translation priors
+- manager regime changes
+- player tactical-role changes
+- World Cup / preseason readiness
+- fixture congestion and European competition
+- uncertainty and calibration
+
+## Design principles
+
+1. **Deadline-safe data only** for backtests. No same-GW lookahead.
+2. **Formation is metadata; player role is a feature.** A nominal RB may behave like a high wing-back or an inverted midfielder.
+3. **Context changes causal inputs, not xPts directly.** For example, World Cup readiness should first affect start probability / expected minutes rather than applying an arbitrary points multiplier.
+4. **Every extension must beat the baseline in backtesting.**
+5. **Raw scraped/downloaded data is not committed.** Pipelines should make it reproducible.
+
+## Current scope: Sprint 1 — data foundation
+
+This branch establishes:
+
+- official FPL API ingestion
+- Vaastav historical/current-season ingestion
+- canonical identifiers and records
+- preseason availability schema
+- spatial/heatmap fingerprint primitives
+- season/model configuration
+- network-free unit tests for core transformations
+
+The Benchwarmers xPts engine will be implemented only after this foundation is stable.
+
+## Repository layout
+
+```text
+config/                    Model and season configuration
+data/
+  raw/                     Local upstream downloads (gitignored)
+  processed/               Generated canonical tables (gitignored)
+  annotations/             Small hand-reviewed tactical/context annotations
+src/fpl_model/
+  ingest/                  FPL, Vaastav, Understat/preseason adapters
+  schema/                  Canonical records and validation
+  tactics/                 Spatial fingerprints and tactical roles
+  context/                 Manager, promotion, tournament, congestion features
+  model/                   xPts component engine (next sprint)
+  validation/              Backtests and calibration (next sprint)
+tests/                     Deterministic unit tests
+legacy/                    Notes on the early notebook prototype
+```
+
+## Quick start
+
+```bash
+python -m venv .venv
+```
+
+Windows:
+
+```bash
+.venv\Scripts\activate
+```
+
+macOS/Linux:
+
+```bash
+source .venv/bin/activate
+```
+
+Install:
+
+```bash
+pip install -e ".[dev]"
+pytest
+```
+
+Example FPL API smoke run:
+
+```bash
+python -m fpl_model.ingest.fpl
+```
+
+Example Vaastav load:
+
+```python
+from fpl_model.ingest.vaastav import VaastavClient
+
+client = VaastavClient()
+players = client.cleaned_players("2026-27")
+```
+
+## Upstream data
+
+The project uses or may use data from:
+
+- the official Fantasy Premier League API
+- `vaastav/Fantasy-Premier-League` as a historical/current-season upstream dataset
+- Understat for xG/xA-related data where appropriate
+- spatial/preseason providers after a reproducibility and terms-of-use review
+
+See `THIRD_PARTY_NOTICES.md`.
+
+## Roadmap
+
+### Sprint 1 — Data foundation
+- [x] Repository/package structure
+- [x] Official FPL API adapter
+- [x] Vaastav adapter
+- [x] Canonical schemas
+- [x] Spatial fingerprint primitive
+- [ ] Test structured preseason heatmap availability on Chelsea
+- [ ] Canonical player ID bridge across providers
+
+### Sprint 2 — Benchwarmers baseline
+- [ ] Reproduce appearance/start/minutes logic
+- [ ] Goal / assist components
+- [ ] Clean sheet / goals-conceded components
+- [ ] Saves / cards / bonus / DefCon
+- [ ] Fixture and home-away adjustments
+- [ ] Golden tests against spreadsheet outputs
+
+### Sprint 3 — Context engine
+- [ ] Promotion priors
+- [ ] Manager regime features
+- [ ] World Cup and preseason readiness
+- [ ] Congestion / rest-day features
+- [ ] Tactical role priors
+
+### Sprint 4 — Validation and decisions
+- [ ] Walk-forward backtesting
+- [ ] Start-probability calibration
+- [ ] xPts uncertainty
+- [ ] Ablation tests for each contextual layer
+- [ ] Squad/transfer optimizer
+
+## License
+
+Project code is released under the repository license. Third-party data remains subject to its respective source terms.

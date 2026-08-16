@@ -1,0 +1,25 @@
+season: "2026-27"
+competition: "Premier League"
+
+upstream:
+  vaastav_season: "2026-27"
+  fpl_api_base: "https://fantasy.premierleague.com/api/"
+
+preseason:
+  enabled: true
+  treat_as_context_not_competitive_sample: true
+
+world_cup_2026:
+  enabled: true
+  final_date: "2026-07-19"
+  features_planned:
+    - tournament_minutes
+    - last_tournament_match_date
+    - days_since_last_tournament_match
+    - club_return_date
+    - training_days
+    - preseason_minutes
+
+projection:
+  first_gameweek: 1
+  last_gameweek: 38
