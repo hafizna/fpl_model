@@ -121,7 +121,7 @@ See `THIRD_PARTY_NOTICES.md`.
 ### Sprint 2 — Benchwarmers baseline
 - [x] Reproduce appearance/start/minutes logic
 - [x] Goal / assist components
-- [ ] Clean sheet / goals-conceded components
+- [x] Clean sheet / goals-conceded components
 - [ ] Saves / cards / bonus / DefCon
 - [ ] Fixture and home-away adjustments
 - [ ] Golden tests against spreadsheet outputs

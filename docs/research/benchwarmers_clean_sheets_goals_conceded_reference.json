@@ -1,0 +1,729 @@
+{
+  "$schema_note": "Reference-only extraction from the Benchwarmers 2026/27 spreadsheet model, covering clean-sheet and goals-conceded expected-points logic. Read-only, formulas + cached values as of the timestamps below. This does not imply spreadsheet parity is implemented in Python. No Python code was written or modified to produce this file.",
+  "extraction_date": "2026-08-17",
+  "extraction_scope": {
+    "in_scope": [
+      "MODEL sheet: team-level xGC/CS-rate columns (BT:BX, CI:CM) and points-scaled columns (DX:EE)",
+      "PPts sheet: fixture/opponent adjustment columns (Q,R,S,T,U,V,W) and CS/GC component columns (AK:AR), and how they feed AY/BA/BG/BI",
+      "CONTROL sheet assumptions referenced by the above (B62/B63, B72/B73, B78/B79, B97/B98, B101/B102, B110/B111, D198:E201)",
+      "xGC, PL, TABLES, TABLE, PSTABLE sheets (structure and formulas for team defensive rates, league averages, Understat regression correction)",
+      "CS sheet (structure only -- confirmed unreferenced by any live formula)",
+      "TEAMS, FIXTURES, MINS sheets (structure only, as supporting/team-identity or window-index sources)",
+      "Promoted-team data-population mechanism (Coventry, Hull, Ipswich vs the established 17 teams)",
+      "Lookahead audit of the LF/SF rolling-window offset arithmetic (CONTROL!B56/B57/B69/B70/B83/B84/B94/B95 and their D/E offset formulas)"
+    ],
+    "out_of_scope": [
+      "Goals, assists, saves, cards, bonus, DefCon components except where needed to show shared formulas (PPts!BA/BG/BI) or shared CONTROL blocks",
+      "Full row-by-row audit of the xGC/PL pivot tables beyond the promoted-team vs established-team comparison",
+      "TEAMS sheet population status beyond noting it is currently blank (not used by the traced CS/GC formula chain)",
+      "Any change to src/fpl_model or tests"
+    ],
+    "reused_findings": "The appearance/start-probability formula map (PPts!BA:BI structural formulas) and the goal/assist fixture-adjustment mechanism (PPts!R/S/T/U/V/W, the H/A-double-application quirk) were already extracted in the two prior reference JSONs and are not re-derived from scratch here; this file cross-references them and adds only the CS/GC-specific columns and their upstream sources."
+  },
+  "workbooks": {
+    "MODEL.xlsx": {
+      "path": "C:\\Users\\hafizna.fadhli\\Downloads\\MODEL.xlsx",
+      "size_bytes": 71300490,
+      "mtime_iso": "2026-08-16T21:40:30.440420",
+      "note": "Timestamp unchanged from both prior extraction sessions, confirming the workbook has not been modified in between.",
+      "role": "Primary source for MODEL, PPts, CONTROL, xGC, PL, TABLES, TABLE, PSTABLE, CS, TEAMS, FIXTURES, MINS sheet formulas used in this extraction."
+    },
+    "SOLVER.xlsx": {
+      "path": "C:\\Users\\hafizna.fadhli\\Downloads\\SOLVER.xlsx",
+      "size_bytes": 200650,
+      "mtime_iso": "2026-08-16T21:38:21.005117",
+      "role": "Downstream squad-optimizer workbook. Not a source of clean-sheet/goals-conceded formulas; not used in this extraction."
+    },
+    "SIMPLE MODEL.xlsx": {
+      "path": "C:\\Users\\hafizna.fadhli\\Downloads\\SIMPLE MODEL.xlsx",
+      "size_bytes": 946907,
+      "mtime_iso": "2026-08-16T21:38:20.417391",
+      "role": "Simplified/derivative workbook without the MODEL/PPts sheets. Not used in this extraction."
+    }
+  },
+  "control_assumptions": [
+    {
+      "cells": ["B62", "B63"],
+      "label": "Mins/Start Previous vs This Season (reused by clean sheets, shared with goals/assists)",
+      "formula": "B63 = 1-B62",
+      "cached_value": { "B62": 1, "B63": 0 },
+      "downstream_effect": "Used inside MODEL!BW/CL (LF % CS/St, SF % CS/90) to blend PS Mn/St% and this-season Mn/St% for the minutes-scaling factor multiplying EXP(-xGC*mins). This is the SAME cell pair already documented as independently editable from the appearance block's B8/B9 in the goals/assists extraction. NOTE: this pairing is irrelevant to the LIVE clean-sheet pipeline, since MODEL!BW/CL are dead-end columns (see spreadsheet_quirks) -- it only affects the unused MODEL!9/MODEL!10 columns.",
+      "independently_editable": true,
+      "independently_editable_note": "Same cells as documented in the goals/assists extraction; not a new pair, included here because it is read by the (dead) MODEL-side CS formula."
+    },
+    {
+      "cells": ["B72", "B73"],
+      "label": "Clean Sheets: Long Form vs Short Form weight",
+      "formula": "B73 = 1-B72",
+      "cached_value": { "B72": 0.8, "B73": 0.19999999999999996 },
+      "downstream_effect": "Used in MODEL!EA ('9') to blend MODEL!DY (LF %9 = LF % CS/St) and MODEL!DZ (SF %9 = SF % CS/90). Again on the DEAD MODEL-side pipeline only -- PPts's live CS% (AM) does not use this pair at all; it instead reads TABLES!AK (LFxSF US xGC FIX), which is pre-blended using the DIFFERENT B97/B98 pair (fixture LF/SF weight) inside TABLES!AD.",
+      "independently_editable": true,
+      "independently_editable_note": "A DISTINCT 0.8/0.2 pair from B59/B60 (goals/assists LF/SF weight), B72/B73 (this one), B78/B79 (2+GC LF/SF weight), and B97/B98 (fixture LF/SF weight). All five pairs currently hold the identical 0.8/0.2 value, which is easy to mistake for one shared knob -- they are five separately-editable CONTROL cells."
+    },
+    {
+      "cells": ["B78", "B79"],
+      "label": "2+ Goals Conceded: Long Form vs Short Form weight",
+      "formula": "B79 = 1-B78",
+      "cached_value": { "B78": 0.8, "B79": 0.19999999999999996 },
+      "downstream_effect": "Used in MODEL!EE ('10') to blend MODEL!EC (LF %10 = LF % 2+ GC) and MODEL!ED (SF %10 = SF % 2+ GC). Same DEAD-pipeline caveat as B72/B73 -- PPts's live AR ('10') does not read this pair.",
+      "independently_editable": true,
+      "independently_editable_note": "A sixth 0.8/0.2-valued pair, distinct from B59/B60, B72/B73, B97/B98. Not linked to any of them in the spreadsheet despite the identical current value."
+    },
+    {
+      "cells": ["B97", "B98"],
+      "label": "Fixture LF/SF weight (opponent xG/xGC) -- shared with goals/assists, LIVE for clean sheets",
+      "formula": "B98 = 1-B97",
+      "cached_value": { "B97": 0.8, "B98": 0.19999999999999996 },
+      "downstream_effect": "Used TWICE in the live CS/GC chain, in two different roles: (1) inside TABLES!AD (LFxSF xGC/90), blending a TEAM's OWN LF/SF xGC/90 -- this feeds AF (LFxSF US xGC FIX), which PPts!AK reads as the player's own team's defensive rate; (2) inside PPts!R/S (VS xG/90, VS xGC/90), blending the OPPONENT's LF/SF attacking/defensive rates for the goals/assists fixture adjustment. Confirmed by direct search: PPts!AL (CS X) uses PPts!R (VS xG/90) as its fixture-adjustment numerator, so B97/B98 controls BOTH the player's own defensive-rate blend (via TABLES!AD/AF) AND the opponent's attacking-rate blend (via PPts!R) simultaneously, for every clean-sheet calculation.",
+      "independently_editable": true,
+      "independently_editable_note": "Same cells already documented in the goals/assists extraction as controlling opponent-strength LF/SF blending; this extraction adds that it ALSO controls the team's own defensive-rate LF/SF blend via TABLES!AD, a role not previously documented."
+    },
+    {
+      "cells": ["B101", "B102", "C101", "C102"],
+      "label": "Understat Correction (xG/xGC): 2-point linear regression calibration table",
+      "formula": "Used as the known_x (B101:B102) and known_y (C101:C102) arguments to FORECAST.LINEAR in TABLES!S/T/Y/Z/AE/AF",
+      "cached_value": { "B101": 2, "C101": 1, "B102": 0.9, "C102": 0.9 },
+      "downstream_effect": "TABLES!AF (LFxSF US xGC FIX), the figure PPts!AK reads directly for every clean-sheet calculation, is computed as raw_xGC_per_90 * FORECAST.LINEAR(raw_xGC_per_90, C101:C102, B101:B102) -- a self-referential linear regression correction (the x-value being corrected is also the regression's x-input) that maps a raw xGC/90 of 2.0 to a multiplier of 1.0 (no correction) and a raw xGC/90 of 0.9 to a multiplier of 0.9 (10% shrinkage), linearly interpolated/extrapolated elsewhere via the 2-point line through (2,1) and (0.9,0.9). Independently verified for Ipswich (raw LFxSF xGC/90=1.479448): slope=(0.9-1)/(0.9-2)=0.0909..., intercept=1-0.0909...*2=0.8182, FORECAST.LINEAR(1.479448)=0.9527, corrected=1.479448*0.9527=1.4094362167912728, matching PPts!AK's cached 1.4094362167912726 to full practical precision.",
+      "independently_editable": true,
+      "independently_editable_note": "A calibration table, not a simple weight pair. No comment in CONTROL explains the origin of the (2,1) and (0.9,0.9) calibration points."
+    },
+    {
+      "cells": ["B105", "B106", "C105", "C106", "B107", "B108"],
+      "label": "PPts FDR multiplier / Safe Threshold / Dampening Factor",
+      "formula": "TABLES!AI/AJ = FORECAST.LINEAR(...,C105:C106,B105:B106); TABLES!AK/AL (Damp xG/xGC) apply a SIGN()*MIN(...)+MAX(...)*dampening_factor clipping formula on top",
+      "cached_value": { "B105": 2.25, "C105": 1.6, "B106": 1.4862086362316422, "C106": 1, "B107": 1.55, "B108": 0.4 },
+      "downstream_effect": "NONE on the live clean-sheet/goals-conceded chain -- confirmed by exhaustive search that TABLES!AI, AJ, AK, AL ('PPts x xG', 'Ppts x xGC', 'Damp xG', 'Damp xGC') are never referenced by any formula in MODEL or PPts. This is a second, independent dead-end calculation, separate from the MODEL!9/10 dead columns.",
+      "independently_editable": true,
+      "independently_editable_note": "Fully computed but entirely unused in the traced chain -- see spreadsheet_quirks.dead_end_damping_calculation."
+    },
+    {
+      "cells": ["B110", "B111"],
+      "label": "League Average xG/xGC Previous vs This Season -- shared with goals/assists",
+      "formula": "B111 = 1-B110",
+      "cached_value": { "B110": 1, "B111": 0 },
+      "downstream_effect": "Blends PSTABLE!N24/O24 (previous-season league average xG/90, xGC/90) and TABLE!N24/O24 (this-season, currently 0 since no matches played) into PPts!T (LA xG/90) and U (LA xGC/90) -- the denominator PPts!AL (CS X) uses to express the opponent's attacking strength relative to league average. Same cells already documented in the goals/assists extraction.",
+      "independently_editable": true,
+      "independently_editable_note": "Not new; included for completeness since LA xG/90 (T) is a direct input to the clean-sheet fixture adjustment (AL)."
+    },
+    {
+      "cells": ["D198", "D199", "D200", "D201"],
+      "label": "FPL points per clean sheet by position",
+      "cached_value": [
+        { "POS": "GK", "CS": 4 },
+        { "POS": "DEF", "CS": 4 },
+        { "POS": "MID", "CS": 1 },
+        { "POS": "FWD", "CS": 0 }
+      ],
+      "downstream_effect": "Looked up via nested IF in both MODEL!DX (dead) and PPts!AN (live), matching real-world FPL scoring. FWD=0 means forwards are structurally ineligible for clean-sheet points -- confirmed on Haaland's golden case (AN=0, AO='9'=0 despite a nonzero CS% of 0.249).",
+      "independently_editable": true,
+      "independently_editable_note": "Looked up via nested IF, not INDEX/MATCH, in both the dead MODEL column and the live PPts column -- an independent duplication of the same lookup logic in two places, not a single shared formula."
+    },
+    {
+      "cells": ["E198", "E199", "E200", "E201"],
+      "label": "FPL points penalty per '2+ goals conceded' event by position",
+      "cached_value": [
+        { "POS": "GK", "2+GC": -1 },
+        { "POS": "DEF", "2+GC": -1 },
+        { "POS": "MID", "2+GC": 0 },
+        { "POS": "FWD", "2+GC": 0 }
+      ],
+      "downstream_effect": "Looked up via nested IF in both MODEL!EB (dead) and PPts!AQ (live). MID/FWD=0 correctly limits the deduction to GK/DEF, but the live formula models only one -1 event for 2+ goals conceded. Official FPL scoring repeats the deduction for every two goals conceded, so the workbook omits additional deductions at 4, 6, and so on (see modelling_answers.q2).",
+      "independently_editable": true,
+      "independently_editable_note": "Same duplication pattern as D198:D201."
+    }
+  ],
+  "formula_map": {
+    "MODEL_sheet": {
+      "note": "The ENTIRE MODEL-sheet CS/GC pipeline (BT:BX, CI:CM, DX:EE) is a dead end -- confirmed by exhaustive formula-string search that MODEL!9, MODEL!10, MODEL!CS, and MODEL!2+ GC are never referenced by any other formula in MODEL or PPts. Recorded in full below because the task requires tracing it end-to-end, but see spreadsheet_quirks.dead_end_model_side_cs_gc_pipeline for the headline finding.",
+      "team_level_xgc_windows": {
+        "LF_xGC_BT": {
+          "header": "LF xGC",
+          "formula": "=IFERROR(SUM(INDEX(xGC!$B$1001:$CZ$1999,MATCH(MODEL[[#This Row],[TEAM]],xGC!$A$1001:$A$1999,0),CONTROL!$E$2-CONTROL!$D$69+1-CONTROL!$C$69):INDEX(xGC!$B$1001:$CZ$1999,MATCH(MODEL[[#This Row],[TEAM]],xGC!$A$1001:$A$1999,0),CONTROL!$E$2-CONTROL!$E$69)),0)",
+          "meaning": "Sum of the player's TEAM's (not the player's own) expected goals conceded over the Long Form window (CONTROL!B69=38 GWs), looked up in the xGC pivot-table sheet by TEAM abbreviation, not player code. THIS IS THE KEY EVIDENCE for modelling question 7: clean sheets/goals-conceded are purely team-level, never conditioned on which specific player is on the pitch."
+        },
+        "LF_xGC_Pl_BU": {
+          "header": "LF xGC Pl",
+          "formula": "=IFERROR(SUM(INDEX(PL!$B$2200:$CZ$2290,MATCH(MODEL[[#This Row],[TEAM]],PL!$A$2200:$A$2290,0),CONTROL!$E$2-CONTROL!$D$69+1-CONTROL!$C$69):INDEX(PL!$B$2200:$CZ$2290,MATCH(MODEL[[#This Row],[TEAM]],PL!$A$2200:$A$2290,0),CONTROL!$E$2-CONTROL!$E$69)),0)",
+          "meaning": "Sum of TEAM matches played over the same window, from a DIFFERENT row block of the PL sheet (rows 2200-2290, a team-level block) than the one used for player-level appearance windows (rows 1001-1999, used by MODEL!LF Pl in the goals/assists chain). Not consumed downstream by anything live (see dead-end note)."
+        },
+        "LF_xGC_90_BV": {
+          "header": "LF xGC/90",
+          "formula": "=IFERROR(INDEX(TABLES[LF US xGC FIX],MATCH(MODEL[[#This Row],[TEAM]],TABLES[ABVR],0)),0)",
+          "meaning": "NOT actually LF_xGC/LF_xGC_Pl despite the header name -- it is a direct lookup of TABLES!T (LF US xGC FIX), i.e. the Understat-regression-corrected long-form rate, already computed team-side. So MODEL!BT/BU (the raw windowed sum/played-count immediately above) are themselves unused by MODEL!BV -- a THIRD dead-end within the dead-end (BT and BU compute real numbers that even MODEL's own downstream column ignores in favour of re-deriving the rate from TABLES)."
+        },
+        "LF_pct_CS_St_BW": {
+          "header": "LF % CS/St",
+          "formula": "=EXP(-MODEL[[#This Row],[LF xGC/90]]*((MODEL[[#This Row],[PS Mn/St %]]*CONTROL!$B$62)+(CONTROL!$B$63*MODEL[[#This Row],[Mn/St %]])))*MODEL[[#This Row],[2]]",
+          "meaning": "Poisson-style clean-sheet probability: exp(-lambda) where lambda = team xGC/90 scaled down by the blended fraction of a match the PLAYER is expected to be on the pitch for (their own Mn/St%, not the team's). CRITICALLY, this is then multiplied by MODEL!2 (the player's own 60-minute-conditional-on-start probability) -- directly answering modelling question 4 for the MODEL-side formula (yes, MODEL!2 IS used directly here). This is the ONLY place in the entire CS/GC chain (dead or live) where the 60-minute probability appears. It is on the dead branch."
+        },
+        "LF_pct_2plusGC_BX": {
+          "header": "LF % 2+ GC",
+          "formula": "=1-(MODEL[[#This Row],[LF % CS/St]]*(1+MODEL[[#This Row],[LF xGC/90]]))",
+          "meaning": "P(2+ goals conceded) derived from the Poisson clean-sheet probability via the identity P(X>=2) = 1 - P(X=0) - P(X=1) = 1 - exp(-lambda)*(1+lambda) for a Poisson(lambda) variable. This is mathematically exact for a true Poisson process; whether team goals-conceded actually follows a Poisson distribution is a modelling assumption, not verified by this extraction."
+        },
+        "SF_xGC_CI": { "header": "SF xGC", "formula": "=IFERROR(SUM(INDEX(xGC!$B$1001:$CZ$1999,MATCH(MODEL[[#This Row],[TEAM]],xGC!$A$1001:$A$1999,0),CONTROL!$E$2-CONTROL!$D$70+1-CONTROL!$C$70):INDEX(xGC!$B$1001:$CZ$1999,MATCH(MODEL[[#This Row],[TEAM]],xGC!$A$1001:$A$1999,0),CONTROL!$E$2-CONTROL!$E$70)),0)" },
+        "SF_xGC_Pl_CJ": { "header": "SF xGC Pl", "formula": "=IFERROR(SUM(INDEX(PL!$B$2200:$CZ$2290,MATCH(MODEL[[#This Row],[TEAM]],PL!$A$2200:$A$2290,0),CONTROL!$E$2-CONTROL!$D$70+1-CONTROL!$C$70):INDEX(PL!$B$2200:$CZ$2290,MATCH(MODEL[[#This Row],[TEAM]],PL!$A$2200:$A$2290,0),CONTROL!$E$2-CONTROL!$E$70)),0)" },
+        "SF_xGC_90_CK": { "header": "SF xGC/90", "formula": "=IFERROR(INDEX(TABLES[SF US xGC FIX],MATCH(MODEL[[#This Row],[TEAM]],TABLES[ABVR],0)),0)" },
+        "SF_pct_CS_90_CL": {
+          "header": "SF % CS/90",
+          "formula": "=EXP(-MODEL[[#This Row],[SF xGC/90]]*((MODEL[[#This Row],[PS Mn/St %]]*CONTROL!$B$62)+(CONTROL!$B$63*MODEL[[#This Row],[Mn/St %]])))*MODEL[[#This Row],[2]]",
+          "meaning": "Short Form mirror of BW, also multiplies by MODEL!2."
+        },
+        "SF_pct_2plusGC_CM": { "header": "SF % 2+ GC", "formula": "=1-(MODEL[[#This Row],[SF % CS/90]]*(1+MODEL[[#This Row],[SF xGC/90]]))" }
+      },
+      "points_scaled_columns": {
+        "CS_points_lookup_DX": {
+          "header": "CS",
+          "formula": "=IF(MODEL[[#This Row],[POS]]=\"GK\",CONTROL!$D$198,IF(MODEL[[#This Row],[POS]]=\"DEF\",CONTROL!$D$199,IF(MODEL[[#This Row],[POS]]=\"MID\",CONTROL!$D$200,IF(MODEL[[#This Row],[POS]]=\"FWD\",CONTROL!$D$201,0))))"
+        },
+        "LF_pct9_DY": { "header": "LF %9", "formula": "=MODEL[[#This Row],[LF % CS/St]]" },
+        "SF_pct9_DZ": { "header": "SF %9", "formula": "=MODEL[[#This Row],[SF % CS/90]]" },
+        "CS_rate_9_EA": {
+          "header": "9",
+          "formula": "=((MODEL[[#This Row],[LF %9]]*CONTROL!$B$72)+(MODEL[[#This Row],[SF %9]]*CONTROL!$B$73))*MODEL[[#This Row],[CS]]",
+          "meaning": "Blended (80% LF, 20% SF) clean-sheet probability (each already MODEL!2-multiplied), times positional CS points. DEAD -- never read by PPts."
+        },
+        "GC_points_lookup_EB": {
+          "header": "2+ GC",
+          "formula": "=IF(MODEL[[#This Row],[POS]]=\"GK\",CONTROL!$E$198,IF(MODEL[[#This Row],[POS]]=\"DEF\",CONTROL!$E$199,IF(MODEL[[#This Row],[POS]]=\"MID\",CONTROL!$E$200,IF(MODEL[[#This Row],[POS]]=\"FWD\",CONTROL!$E$201,0))))"
+        },
+        "LF_pct10_EC": { "header": "LF %10", "formula": "=MODEL[[#This Row],[LF % 2+ GC]]" },
+        "SF_pct10_ED": { "header": "SF %10", "formula": "=MODEL[[#This Row],[SF % 2+ GC]]" },
+        "GC_rate_10_EE": {
+          "header": "10",
+          "formula": "=((MODEL[[#This Row],[LF %10]]*CONTROL!$B$78)+(MODEL[[#This Row],[SF %10]]*CONTROL!$B$79))*MODEL[[#This Row],[2+ GC]]",
+          "meaning": "Blended P(2+ GC) times positional penalty. DEAD -- never read by PPts."
+        }
+      }
+    },
+    "TABLES_sheet": {
+      "note": "This is the sheet the LIVE PPts pipeline actually reads from. All formulas verified character-for-character against the live workbook.",
+      "LF_xGC_K": { "header": "LF xGC", "formula": "=IFERROR(SUM(INDEX(xGC!$B$1001:$CZ$1999,MATCH(TABLES[[#This Row],[ABVR]],xGC!$A$1001:$A$1999,0),MATCH(CONTROL!$C$2&\"-GW\"&CONTROL!$C$3,xGC!$B$1001:$CZ$1001,0)-CONTROL!$D$94+1-CONTROL!$C$94):INDEX(xGC!$B$1001:$CZ$1999,MATCH(TABLES[[#This Row],[ABVR]],xGC!$A$1001:$A$1999,0),MATCH(CONTROL!$C$2&\"-GW\"&CONTROL!$C$3,xGC!$B$1001:$CZ$1001,0)-CONTROL!$E$94)),0)" },
+      "LF_PL_M": { "header": "LF PL", "formula": "=IFERROR(SUM(INDEX(PL!$B$1001:$CZ$1999,MATCH(TABLES[[#This Row],[ABVR]],PL!$A$1001:$A$1999,0),MATCH(CONTROL!$C$2&\"-GW\"&CONTROL!$C$3,PL!$B$1001:$CZ$1001,0)-CONTROL!$D$94+1-CONTROL!$C$94):INDEX(PL!$B$1001:$CZ$1999,MATCH(TABLES[[#This Row],[ABVR]],PL!$A$1001:$A$1999,0),MATCH(CONTROL!$C$2&\"-GW\"&CONTROL!$C$3,PL!$B$1001:$CZ$1001,0)-CONTROL!$E$94)),0)" },
+      "LF_xGC_90_R": { "header": "LF xGC/90", "formula": "=IFERROR(TABLES[[#This Row],[LF xGC]]/TABLES[[#This Row],[LF PL]],0)", "meaning": "Genuine SUM/COUNT rate calculation here (unlike MODEL!BV, which skips straight to the US-corrected value). This is the raw, uncorrected team xGC/90." },
+      "SF_xGC_90_X": { "header": "SF xGC/90", "formula": "=IFERROR(TABLES[[#This Row],[SF xGC]]/TABLES[[#This Row],[SF PL]],0)" },
+      "LFxSF_xGC_90_AD": {
+        "header": "LFxSF xGC/90",
+        "formula": "=(TABLES[[#This Row],[LF xGC/90]]*CONTROL!$B$97)+(CONTROL!$B$98*TABLES[[#This Row],[SF xGC/90]])",
+        "meaning": "Blends the team's own raw LF/SF xGC/90 using B97/B98 (0.8/0.2) -- the SAME weight pair used elsewhere for opponent-strength blending (see control_assumptions B97/B98 for the dual role)."
+      },
+      "LFxSF_US_xGC_FIX_AF": {
+        "header": "LFxSF US xGC FIX",
+        "formula": "=TABLES[[#This Row],[LFxSF xGC/90]]*_xlfn.FORECAST.LINEAR(TABLES[[#This Row],[LFxSF xGC/90]],CONTROL!$C$101:$C$102,CONTROL!$B$101:$B$102)",
+        "meaning": "Applies the Understat 2-point linear regression correction (CONTROL!B101:C102) to the blended raw rate. THIS is the figure PPts!AK reads. Independently verified for Ipswich to full practical float precision (see control_assumptions.B101 entry)."
+      },
+      "PPts_x_xG_AI_dead": { "header": "PPts x xG", "formula": "=_xlfn.FORECAST.LINEAR(TABLES[[#This Row],[LFxSF US xG Fix]],CONTROL!$C$105:$C$106,CONTROL!$B$105:$B$106)", "meaning": "Feeds only Damp xG (AK), which is itself unreferenced anywhere. Dead end." },
+      "Ppts_x_xGC_AJ_dead": { "header": "Ppts x xGC", "formula": "=_xlfn.FORECAST.LINEAR(TABLES[[#This Row],[LFxSF US xGC FIX]],CONTROL!$C$105:$C$106,CONTROL!$B$105:$B$106)", "meaning": "Feeds only Damp xGC (AL), which is itself unreferenced anywhere. Dead end." },
+      "Damp_xG_AK_dead": { "header": "Damp xG", "formula": "=SIGN(TABLES[[#This Row],[PPts x xG]])*(MIN(ABS(TABLES[[#This Row],[PPts x xG]]),CONTROL!$B$107)+MAX(ABS(TABLES[[#This Row],[PPts x xG]])-CONTROL!$B$107,0)*CONTROL!$B$108)", "meaning": "A sign-preserving soft-clip/dampening transform (values beyond the Safe Threshold B107=1.55 are shrunk by the Dampening Factor B108=0.4). Confirmed by exhaustive search: never referenced by any other formula in MODEL, PPts, or TABLES itself." },
+      "Damp_xGC_AL_dead": { "header": "Damp xGC", "formula": "=SIGN(TABLES[[#This Row],[Ppts x xGC]])*(MIN(ABS(TABLES[[#This Row],[Ppts x xGC]]),CONTROL!$B$107)+MAX(ABS(TABLES[[#This Row],[Ppts x xGC]])-CONTROL!$B$107,0)*CONTROL!$B$108)", "meaning": "Dead end, same as Damp xG." }
+    },
+    "PPts_sheet": {
+      "fixture_and_opponent_columns": {
+        "VS_Q": { "header": "VS", "note": "Same mechanism as documented in the goals/assists extraction -- opponent abbreviation, uppercase=home, lowercase=away." },
+        "VS_xG_90_R": {
+          "header": "VS xG/90",
+          "formula": "=IFERROR((CONTROL!$B$97*INDEX(TABLES[LF xG/90],MATCH(PPts[[#This Row],[VS]],TABLES[ABVR],0)))+(CONTROL!$B$98*INDEX(TABLES[SF xG/90],MATCH(PPts[[#This Row],[VS]],TABLES[ABVR],0))),0)",
+          "meaning": "Opponent's OWN attacking xG/90 (raw, NOT Understat-corrected), blended LF/SF via B97/B98. THIS is the numerator PPts!AL (CS X) multiplies the player's team's own defensive rate by -- so the clean-sheet fixture adjustment scales the team's defensive rate UP when facing a stronger-than-average attacking opponent, and DOWN when facing a weaker one."
+        },
+        "LA_xG_90_T": { "header": "LA xG/90", "formula": "=IFERROR((PSTABLE!$N$24*CONTROL!$B$110)+(CONTROL!$B$111*TABLE!$N$24),0)", "meaning": "League-average xG/90, the denominator for PPts!AL." }
+      },
+      "clean_sheet_and_gc_columns": {
+        "LFxSF_US_xGC_FIX_AK": {
+          "header": "LFxSF US xGC FIX",
+          "formula": "=IFERROR(INDEX(TABLES[LFxSF US xGC FIX],MATCH(PPts[[#This Row],[Team]],TABLES[ABVR],0)),\"-\")",
+          "meaning": "Direct lookup of the PLAYER'S OWN TEAM's Understat-corrected, LF/SF-blended defensive rate from TABLES. Note the IFERROR fallback here is the STRING \"-\", not a numeric 0, unlike almost every other IFERROR in the workbook (see spreadsheet_quirks.string_fallback_instead_of_zero)."
+        },
+        "CS_X_AL": {
+          "header": "CS X",
+          "formula": "=IFERROR((PPts[[#This Row],[LFxSF US xGC FIX]]*PPts[[#This Row],[VS xG/90]])/PPts[[#This Row],[LA xG/90]],0)",
+          "meaning": "Lambda for the Poisson clean-sheet model: the player's team's own defensive rate, SCALED UP OR DOWN by how the upcoming opponent's attacking strength compares to league average. THIS IS ANSWER TO MODELLING QUESTION 8: the fixture multiplier combines the player's TEAM's xGC (not the raw opponent xGC), the OPPONENT's attacking xG, AND the league average -- all three simultaneously, via multiplication and division respectively. It does NOT use the opponent's own defensive xGC at all (that quantity, PPts!S 'VS xGC/90', exists on the sheet but is used only for goals/assists (PPts!W), never referenced here)."
+        },
+        "CS_pct_AM": {
+          "header": "CS%",
+          "formula": "=EXP(-PPts[[#This Row],[CS X]])",
+          "meaning": "THE LIVE clean-sheet probability. Answers modelling question 1: this is neither empirical clean-sheet frequency nor a direct xGC value -- it is an INFERRED PROBABILITY derived from a Poisson(lambda=CS X) distribution's P(X=0) term, where lambda is itself a fixture-and-league-adjusted xGC rate. CRITICALLY, and directly answering modelling question 4 for the live formula: this contains NO reference to MODEL!2, Chance of Playing, or Start% anywhere in its formula or its full upstream chain (AK, R, T, and their sources) -- confirmed by exhaustive string search. The 60-minute probability multiplication that exists on the dead MODEL!BW/CL columns is ABSENT here."
+        },
+        "CS_points_AN": { "header": "CS", "formula": "=IF(PPts[[#This Row],[POS]]=\"GK\",CONTROL!$D$198,IF(PPts[[#This Row],[POS]]=\"DEF\",CONTROL!$D$199,IF(PPts[[#This Row],[POS]]=\"MID\",CONTROL!$D$200,IF(PPts[[#This Row],[POS]]=\"FWD\",CONTROL!$D$201,0))))" },
+        "component_9_AO": {
+          "header": "9",
+          "formula": "=PPts[[#This Row],[CS]]*PPts[[#This Row],[CS%]]",
+          "meaning": "Final clean-sheet xPts-if-eligible component = positional CS points * CS%. For FWD (CS points=0) this is always 0 regardless of how low the fixture-adjusted lambda is -- verified on Haaland (AM=0.249, but POS=FWD so AN=0, AO=0)."
+        },
+        "pct_2plusGC_AP": {
+          "header": "% 2+ GC",
+          "formula": "=1-PPts[[#This Row],[CS%]]*(1+PPts[[#This Row],[CS X]])",
+          "meaning": "Same Poisson P(X>=2) identity as the dead MODEL side, applied to the live CS%/CS X values."
+        },
+        "GC_points_AQ": { "header": "2+ GC", "formula": "=IF(PPts[[#This Row],[POS]]=\"GK\",CONTROL!$E$198,IF(PPts[[#This Row],[POS]]=\"DEF\",CONTROL!$E$199,IF(PPts[[#This Row],[POS]]=\"MID\",CONTROL!$E$200,IF(PPts[[#This Row],[POS]]=\"FWD\",CONTROL!$E$201,0))))" },
+        "component_10_AR": {
+          "header": "10",
+          "formula": "=PPts[[#This Row],[2+ GC]]*PPts[[#This Row],[% 2+ GC]]",
+          "meaning": "Final workbook goals-conceded xPts-if-eligible component. It models a SINGLE DISCRETE -1 event with probability P(2+), or 0 for MID/FWD. This is an approximation of official FPL scoring, which repeats the -1 deduction for every pair conceded; the workbook has no additional terms for 4+, 6+, and so on."
+        }
+      },
+      "how_components_feed_totals": {
+        "note": "Structural formulas (BA, BG, BI) already fully documented in the appearance and goals/assists reference JSONs; summarized here specifically for columns '9' (CS) and '10' (GC).",
+        "IF_START_TOTAL_BA": "BA sums ALL 11 component columns including '9' and '10', H/A-adjusted once. Both CS and GC xPts are counted at full value here, as if the player were certain to start.",
+        "IF_NOT_START_TOTAL_BG": "BG = (columns 4,5,6,7,8,10 ONLY) * BF * H/A. ANSWERS MODELLING QUESTION 5 DEFINITIVELY: column '9' (clean sheets) is explicitly EXCLUDED from this list -- a substitute or non-starter receives ZERO clean-sheet value in the not-start branch, full stop. Column '10' (2+ GC) IS included, scaled by BF (the substitute-cameo-to-start minutes ratio) -- so a substitute DOES carry some goals-conceded risk (correctly reflecting that even a substitute appearance exposes the player to their team conceding 2+ while they're on the pitch, in a way that a full clean sheet -- requiring 90 minutes of zero goals against -- structurally cannot apply to a cameo). Independently verified end-to-end for Yoro (rotation defender golden case): recomputed BG using only 4,5,6,7,8,10 (excluding 9) and matched the cached value to full float precision.",
+        "TRUE_TOTAL_BI": "Same H/A-applied-twice mechanism documented in both prior extractions mechanically includes column '10' (goals-conceded penalty) in its overstated not-start contribution, but NEVER includes column '9' (clean sheets) in the not-start branch at all -- so the H/A double-application quirk has a real but narrower footprint for the CS/GC block than for goals/assists: it can only ever affect the 2+GC penalty's magnitude for non-starters, never the clean-sheet component (which is zero for non-starters regardless of H/A).",
+        "where_start_and_appearance_probability_enter": "Identical mechanism to goals/assists: BH!Start% (Chance of Playing * PSxTS Starts/Squads Made, or the manual override) is the ONLY place appearance/start probability touches the CS/GC components, applied at the very final BA-vs-BG blend in BI. Confirmed by exhaustive search that CS%, CS X, AK, AO, AP, AR contain no reference to Chance, Start, or MODEL!2 anywhere in their formulas."
+      }
+    }
+  },
+  "source_field_definitions": {
+    "team_join_mechanism": "MODEL!TEAM (a 3-letter abbreviation, e.g. 'ARS', 'COV') is the join key for the team-level xGC lookup: MATCH(MODEL!TEAM, xGC!$A$1001:$A$1999, 0) on the MODEL-side (dead) pipeline, and MATCH(PPts!Team, TABLES!ABVR, 0) on the live PPts-side pipeline via the TABLES intermediate sheet. Unlike the player-level appearance/goal/assist joins (which use a 4-alias name-matching dedupe), the team join is a single, direct abbreviation match with no fallback aliasing observed.",
+    "xGC_pivot_table": "The xGC sheet is a team-by-GW pivot table structurally identical to the xG/xA/MINS/PL sheets used for player-level windows, but keyed by TEAM ABBREVIATION in column A (not player code), with one row per team starting at row 1001. Columns are gameweek labels in '<season>-GW<NN>' format, e.g. '25-26-GW01'.",
+    "PL_team_level_block": "MODEL!BU/CJ read from PL!$B$2200:$CZ$2290, a SEPARATE row block from the player-level PL!$B$1001:$CZ$1999 block used elsewhere. TABLES!M (LF PL), which the live pipeline's rate calculation (TABLES!R = LF xGC/LF PL) actually depends on, uses the row-1001 block instead, matched by TABLES!ABVR. The two 'PL' row blocks (1001 and 2200) were not fully cross-verified for consistency in this extraction -- flagged as an unresolved ambiguity.",
+    "TABLES_ABVR": "TABLES!D (ABVR) is the canonical 3-letter team abbreviation used as the join key from PPts!Team and MODEL!TEAM alike. TABLES!A/B/C (Team, Alt Spelling 1, Alt Spelling 2) provide alternate full-name spellings for other lookups elsewhere in the workbook (e.g. matching FIXTURES data), not used directly in the CS/GC chain traced here.",
+    "TABLE_and_PSTABLE": "TABLE = this-season (2026-27) league table; PSTABLE = previous-season (2025-26) league table. Both have a row 24 labelled 'League Average xG/90' (column N) and an implicit xGC/90 average in column O. PSTABLE!N24=1.5294868421052636, O24=1.5294605263157894 (nonzero, real data). TABLE!N24=0, O24=0 (all zero, since 2026-27 preseason has no matches played) -- consistent with the CONTROL!B110=1/B111=0 preseason weighting making this-season's all-zero average numerically irrelevant right now.",
+    "promoted_team_identification": "Comparing TABLE!B (2026-27 team list) against PSTABLE!B (2025-26 team list) identifies exactly 3 teams present in TABLE but absent from PSTABLE: Coventry, Hull, Ipswich (promoted). Exactly 3 teams present in PSTABLE but absent from TABLE: Burnley, Wolverhampton Wanderers, West Ham (relegated). All 20 team abbreviations in TABLE match those observed in MODEL!TEAM and PPts!Team for the current roster.",
+    "CS_sheet": "A small (22-row, 21-column) standalone reference table of FBref-style team defensive statistics (GA, GA90, SoTA, Saves, Save%). Confirmed by exhaustive search to be referenced by NO live formula in MODEL, PPts, or TABLES -- appears to be a manually-maintained cross-check table for a human analyst, not a data source for any computed figure in this extraction's scope."
+  },
+  "positional_scoring_rules": {
+    "clean_sheet_points": { "GK": 4, "DEF": 4, "MID": 1, "FWD": 0 },
+    "two_plus_goals_conceded_penalty": { "GK": -1, "DEF": -1, "MID": 0, "FWD": 0 },
+    "source": "CONTROL!D198:E201. Positional eligibility and the per-pair -1 constant match the 2026-27 rules, but the workbook applies that constant only once through P(2+), rather than once for every pair conceded.",
+    "sixty_minute_eligibility_note": "The FPL rule requires 60+ minutes played for a clean sheet to count. On the LIVE PPts pipeline, this eligibility is NOT encoded as an explicit minutes/probability gate inside CS% itself (see modelling_answers.q3/q4) -- instead, the workbook relies entirely on the BA/BG/BI start-vs-not-start blend structure, where column '9' (clean sheets) is excluded from the not-start branch (BG) altogether, and the start branch (BA, weighted by Start%) implicitly assumes a starter who stays on long enough. This is an approximation of the 60-minute rule via branch exclusion, not a direct probability multiplication."
+  },
+  "dependency_flow": {
+    "clean_sheet_flow": [
+      "1. TABLES!R (LF xGC/90) = SUM(team xGC over 38-GW LF window from xGC sheet) / SUM(team matches played over same window from PL sheet), keyed by TABLES!ABVR",
+      "2. TABLES!X (SF xGC/90) = same over the 6-GW SF window",
+      "3. TABLES!AD (LFxSF xGC/90) = LF*0.8 + SF*0.2 (CONTROL!B97/B98)",
+      "4. TABLES!AF (LFxSF US xGC FIX) = AD * FORECAST.LINEAR(AD, CONTROL!C101:C102, CONTROL!B101:B102) -- Understat regression correction",
+      "5. PPts!AK (LFxSF US xGC FIX) = INDEX/MATCH lookup of step 4's result for the player's own team",
+      "6. PPts!R (VS xG/90) = opponent's own LF/SF-blended attacking xG/90 (same B97/B98 weight, different TABLES columns)",
+      "7. PPts!T (LA xG/90) = league-average xG/90, blended PSTABLE/TABLE via CONTROL!B110/B111",
+      "8. PPts!AL (CS X) = (AK * R) / T -- the player's team's defensive rate, scaled by opponent strength relative to league average",
+      "9. PPts!AM (CS%) = EXP(-AL) -- Poisson P(no goals conceded)",
+      "10. PPts!AN (CS) = positional CS points via CONTROL!D198:D201",
+      "11. PPts!AO ('9') = AN * AM -- clean-sheet xPts-if-eligible",
+      "12. PPts!BA (IF START TOTAL) includes '9' at full value, H/A-adjusted once",
+      "13. PPts!BG (IF NOT START TOTAL) EXCLUDES '9' entirely",
+      "14. PPts!BI (TRUE TOTAL) = (T1 + full_sum*Start% + BG*(1-Start%)) * H/A -- clean-sheet contribution to the final number is AO*Start%*H/A, nothing more, nothing less"
+    ],
+    "goals_conceded_flow": [
+      "Steps 1-9 identical to clean-sheet flow (shares CS X and CS% entirely)",
+      "10. PPts!AP (% 2+ GC) = 1 - AM*(1+AL) -- Poisson P(X>=2) via the complement identity",
+      "11. PPts!AQ (2+ GC) = positional penalty via CONTROL!E198:E201",
+      "12. PPts!AR ('10') = AQ * AP -- goals-conceded xPts-if-eligible (a negative number for GK/DEF, zero for MID/FWD)",
+      "13. PPts!BA includes '10' at full value, H/A-adjusted once",
+      "14. PPts!BG INCLUDES '10' (unlike '9'), scaled by BF (substitute-cameo minutes ratio) and H/A -- so goals-conceded risk DOES apply to substitute/non-start exposure, asymmetrically from clean sheets",
+      "15. PPts!BI blends both branches as usual, with the H/A-applied-twice quirk mechanically affecting only the not-start portion of the GC contribution, never the CS contribution"
+    ]
+  },
+  "modelling_answers": {
+    "q1_cs_output_basis": "PPts!CS% is an INFERRED PROBABILITY (a Poisson P(X=0) term), not empirical clean-sheet frequency and not a raw xGC value. It is DERIVED FROM xGC (specifically, a fixture-and-league-adjusted, Understat-regression-corrected version of the team's own xGC/90), passed through EXP(-lambda). No empirical historical clean-sheet COUNT or FREQUENCY (e.g. 'team X kept a clean sheet in N of M matches') appears anywhere in the live chain.",
+    "q2_gc_scoring_model": "The workbook models one nonlinear, discrete -1 event as P(2+ goals conceded) * (-1 point), derived via 1-P(X=0)-P(X=1). This is not exact FPL scoring: the official rule deducts one point for EVERY two goals conceded, so the expected deduction under a Poisson model is -E[floor(X/2)], including additional deductions at 4, 6, and so on. The workbook captures only the first threshold.",
+    "q3_sixty_minute_threshold_location": "On the LIVE pipeline, there is no explicit 60-minute probability multiplication anywhere inside the CS%/AO/AP/AR formulas themselves. The 60-minute (and more broadly, start/appearance) eligibility is instead approximated structurally: clean sheets (column 9) are entirely excluded from the not-start/substitute branch (BG), so a player who doesn't start contributes literally zero clean-sheet xPts regardless of how many minutes they might play as a substitute. Goals-conceded (column 10) IS present in both branches. On the DEAD MODEL-side pipeline (MODEL!BW/CL), by contrast, the 60-minute probability (MODEL!2) IS multiplied in directly -- but that pipeline is never read by anything downstream.",
+    "q4_model2_used_directly": "NO, on the live pipeline. MODEL!2 (or any other 60-minute probability) is completely absent from PPts!AK/AL/AM/AN/AO/AP/AQ/AR and from BB/BC/BF/BH -- confirmed by exhaustive formula-string search. MODEL!2 IS used directly, but only inside the dead-end MODEL!BW and MODEL!CL formulas, which feed only the equally-dead MODEL!9/MODEL!10 columns.",
+    "q5_substitute_below_60_clean_sheet_value": "NO. PPts!BG (IF NOT START TOTAL) explicitly excludes column '9' from its summed list (columns 4,5,6,7,8,10 only). A substitute or non-starting player's clean-sheet contribution to TRUE TOTAL is structurally zero, regardless of Start% or minutes. This is a clean, deliberate-looking exclusion (not an oversight), since it directly matches the real FPL rule that clean-sheet points require 60+ minutes for the team to end with a clean sheet while that player was on the pitch -- a threshold a cameo appearance is very unlikely to clear. Goals-conceded (column 10), by contrast, IS included in BG (scaled by the substitute-minutes ratio), which is an intentional-looking asymmetry: even a substitute can be on the pitch when the 2nd/3rd/etc. goal against goes in.",
+    "q6_probabilities_embedded_in_components": "NO for the live pipeline -- confirmed by exhaustive search that Start probability, appearance probability, and Chance of Playing never appear inside AK/AL/AM/AN/AO/AP/AQ/AR. They enter ONLY at the final BA/BG/BI blend via BH!Start%, exactly once, identical to the mechanism already documented for goals and assists.",
+    "q7_team_level_or_player_conditioned": "PURELY TEAM-LEVEL. The xGC/CS/GC rate is looked up by MATCH(TEAM, ...) -- a team abbreviation join -- with no player code, player minutes, or player identity anywhere in the AK/AL/AM/AN/AO/AP/AQ/AR chain except (a) the player's OWN position, used only for the points-per-CS/points-per-2+GC lookup (AN, AQ), and (b) indirectly via BB/BF/BH at the final blend stage (which is about the player's OWN start/minutes probability, not about conditioning the team's defensive rate on which specific players are on the pitch). No formula anywhere reduces a team's expected clean-sheet probability based on which 11 players are selected -- e.g. a key defender's absence has zero direct effect on CS% for any OTHER player at that team, only an indirect effect via that specific missing player's own BH!Start% dropping to near-zero (verified conceptually, not by a specific golden case, since simulating an injury scenario was out of scope)."
+      ,
+    "q8_fixture_multiplier_composition": "A COMBINATION of all three, but NOT the opponent's own defensive rate. PPts!AL (CS X) = (player's team's own Understat-corrected xGC/90) * (opponent's attacking xG/90, LF/SF-blended, NOT Understat-corrected) / (league-average xG/90, previous/this-season blended). The opponent's OWN defensive rate (PPts!S, 'VS xGC/90') is computed on the sheet but is NEVER referenced by the clean-sheet chain -- it is used only for the goals/assists fixture adjustment (PPts!W). This is logically consistent (a clean-sheet probability should depend on how good the OPPONENT'S ATTACK is, not the opponent's own defense), but worth stating explicitly since column S sits directly next to columns used by the CS calculation and could be mistaken for an input.",
+    "q9_ha_application_stage_and_duplication": "H/A is applied at exactly the same two stages already documented for goals/assists, and the CS/GC columns are swept up in that existing mechanism rather than having any CS/GC-specific H/A logic of their own: (1) once in PPts!BA (the full 11-column sum, H/A-multiplied once) and (2) baked into PPts!BG (which sums columns 4,5,6,7,8,10 -- NOT 9 -- times BF times H/A) and then (3) PPts!BI multiplies the ENTIRE blended total (including the already-H/A-adjusted BG) by H/A AGAIN. So YES, H/A is applied twice, but this double-application can only ever affect the goals-conceded (column 10) contribution for non-starters -- it structurally cannot affect clean sheets (column 9), since column 9 is entirely absent from BG.",
+    "q10_promoted_team_fallbacks": "YES, a real and substantial fallback exists, though it is NOT a simple zero-fill or IFERROR-to-zero -- it is a deliberate-looking data-population choice. For the 3 promoted teams (Coventry, Hull, Ipswich), the underlying xGC and PL pivot-table sheets have ZERO values in every one of the 37 genuine weekly GW columns of the previous-season (2025-26) window, with the ENTIRE season's estimated total (e.g. Coventry: 60.672 xGC, 38 'matches played') dumped into a single final column ('25-26-GW38'). Established teams (including Sunderland, themselves promoted the prior year but with a full genuine PL season now on record) have their totals spread realistically across all 37-38 columns. Net numerical effect: the resulting LF xGC/90 rate (lump_sum/38) is still a sensible season-average figure, and SF xGC/90 collapses to being IDENTICAL to LF xGC/90 (both windows' only nonzero column is the same lump-sum column) -- so the LF/SF blend (CONTROL!B97/B98) is a no-op specifically for promoted teams, even though it's a genuine blend for everyone else. This was independently confirmed for all 3 promoted teams by inspecting the raw xGC/PL sheet rows directly.",
+    "q11_silent_iferror_zero_paths": "YES, extensively, but layered: MODEL!BT/BU/CI/CJ (team-level xGC/PL sums) are IFERROR-wrapped to 0, as are TABLES!K/L/M/R/X (the live rate-calculation chain). CRITICALLY, PPts!AK (LFxSF US xGC FIX, the player's OWN team's defensive rate) is IFERROR-wrapped not to 0 but to the STRING \"-\" -- meaning a genuine team-lookup failure at this specific step would silently poison every downstream arithmetic formula (AL, AM, AO, AP, AR) with a #VALUE! error rather than a clean 0, UNLIKE most of the rest of the workbook's IFERROR-to-zero convention. This was not observed to actually occur for any of the 20 real teams in the current roster (all matched cleanly), but the fallback VALUE itself is an inconsistency worth flagging (see spreadsheet_quirks.string_fallback_instead_of_zero).",
+    "q12_lookahead_risk": "NO lookahead risk was found in the CS/GC rolling-window ranges. The Long Form window for CS/GC (CONTROL!B69/C69/D69/E69, and the parallel FDR block B94/C94/D94/E94 used by TABLES) always ends at CONTROL!E2 minus a strictly positive offset (verified precisely: for the current B3=0 preseason state, the window spans xGC-sheet columns D through AO inclusive, i.e. '25-26-GW01' through '25-26-GW38' -- ending exactly ONE column before the current-season 'GW00' marker at column AP). The window's end offset is anchored behind CONTROL!E2 (the current-GW pointer) by construction in every one of the D56/D69/D83/D94-style formulas (an IF-ladder that shifts the window forward in lockstep with B3 as the season progresses), so the window cannot structurally reach into the current or a future GW regardless of B3's value. This mirrors the lookahead-safety already implicit in the design principle stated in README.md ('Deadline-safe data only for backtests. No same-GW lookahead.')."
+  },
+  "golden_cases": [
+    {
+      "label": "premium_goalkeeper",
+      "player_code": 154561,
+      "player_name": "David Raya Mart\u00edn",
+      "web_name": "Raya",
+      "team": "ARS",
+      "position": "GK",
+      "sheet_refs": { "MODEL_row": 2, "PPts_row_GW1": 2 },
+      "inputs": {
+        "MODEL!POS": "GK",
+        "MODEL!TEAM": "ARS",
+        "TABLES!LFxSF US xGC FIX (ARS)": 0.8304680655866142,
+        "PPts!Q VS": "COV",
+        "PPts!R VS xG/90 (Coventry attacking)": 1.26369,
+        "PPts!T LA xG/90": 1.5294868421052636,
+        "PPts!AZ H/A": 1.05,
+        "CONTROL!D198 (GK CS points)": 4,
+        "CONTROL!E198 (GK 2+GC penalty)": -1
+      },
+      "cached_intermediate_values": {
+        "PPts!AK LFxSF US xGC FIX": 0.8304680655866142,
+        "PPts!AL CS X": 0.6861479032775635,
+        "PPts!AM CS%": 0.503511914736361,
+        "PPts!AN CS": 4,
+        "PPts!AO '9' (CS xPts-if-eligible)": 2.014047658945444,
+        "PPts!AP % 2+ GC": 0.15100444069201358,
+        "PPts!AQ 2+ GC": -1,
+        "PPts!AR '10' (GC xPts-if-eligible)": -0.15100444069201358,
+        "PPts!BH Start %": 1,
+        "PPts!BG IF NOT START TOTAL": 0.037657280061635656,
+        "PPts!BA IF START TOTAL": 4.850971146125662,
+        "PPts!BI TRUE TOTAL": 4.840471146125662
+      },
+      "expected_outputs": {
+        "clean_sheet_xpts_if_eligible": 2.014047658945444,
+        "goals_conceded_xpts_if_eligible": -0.15100444069201358,
+        "start_probability": 1,
+        "note": "PRIMARY GK clean-sheet independent-recomputation case. Hand-recomputed AL=(0.8304680655866142*1.26369)/1.5294868421052636=0.6861479032775635; AM=exp(-0.6861479032775635)=0.503511914736361; AO=4*0.503511914736361=2.014047658945444 -- all match cache to full float precision. Start%=1 means the H/A-double-application quirk is invisible for Raya (isolates the pure eligible-branch value), same isolation property already noted for Raya in the appearance extraction."
+      }
+    },
+    {
+      "label": "nailed_elite_defender",
+      "player_code": 226597,
+      "player_name": "Gabriel dos Santos Magalh\u00e3es",
+      "web_name": "Gabriel",
+      "team": "ARS",
+      "position": "DEF",
+      "sheet_refs": { "MODEL_row": 5, "PPts_row_GW1": 5 },
+      "inputs": {
+        "MODEL!POS": "DEF",
+        "MODEL!TEAM": "ARS",
+        "TABLES!LFxSF US xGC FIX (ARS)": 0.8304680655866142,
+        "PPts!Q VS": "COV",
+        "PPts!R VS xG/90": 1.26369,
+        "PPts!T LA xG/90": 1.5294868421052636,
+        "PPts!AZ H/A": 1.05,
+        "CONTROL!D199 (DEF CS points)": 4,
+        "CONTROL!E199 (DEF 2+GC penalty)": -1
+      },
+      "cached_intermediate_values": {
+        "PPts!AK LFxSF US xGC FIX": 0.8304680655866142,
+        "PPts!AL CS X": 0.6861479032775635,
+        "PPts!AM CS%": 0.503511914736361,
+        "PPts!AN CS": 4,
+        "PPts!AO '9'": 2.014047658945444,
+        "PPts!AP % 2+ GC": 0.15100444069201358,
+        "PPts!AQ 2+ GC": -1,
+        "PPts!AR '10'": -0.15100444069201358,
+        "PPts!BH Start %": 0.9375,
+        "PPts!BG IF NOT START TOTAL": 0.6960374584826476,
+        "PPts!BA IF START TOTAL": 6.976585686529088,
+        "PPts!BI TRUE TOTAL": 6.641351539333944
+      },
+      "expected_outputs": {
+        "clean_sheet_xpts_if_eligible": 2.014047658945444,
+        "goals_conceded_xpts_if_eligible": -0.15100444069201358,
+        "start_probability": 0.9375,
+        "note": "IDENTICAL CS%/CS X/AO/AR to Raya (same team ARS, same fixture vs COV, same H/A, same CS/2+GC points since GK and DEF share identical position-point constants) -- a strong sanity check confirming CS/GC is purely team-level and position-banded, not player-specific, directly supporting modelling_answers.q7. Only BH!Start% differs (0.9375 vs Raya's 1), changing TRUE TOTAL despite identical eligible-branch values."
+      }
+    },
+    {
+      "label": "rotation_prone_defender",
+      "player_code": 550864,
+      "player_name": "Leny Yoro",
+      "web_name": "Yoro",
+      "team": "MUN",
+      "position": "DEF",
+      "sheet_refs": { "MODEL_row": 434, "PPts_row_GW1": 434 },
+      "inputs": {
+        "MODEL!PS Starts": 18,
+        "MODEL!PS Subs": 14,
+        "MODEL!PS UnSub": 5,
+        "TABLES!LFxSF US xGC FIX (MUN)": 1.2227514148689105,
+        "PPts!Q VS": "hul",
+        "PPts!R VS xG/90 (Hull attacking, away fixture)": 0.8646300000000001,
+        "PPts!T LA xG/90": 1.5294868421052636,
+        "PPts!AZ H/A (away)": 0.95,
+        "PPts!BF PSxTS Mn/Sub / Mn/St": 0.24390243902439024,
+        "CONTROL!D199 (DEF CS points)": 4,
+        "CONTROL!E199 (DEF 2+GC penalty)": -1
+      },
+      "cached_intermediate_values": {
+        "PPts!AK LFxSF US xGC FIX": 1.2227514148689105,
+        "PPts!AL CS X": 0.6912302392761249,
+        "PPts!AM CS%": 0.5009593898951726,
+        "PPts!AN CS": 4,
+        "PPts!AO '9'": 2.0038375595806905,
+        "PPts!AP % 2+ GC": 0.15276233115996563,
+        "PPts!AQ 2+ GC": -1,
+        "PPts!AR '10'": -0.15276233115996563,
+        "PPts!full_component_sum_2_to_11": 3.911247081200729,
+        "PPts!BH Start %": 0.4864864864864865,
+        "PPts!BG IF NOT START TOTAL": 0.12608918777255204,
+        "PPts!BA IF START TOTAL": 4.665684727140692,
+        "PPts!BI TRUE TOTAL": 2.682546889941271
+      },
+      "expected_outputs": {
+        "clean_sheet_xpts_if_eligible": 2.0038375595806905,
+        "goals_conceded_xpts_if_eligible": -0.15276233115996563,
+        "start_probability": 0.4864864864864865,
+        "true_total_xpts": 2.682546889941271,
+        "note": "PRIMARY rotation/below-certain-start defender case. Independently recomputed both AO/AR (CS/GC components) AND the full TRUE TOTAL end-to-end: BG=(sum of cols 4,5,6,7,8,10, EXCLUDING 9)*BF*H/A=0.5441743893341721*0.24390243902439024*0.95=0.12608918777255204 (matches cache); BI=(T1+full_sum*Start%+BG*(1-Start%))*H/A=(0.8562162162162162+3.911247081200729*0.4864864864864865+0.12608918777255204*0.5135135135135136)*0.95=2.682546889941271 (matches cache). This is the DIRECT PROOF that clean sheets are excluded from BG while goals-conceded is included: the '9' component (2.0038) contributes to BA and to Start%*full_sum inside BI, but has ZERO presence in BG's rate-scalable sum, while '10' (-0.1528) appears in both."
+      }
+    },
+    {
+      "label": "midfielder_clean_sheet_eligible",
+      "player_code": 223340,
+      "player_name": "Bukayo Saka",
+      "web_name": "Saka",
+      "team": "ARS",
+      "position": "MID",
+      "sheet_refs": { "MODEL_row": 13, "PPts_row_GW1": 13, "PREDICT_row": 24 },
+      "inputs": {
+        "TABLES!LFxSF US xGC FIX (ARS)": 0.8304680655866142,
+        "PPts!Q VS": "COV",
+        "PPts!R VS xG/90": 1.26369,
+        "PPts!T LA xG/90": 1.5294868421052636,
+        "PPts!AZ H/A": 1.05,
+        "PREDICT!Manual Start %": 0.6,
+        "CONTROL!D200 (MID CS points)": 1,
+        "CONTROL!E200 (MID 2+GC penalty)": 0
+      },
+      "cached_intermediate_values": {
+        "PPts!AK LFxSF US xGC FIX": 0.8304680655866142,
+        "PPts!AL CS X": 0.6861479032775635,
+        "PPts!AM CS%": 0.503511914736361,
+        "PPts!AN CS": 1,
+        "PPts!AO '9'": 0.503511914736361,
+        "PPts!AP % 2+ GC": 0.15100444069201358,
+        "PPts!AQ 2+ GC": 0,
+        "PPts!AR '10'": 0,
+        "PPts!BH Start %": 0.6,
+        "PPts!BC M Start %": 0.6
+      },
+      "expected_outputs": {
+        "clean_sheet_xpts_if_eligible": 0.503511914736361,
+        "goals_conceded_xpts_if_eligible": 0.0,
+        "note": "Same underlying CS%=0.503511914736361 as Raya/Gabriel (identical team+fixture), but the MID position multiplies by only 1 CS point (not 4) and 0 GC penalty (not -1) -- confirming the positional-eligibility gate is a pure multiplication by CONTROL!D198:E201, applied AFTER an identical, position-agnostic CS% calculation. Also the manual-start-override case: BC/BH!Start%=0.6 materially changes how much of AO's value reaches TRUE TOTAL, but does not touch AO itself (same non-interaction with rate components already documented for goals/assists)."
+      }
+    },
+    {
+      "label": "forward_control_case",
+      "player_code": 223094,
+      "player_name": "Erling Haaland",
+      "web_name": "Haaland",
+      "team": "MCI",
+      "position": "FWD",
+      "sheet_refs": { "MODEL_row": 421, "PPts_row_GW1": 421 },
+      "inputs": {
+        "TABLES!LFxSF US xGC FIX (MCI)": 1.1858917181401898,
+        "PPts!Q VS": "BOU",
+        "PPts!R VS xG/90 (Bournemouth attacking)": 1.7942807017543858,
+        "PPts!T LA xG/90": 1.5294868421052636,
+        "PPts!AZ H/A": 1.05,
+        "CONTROL!D201 (FWD CS points)": 0,
+        "CONTROL!E201 (FWD 2+GC penalty)": 0
+      },
+      "cached_intermediate_values": {
+        "PPts!AK LFxSF US xGC FIX": 1.1858917181401898,
+        "PPts!AL CS X": 1.3912003461896087,
+        "PPts!AM CS%": 0.24877650740476068,
+        "PPts!AN CS": 0,
+        "PPts!AO '9'": 0,
+        "PPts!AP % 2+ GC": 0.40512552936989443,
+        "PPts!AQ 2+ GC": 0,
+        "PPts!AR '10'": 0
+      },
+      "expected_outputs": {
+        "clean_sheet_xpts_if_eligible": 0.0,
+        "goals_conceded_xpts_if_eligible": 0.0,
+        "note": "PRIMARY positional-ineligibility control case. CS% is a genuine, nonzero, non-trivial Poisson probability (0.249 -- Man City are moderately likely to concede against Bournemouth per this model), and AL/AM are computed identically to any other player at MCI. But AN/AQ (positional points/penalty) are exactly 0 for FWD, so AO and AR are forced to exactly 0.0 regardless of AM's value -- proving the positional gate is applied as a pure multiplicative override at the LAST step (AN*AM, AQ*AP), not as an early exclusion of forwards from the CS% calculation itself."
+      }
+    },
+    {
+      "label": "promoted_team_defender",
+      "player_code": 216616,
+      "player_name": "Dara O'Shea",
+      "web_name": "O'Shea",
+      "team": "IPS",
+      "position": "DEF",
+      "sheet_refs": { "MODEL_row": 311, "PPts_row_GW1": 311 },
+      "inputs": {
+        "MODEL!PS Starts": 46,
+        "TABLES!LF xGC/90 (IPS, raw)": 1.479448,
+        "TABLES!SF xGC/90 (IPS, raw)": 1.479448,
+        "TABLES!LFxSF US xGC FIX (IPS)": 1.4094362167912726,
+        "PPts!Q VS": "SUN",
+        "PPts!R VS xG/90 (Sunderland attacking)": 1.1732105263157895,
+        "PPts!T LA xG/90": 1.5294868421052636,
+        "PPts!AZ H/A": 1.05,
+        "CONTROL!D199 (DEF CS points)": 4,
+        "CONTROL!E199 (DEF 2+GC penalty)": -1
+      },
+      "cached_intermediate_values": {
+        "PPts!AK LFxSF US xGC FIX": 1.4094362167912726,
+        "PPts!AL CS X": 1.0811243092710574,
+        "PPts!AM CS%": 0.3392139298031153,
+        "PPts!AN CS": 4,
+        "PPts!AO '9'": 1.3568557192124613,
+        "PPts!AP % 2+ GC": 0.2940536446433706,
+        "PPts!AQ 2+ GC": -1,
+        "PPts!AR '10'": -0.2940536446433706,
+        "PPts!BH Start %": 1,
+        "PPts!BG IF NOT START TOTAL": 0.014452356492414543,
+        "PPts!BA IF START TOTAL": 3.5759602876351573,
+        "PPts!BI TRUE TOTAL": 3.5654602876351578
+      },
+      "expected_outputs": {
+        "clean_sheet_xpts_if_eligible": 1.3568557192124613,
+        "goals_conceded_xpts_if_eligible": -0.2940536446433706,
+        "start_probability": 1,
+        "note": "PRIMARY promoted-team golden case. Ipswich's raw LF xGC/90 EQUALS raw SF xGC/90 exactly (1.479448 both), independently confirming the promoted-team lump-sum-in-final-GW-column data pattern (see modelling_answers.q10) makes the LF/SF blend numerically inert for this team specifically. AK's Understat-correction step was independently verified to full practical float precision: 1.479448 * FORECAST.LINEAR(1.479448, [1,0.9], [2,0.9]) = 1.479448*0.9526770909090909 = 1.4094362167912728 (cache: 1.4094362167912726). Elevated CS X (1.08, higher than Arsenal's 0.69 or Man United's home-fixture-adjusted rate) correctly reflects Ipswich's weaker underlying defensive rate, NOT a missing-data artifact -- the fallback is a real (if coarse) estimate, not a zero or an error."
+      }
+    }
+  ],
+  "independent_calculation_checks": [
+    {
+      "id": "goalkeeper_clean_sheet_raya",
+      "target": "PPts!AO '9' (clean-sheet xPts-if-eligible) for David Raya",
+      "formula_recomputed": "AL = (AK * R) / T; AM = EXP(-AL); AO = AN * AM",
+      "inputs_used": { "AK": 0.8304680655866142, "R_VS_xG_90": 1.26369, "T_LA_xG_90": 1.5294868421052636, "AN_CS_points_GK": 4 },
+      "computed_value": 2.014047658945444,
+      "cached_value": 2.014047658945444,
+      "match": "EXACT (full float precision)"
+    },
+    {
+      "id": "defender_clean_sheet_gabriel",
+      "target": "PPts!AO '9' for Gabriel (identical fixture/team to Raya, DEF position)",
+      "formula_recomputed": "Same as above with AN_CS_points_DEF = 4",
+      "computed_value": 2.014047658945444,
+      "cached_value": 2.014047658945444,
+      "match": "EXACT (full float precision); also confirms position-independence of the underlying CS% for GK vs DEF, which share identical CONTROL!D198/D199=4"
+    },
+    {
+      "id": "goals_conceded_yoro",
+      "target": "PPts!AR '10' (goals-conceded xPts-if-eligible) for Leny Yoro",
+      "formula_recomputed": "AL = (AK * R) / T; AM = EXP(-AL); AP = 1 - AM*(1+AL); AR = AQ * AP",
+      "inputs_used": { "AK": 1.2227514148689105, "R_VS_xG_90": 0.8646300000000001, "T_LA_xG_90": 1.5294868421052636, "AQ_2plusGC_points_DEF": -1 },
+      "computed_value": -0.15276233115996563,
+      "cached_value": -0.15276233115996563,
+      "match": "EXACT (full float precision)"
+    },
+    {
+      "id": "rotation_case_yoro_true_total",
+      "target": "PPts!BI TRUE TOTAL for Leny Yoro (rotation/below-certain-start defender)",
+      "formula_recomputed": "BG_check = (col4+col5+col6+col7+col8+col10, EXCLUDING col9) * BF * H/A; BI = (T1 + sum(cols2..11)*Start% + BG*(1-Start%)) * H/A",
+      "inputs_used": {
+        "T1": 0.8562162162162162,
+        "sum_cols_2_to_11": 3.911247081200729,
+        "Start_pct": 0.4864864864864865,
+        "BG_rate_scalable_sum_4_5_6_7_8_10": 0.5441743893341721,
+        "BF": 0.24390243902439024,
+        "H_A": 0.95
+      },
+      "computed_value_BG": 0.12608918777255204,
+      "cached_value_BG": 0.12608918777255204,
+      "computed_value_BI": 2.682546889941271,
+      "cached_value_BI": 2.682546889941271,
+      "match": "EXACT for both BG and BI (full float precision); independently confirms column 9 (CS=2.0038) is absent from BG's summed inputs while column 10 (GC=-0.1528) is present"
+    },
+    {
+      "id": "promoted_team_oshea",
+      "target": "PPts!AO '9' and AR '10' for Dara O'Shea (Ipswich, promoted team) plus the underlying Understat-correction step",
+      "formula_recomputed": "TABLES!AF = LFxSF_xGC_90 * FORECAST.LINEAR(LFxSF_xGC_90, [C101,C102]=[1,0.9], [B101,B102]=[2,0.9]); then AL=(AK*R)/T; AM=EXP(-AL); AO=AN*AM; AP=1-AM*(1+AL); AR=AQ*AP",
+      "inputs_used": {
+        "LFxSF_xGC_90_raw_IPS": 1.479448,
+        "regression_slope": 0.09090909090909088,
+        "regression_intercept": 0.8181818181818182,
+        "AK": 1.4094362167912726,
+        "R_VS_xG_90_SUN": 1.1732105263157895,
+        "T_LA_xG_90": 1.5294868421052636,
+        "AN_CS_points_DEF": 4,
+        "AQ_2plusGC_points_DEF": -1
+      },
+      "computed_value_understat_correction": 1.4094362167912728,
+      "cached_value_understat_correction": 1.4094362167912726,
+      "computed_value_AO": 1.3568557192124613,
+      "cached_value_AO": 1.3568557192124613,
+      "computed_value_AR": -0.2940536446433706,
+      "cached_value_AR": -0.2940536446433706,
+      "match": "EXACT for AO and AR (full float precision); the Understat-correction regression step matches to 15 significant figures (1.4094362167912728 vs 1.4094362167912726), a difference of 2e-16, well within float64 rounding noise and not a discrepancy"
+    }
+  ],
+  "warnings": [
+    {
+      "type": "cache_staleness_risk",
+      "detail": "Same caveat as both prior extractions: MODEL.xlsx has calculation.fullCalcOnLoad=True; values here are openpyxl's last-saved cache, read without opening/recalculating in Excel. Workbook file size/mtime confirmed unchanged from both prior extraction sessions."
+    },
+    {
+      "type": "preseason_state",
+      "detail": "CONTROL!B3=0 (preseason). Several CONTROL weight pairs relevant to CS/GC (B72/B73, B78/B79, B97/B98) are genuine 0.8/0.2 blends between two windows that both currently draw from previous-season (2025-26) data -- NOT a degenerate 100/0 preseason split like the appearance block's B8/B9. However, for the 3 promoted teams specifically, the LF/SF blend IS numerically inert (see modelling_answers.q10) due to the lump-sum data-population pattern, independent of the preseason state itself."
+    },
+    {
+      "type": "scan_coverage",
+      "detail": "MODEL rows 2-800 (799 data rows) were scanned for the CS/GC-relevant columns listed in extraction_scope to select representative players; a full exhaustive audit of all 799 rows' cached values for staleness/errors was not performed (following the same practice as both prior extractions, which found zero errors in equivalent scans). The 6 golden-case rows' full formula and cached-value chains were individually verified to full float precision."
+    },
+    {
+      "type": "team_data_population_not_exhaustively_audited",
+      "detail": "The promoted-team lump-sum pattern was confirmed for exactly 3 teams (Coventry, Hull, Ipswich) by direct inspection of their xGC and PL sheet rows. The remaining 17 established teams' per-GW data was spot-checked for Arsenal, Sunderland, and Manchester United (all showing genuine per-GW spread) but not exhaustively verified for all 17."
+    },
+    {
+      "type": "PL_sheet_dual_row_blocks_not_cross_verified",
+      "detail": "MODEL!BU/CJ (dead-end columns) read from PL!$B$2200:$CZ$2290, while TABLES!M (live) reads from PL!$B$1001:$CZ$1999 -- two structurally different row blocks in the same sheet. Since MODEL!BU/CJ are dead-end columns anyway, this extraction did not verify whether the two blocks contain consistent data or diverge; the LIVE calculation path depends only on the 1001 block, which was verified to produce sensible values for all 6 golden-case teams."
+    }
+  ],
+  "spreadsheet_quirks": [
+    {
+      "id": "dead_end_model_side_cs_gc_pipeline",
+      "title": "The ENTIRE MODEL-sheet clean-sheet/goals-conceded pipeline (BT:BX, CI:CM, DX:EE) is unused",
+      "detail": "MODEL!9, MODEL!10, MODEL!CS, and MODEL!2+ GC are never referenced by any formula anywhere in MODEL or PPts -- confirmed by exhaustive formula-string search. This is the SAME dead-end pattern already documented for goals/assists (MODEL!PS A/A/xA/etc.) applied to an entire additional component family. Notably, this dead pipeline is the ONLY place in the whole traced CS/GC chain where MODEL!2 (60-minute probability) is actually multiplied in -- meaning the workbook's own 'more theoretically complete' clean-sheet formula (team rate * player-minutes-scaling * 60-minute-probability) is computed but discarded, in favour of a live PPts-side formula that omits the minutes/60-minute scaling entirely. Whether this was a deliberate simplification or an accidental abandonment during development cannot be determined from the spreadsheet alone."
+    },
+    {
+      "id": "dead_end_damping_calculation",
+      "title": "A second, independent dead-end calculation exists in TABLES (PPts x xG/xGC, Damp xG/xGC)",
+      "detail": "TABLES!AI, AJ (PPts x xG, Ppts x xGC) apply a DIFFERENT FORECAST.LINEAR calibration (CONTROL!B105:C106, distinct from the Understat correction's B101:C102) and TABLES!AK, AL (Damp xG, Damp xGC) apply a further sign-preserving soft-clip using CONTROL!B107 (Safe Threshold=1.55) and B108 (Dampening Factor=0.4) on top. All four columns compute real, non-trivial numbers but are never referenced by any other formula in MODEL, PPts, or TABLES itself -- confirmed by exhaustive search. This appears to be a more sophisticated, abandoned second attempt at fixture-difficulty dampening, sitting alongside (not feeding into) the simpler CS X/CS% mechanism that is actually live."
+    },
+    {
+      "id": "string_fallback_instead_of_zero",
+      "title": "PPts!AK's IFERROR fallback is the string \"-\", not a numeric 0",
+      "detail": "Every other IFERROR fallback identified across all three extractions in this workbook (appearance, goals/assists, and the rest of this CS/GC chain) falls back to numeric 0. PPts!AK (LFxSF US xGC FIX) is the sole exception found: =IFERROR(INDEX(...),\"-\"). If the team-lookup MATCH inside this formula ever failed for a real player (e.g. a team-abbreviation mismatch between PPts!Team and TABLES!ABVR), AK would silently become the text string \"-\" rather than 0, and every downstream formula that multiplies or divides by AK (AL, and transitively AM, AO, AP, AR) would return a #VALUE! error rather than a clean, silently-wrong-but-numeric 0. This is a MORE DANGEROUS failure mode than the usual IFERROR-to-zero pattern, since a #VALUE! error is visually obvious in Excel but would break a naive automated read of the cached value (e.g. an openpyxl script assuming all cells are numeric) rather than silently propagating a wrong number. Not observed to occur for any of the 20 real teams in the current roster."
+    },
+    {
+      "id": "b97_b98_dual_role",
+      "title": "CONTROL!B97/B98 controls both the team's own defensive-rate blend AND the opponent's attacking-rate blend simultaneously",
+      "detail": "Already documented in the goals/assists extraction as the 'fixture LF/SF weight' for opponent xG/xGC (used in PPts!R/S). This extraction finds it ALSO controls TABLES!AD (LFxSF xGC/90), the blend of a team's OWN long-form/short-form defensive rate, which feeds PPts!AK. So a single CONTROL edit to B97/B98 simultaneously changes (a) how much recent form matters for a team's OWN defensive expectation and (b) how much recent form matters for interpreting an OPPONENT's attacking threat -- two conceptually distinct modelling choices sharing one knob. Not necessarily a bug (both could reasonably use 'general recency weighting'), but a coupling that is not obvious from the CONTROL sheet's single-line label ('PPts FDR multiplier' block header sits nearby but is for the unrelated dead damping calculation)."
+    },
+    {
+      "id": "clean_sheet_gc_asymmetric_not_start_inclusion",
+      "title": "Clean sheets are fully excluded from the not-start branch; goals-conceded is included",
+      "detail": "See modelling_answers.q5. This is recorded as a quirk (worth flagging explicitly) even though it looks like a deliberate and sensible modelling choice (a cameo appearance essentially cannot earn a clean sheet under real FPL rules, since the team must go the full match without conceding AND the player must reach 60 minutes; but a cameo CAN be on the pitch when the team's 2nd/3rd goal against is conceded). Flagged here because it is easy for a from-scratch Python reproduction to miss this asymmetry and either (a) include CS in the not-start branch by analogy with GC, over-crediting substitutes, or (b) exclude GC by analogy with CS, under-penalizing substitutes."
+    },
+    {
+      "id": "poisson_assumption_unverified",
+      "title": "The EXP(-lambda) clean-sheet formula assumes goals conceded follows a Poisson distribution, which is asserted, not validated by this extraction",
+      "detail": "PPts!AM = EXP(-CS_X) and PPts!AP = 1-CS%*(1+CS_X) are exactly the P(X=0) and P(X>=2) terms of a Poisson(lambda=CS_X) distribution. This is a standard and common approach in football analytics, but this extraction did not (and could not, from the spreadsheet alone) verify that the workbook's lambda parameter (a fixture-and-league-adjusted xGC/90 figure) is actually calibrated to make the Poisson assumption produce well-calibrated real-world probabilities. Recorded as a modelling choice, not a bug."
+    }
+  ],
+  "likely_bugs": [
+    {
+      "id": "model_side_cs_gc_pipeline_entirely_wasted",
+      "severity": "low_impact_high_confusion",
+      "detail": "See spreadsheet_quirks.dead_end_model_side_cs_gc_pipeline. Not a bug in the sense of producing a wrong CACHED NUMBER (nothing downstream reads it, so it cannot corrupt any live output), but very likely represents either an abandoned refactor (the live PPts-side formula may have been a deliberate simplification that nobody went back to delete the old MODEL-side formulas for) or a wiring mistake where PPts was SUPPOSED to reference MODEL!9/MODEL!10 (analogous to how MODEL!1 does feed PPts via MODEL_1/T1) but was instead built to recompute everything independently, silently orphaning the 60-minute-probability-aware MODEL-side version. Given the goals/assists extraction found the identical pattern (season-total assist columns computed and discarded), this looks like a workbook-wide authoring habit rather than a one-off mistake, which somewhat reduces (but does not eliminate) the concern that it reflects an actual wiring error in the CS/GC block specifically."
+    },
+    {
+      "id": "string_fallback_could_produce_value_errors",
+      "severity": "low_probability_high_severity_if_triggered",
+      "detail": "See spreadsheet_quirks.string_fallback_instead_of_zero. Currently harmless (no team-lookup failures observed), but the string-vs-zero inconsistency is exactly the kind of latent defect that could silently break the entire clean-sheet/goals-conceded column for every affected player the next time a team abbreviation changes or is renamed (e.g. a team-name-spelling change in TABLES not matched by a corresponding change in PPts!Team, or vice versa) without anyone noticing until the resulting #VALUE! errors are spotted."
+    },
+    {
+      "id": "ha_double_application_narrower_but_present",
+      "severity": "same_as_previously_documented",
+      "detail": "Not a new bug -- restates that the H/A-applied-twice defect already flagged in both prior extractions mechanically extends to the goals-conceded ('10') component whenever Start% < 1, exactly as it does for goals/assists/cards/bonus/DC. Included here for completeness since the CS/GC extraction is where its asymmetric footprint (present for GC, structurally impossible for CS) was first precisely characterized."
+    }
+  ],
+  "unresolved_ambiguities": [
+    {
+      "id": "why_two_different_forecast_linear_calibration_tables",
+      "note": "CONTROL!B101:C102 (Understat Correction, live) and CONTROL!B105:C106 (PPts FDR multiplier, dead) are two separate 2-point linear-regression calibration tables applied to structurally similar xG/xGC rate inputs. No comment in CONTROL explains why two were built, why one is live and one is dead, or what the calibration points (2,1)/(0.9,0.9) versus (2.25,1.6)/(1.4862...,1) represent empirically."
+    },
+    {
+      "id": "why_pl_sheet_has_two_row_blocks",
+      "note": "See warnings.PL_sheet_dual_row_blocks_not_cross_verified. Whether PL!$B$1001:$CZ$1999 (player-level, also reused for a team-level lookup by TABLES) and PL!$B$2200:$CZ$2290 (a separate team-level block read only by the dead MODEL!BU/CJ) are meant to be identical, deliberately different (e.g. one already deduplicated to team level, one summed on the fly), or one is a leftover from an earlier version of the workbook, was not determined."
+    },
+    {
+      "id": "whether_promoted_team_lump_sum_is_hand_entered_or_formula_derived",
+      "note": "The single-column lump-sum pattern for Coventry/Hull/Ipswich (see modelling_answers.q10) was confirmed as DATA (cached values), not as a formula, within the openpyxl data_only=False read of the xGC/PL sheets -- meaning it is very likely a hand-pasted or externally-computed Championship-to-Premier-League translated estimate rather than a live formula. This extraction did not have access to the pivot table's underlying source/refresh definition to confirm how that single-column value was originally derived (e.g. a specific Championship-to-PL xGC translation model, a simple league-average substitution, or an analyst's manual estimate)."
+    },
+    {
+      "id": "whether_teams_sheet_blank_state_matters",
+      "note": "The TEAMS sheet (in the required inspection list) was found entirely populated with 0/blank values for every field. It was confirmed NOT to be referenced by the traced CS/GC formula chain, but this extraction did not determine whether TEAMS is used elsewhere in the workbook (e.g. for a different feature not in scope) where its blank state might matter, nor whether its blankness reflects a stale/unrefreshed API pull that could indicate other silent data gaps outside this extraction's scope."
+    }
+  ],
+  "lookahead_audit": {
+    "conclusion": "NO lookahead risk identified in the clean-sheet/goals-conceded rolling-window ranges.",
+    "method": "For the current CONTROL!B3=0 (preseason) state, precisely traced CONTROL!E2 (=41, the column-position of '26-27-GW00' within the xGC sheet's B:CZ header row) through the Clean Sheets Long Form window formula (CONTROL!B69/C69/D69/E69) to derive the exact inclusive column range read by MODEL!BT and, via the parallel FDR block (B94/C94/D94/E94), by TABLES!K/L/M. Result: the window spans xGC/PL-sheet columns D through AO inclusive, corresponding to GW labels '25-26-GW01' through '25-26-GW38' -- the complete previous season, ending exactly one column short of the current-season 'GW00' marker at column AP.",
+    "structural_argument": "The window's end offset is always CONTROL!E2 - E69 (currently 41-1=40), and E69/E70/E83/E84/E94/E95 are each defined as C+(D-B), where D is itself an IF-ladder (IF(B-$B$3>76,B+3,IF(B-$B$3>38,B+2,IF(B-$B$3>0,B+1,B)))) that shifts the effective window length FORWARD by 1/2/3 extra columns as B3 (the last-played GW) advances past 0/38/76. This IF-ladder construction guarantees the window's right edge tracks strictly behind CONTROL!E2 (the current-GW pointer) at every value of B3 observed or inferable from the formula's own bounds, not only at the specific B3=0 snapshot this extraction captured. No formula in the traced CS/GC chain references a GW column at or beyond CONTROL!E2's position.",
+    "caveat": "This conclusion is verified precisely for B3=0 (the actual cached state) and argued structurally (not empirically re-verified) for other B3 values, since only one season-state snapshot was available in this read-only extraction. The IF-ladder's threshold behavior at B3=38 and B3=76 boundaries (where the window length itself jumps by an extra column) was not independently spot-checked at those specific values."
+  }
+}

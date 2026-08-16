@@ -151,3 +151,26 @@ This deliberately differs from the spreadsheet's final not-start branch, which u
 `1 - P(start)` and therefore treats genuine absences as substitute cameos. Home/away adjustment is
 also excluded from this component so it can be introduced once, in the dedicated fixture layer,
 instead of inheriting the spreadsheet's double-application bug.
+
+### Clean-sheet/goals-conceded foundation
+
+The defensive reference extraction lives in
+`docs/research/benchwarmers_clean_sheets_goals_conceded_reference.json`. The live workbook path
+blends team long/short-form xGC, applies its linear Understat correction, scales that rate by the
+opponent's attacking xG relative to league average, and treats the result as a Poisson lambda.
+
+The Python component retains that rate path and exposes both workbook probabilities:
+
+- `P(clean sheet) = exp(-lambda)`
+- `P(2+ goals conceded) = 1 - exp(-lambda) * (1 + lambda)`
+
+Player exposure is made explicit. Clean-sheet xPts is multiplied by the unconditional probability
+of playing at least 60 minutes. Goals-conceded exposure uses mutually exclusive start and substitute
+appearance probabilities; the substitute lambda is rescaled by the cameo/start minutes ratio.
+Absence probability contributes to neither branch.
+
+The workbook applies at most one goals-conceded deduction via `-P(2+ goals conceded)`. Official FPL
+scoring deducts one point **for every** two goals conceded by a goalkeeper or defender. The coherent
+projection therefore uses `E[floor(goals conceded / 2)]` under the Poisson distribution, while
+retaining the workbook approximation as a separately named diagnostic for golden parity. See the
+[official scoring rules](https://fplchallenge.premierleague.com/help/rules).
