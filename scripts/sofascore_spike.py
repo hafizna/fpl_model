@@ -3,6 +3,7 @@
 Examples:
 
     python scripts/sofascore_spike.py --date 2026-08-15 --team-id 38
+    python scripts/sofascore_spike.py --event-id 123456
     python scripts/sofascore_spike.py --event-id 123456 --player-id 78910
 
 This script performs live requests to undocumented provider endpoints. Use it
@@ -13,7 +14,10 @@ from __future__ import annotations
 
 import argparse
 
-from fpl_model.ingest.sofascore_experimental import SofaScoreExperimentalClient
+from fpl_model.ingest.sofascore_experimental import (
+    SofaScoreCoverageError,
+    SofaScoreExperimentalClient,
+)
 from fpl_model.tactics.spatial import fingerprint
 
 
@@ -43,12 +47,29 @@ def main() -> None:
         if players.empty:
             print("No lineup players returned")
         else:
+            print("\nLineups")
             print(players.to_string(index=False))
+
+        try:
+            positions = client.normalised_average_positions(args.event_id)
+        except SofaScoreCoverageError as exc:
+            print(f"\nAverage positions unavailable: {exc}")
+        else:
+            print("\nAverage positions (one match-level request)")
+            show = [
+                "side",
+                "sofascore_player_id",
+                "player_name",
+                "provider_position",
+                "normalised_x",
+                "normalised_y",
+            ]
+            print(positions[show].to_string(index=False))
 
     if args.event_id and args.player_id:
         normalised = client.normalised_player_heatmap(args.event_id, args.player_id)
         result = fingerprint(normalised)
-        print("\nSpatial fingerprint")
+        print("\nDetailed player heatmap fingerprint")
         print(result)
 
     if not ((args.date and args.team_id) or args.event_id):
