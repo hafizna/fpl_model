@@ -43,6 +43,17 @@ normalise_points(..., x_max=100, y_max=100)
 SpatialFingerprint
 ```
 
+## Cloud-runner probe result
+
+A one-off GitHub Actions probe was run on 16 August 2026 against both:
+
+- `https://www.sofascore.com/api/v1`
+- `https://api.sofascore.com/api/v1`
+
+using browser-like headers and a deliberately low request rate. Both hosts returned HTTP `403` for scheduled-event requests from GitHub-hosted runner IPs.
+
+This does **not** prove that the endpoint pattern is invalid: current community clients document the same endpoints, and SofaScore is known to apply bot/rate-limit controls. It does mean that cloud CI is not a suitable live ingestion environment for this source. The next acceptance test should run from the user's local machine/network. Do not attempt to bypass provider access controls.
+
 ## Chelsea proof-of-concept
 
 SofaScore's public pages show coverage for several Chelsea 2026 preseason friendlies. The first local smoke test should discover those match IDs through the daily schedule rather than hard-code IDs copied from a webpage.
@@ -54,6 +65,8 @@ Example:
 ```bash
 python scripts/sofascore_spike.py --date 2026-08-15 --team-id 38
 ```
+
+If that date is not returned by the provider, repeat for known preseason dates such as 1, 5, 8, or 9 August 2026.
 
 Then use one returned event ID:
 
@@ -96,4 +109,5 @@ A high Role Attack Index does not automatically mean `xPts * 1.20`. Spatial feat
 - fail gracefully on missing coverage
 - isolate this adapter so the main model can run without SofaScore
 - re-check provider terms before scaling automated collection
+- respect HTTP access controls; do not build bypass logic
 - do not use screenshot OCR as the production fallback
