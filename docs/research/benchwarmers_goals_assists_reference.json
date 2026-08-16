@@ -1,0 +1,769 @@
+{
+  "$schema_note": "Reference-only extraction from the Benchwarmers 2026/27 spreadsheet model, covering goal and assist expected-points logic. Read-only, formulas + cached values as of the timestamps below. This does not imply spreadsheet parity is implemented in Python. No Python code was written or modified to produce this file.",
+  "extraction_date": "2026-08-16",
+  "extraction_scope": {
+    "in_scope": [
+      "MODEL sheet: goal/assist rate columns (AE:AL, BI:BL, BM:BR, CC:CH, DP:DW)",
+      "PPts sheet: goal/assist component columns (Q:W fixture adjustment, AB:AJ goal/assist blocks) and how they feed AY/BA/BG/BI",
+      "CONTROL sheet assumptions referenced by the above (B59/B60, B62/B63, B65, B97/B98, B110/B111, C198:C201)",
+      "xG, xA, PL, MINS sheets (structure only, as the pivot-table sources for LF/SF windows)",
+      "TABLES sheet (structure only, as the source of opponent-relative fixture scaling)",
+      "PT, PSPT, PSAPI, API sheets (structure only, as the source of raw appearance/assist-count data)"
+    ],
+    "out_of_scope": [
+      "Goals conceded, clean sheets, saves, cards, bonus, DefCon components (columns 3,4,5,6,9,10,11 except where needed to show they are excluded from BG)",
+      "Full row-by-row audit of xG/xA/PL/MINS pivot tables or TABLES team-aggregate formulas",
+      "Any change to src/fpl_model or tests"
+    ],
+    "reused_findings": "The appearance/start-probability formula map (MODEL!CR:CY, PPts!BA:BI structural formulas, CONTROL preseason state) was already extracted in docs/research/benchwarmers_appearance_reference.json and is not re-derived here in full; this file cross-references it and adds only the goal/assist-specific columns (AB:AJ) and their upstream sources."
+  },
+  "workbooks": {
+    "MODEL.xlsx": {
+      "path": "C:\\Users\\hafizna.fadhli\\Downloads\\MODEL.xlsx",
+      "size_bytes": 71300490,
+      "mtime_iso": "2026-08-16T21:40:30.440420",
+      "ctime_iso": "2026-08-16T21:38:42.334302",
+      "note": "Timestamps unchanged from the prior appearance extraction session, confirming the workbook has not been modified in between.",
+      "role": "Primary source for MODEL, PPts, CONTROL, xG, xA, PL, MINS, TABLES, PT, PSPT, PSAPI, API sheet formulas used in this extraction."
+    },
+    "SOLVER.xlsx": {
+      "path": "C:\\Users\\hafizna.fadhli\\Downloads\\SOLVER.xlsx",
+      "size_bytes": 200650,
+      "mtime_iso": "2026-08-16T21:38:21.005117",
+      "ctime_iso": "2026-08-16T21:38:16.474932",
+      "role": "Downstream squad-optimizer workbook. Not a source of goal/assist formulas; not used in this extraction."
+    },
+    "SIMPLE MODEL.xlsx": {
+      "path": "C:\\Users\\hafizna.fadhli\\Downloads\\SIMPLE MODEL.xlsx",
+      "size_bytes": 946907,
+      "mtime_iso": "2026-08-16T21:38:20.417391",
+      "ctime_iso": "2026-08-16T21:38:13.742047",
+      "role": "Simplified/derivative workbook without the MODEL/PPts sheets. Not used in this extraction."
+    }
+  },
+  "control_assumptions": {
+    "sheet": "CONTROL",
+    "note": "Values as cached/saved in MODEL.xlsx. User-editable blend weights, not hardcoded model constants. All still reflect the preseason state (CONTROL!B3=0) documented in the appearance extraction.",
+    "long_form_short_form_blend_goals_assists": {
+      "label": "Goals & Assists: Long Form vs Short Form weight",
+      "long_form_weight": { "cell": "B59", "value": 0.8 },
+      "short_form_weight": { "cell": "B60", "formula": "=1-B59", "value": 0.19999999999999996 },
+      "effect": "MODEL!7 (assist rate*3) and MODEL!8 (goal rate*positional points) blend the Long Form window's xA/St, xG/St 80% and the Short Form window's xA/St, xG/St 20%.",
+      "window_lengths": {
+        "long_form_length_gws": { "cell": "B56", "value": 38 },
+        "short_form_length_gws": { "cell": "B57", "value": 6 },
+        "note": "During preseason (B3=0), the effective long-form window resolves to the full previous season (38 GWs back from the current GW column) and the short-form window resolves to the last 6 GWs of the previous season, via CONTROL!D56/D57 and E56/E57's offset formulas."
+      }
+    },
+    "mins_per_start_blend_goals_assists": {
+      "label": "Goals & Assists: Mins/Start Previous Season vs This Season weight (separate from the appearance block's B8/B9)",
+      "previous_season_weight": { "cell": "B62", "value": 1 },
+      "this_season_weight": { "cell": "B63", "formula": "=1-B62", "value": 0 },
+      "effect": "MODEL!AK (G+A PSxTS Mn/Start) and AL (G+A PSxTS Mn/Sub) blend PS Mn/St%/PS Mn/Sub% (100%) and this-season Mn/St%/Mn/Sub% (0%) using this pair, NOT the appearance block's B8/B9. Both pairs are currently 1/0, but they are independently editable knobs in the spreadsheet and must not be assumed identical in a Python port."
+    },
+    "fantasy_assist_boost": {
+      "label": "Fantasy Assist Boost",
+      "cell": "B65",
+      "value": 0.4,
+      "effect": "PPts!AD (FA BOOST) = PPts!AC * (1 + B65). A flat +40% multiplier applied to the fixture-adjusted assist rate before multiplying by the 3-points-per-assist constant. No equivalent boost exists on the goal side (PPts!AH has no analogous +X% term)."
+    },
+    "fixture_difficulty_lf_sf_blend": {
+      "label": "VS xG/90, VS xGC/90 (opponent strength): Long Form vs Short Form weight",
+      "long_form_weight": { "cell": "B97", "value": 0.8 },
+      "short_form_weight": { "cell": "B98", "formula": "=1-B97", "value": 0.19999999999999996 },
+      "effect": "PPts!R (VS xG/90) and S (VS xGC/90) blend the opponent's TABLES[LF xG/90]/[LF xGC/90] (80%) and TABLES[SF xG/90]/[SF xGC/90] (20%). This is a separate LF/SF blend from B59/B60 (own-player rate blend) -- same weight values currently, different cells, different purpose."
+    },
+    "league_average_xg_xgc_blend": {
+      "label": "League Average xG/xGC: Previous Season vs This Season weight",
+      "previous_season_weight": { "cell": "B110", "value": 1 },
+      "this_season_weight": { "cell": "B111", "formula": "=1-B110", "value": 0 },
+      "effect": "PPts!T (LA xG/90) and U (LA xGC/90) blend PSTABLE!N24/O24 (previous-season league average) and TABLE!N24/O24 (this-season league average) using this pair. Used as the denominator in PPts!V/W to express the opponent's strength relative to league average."
+    },
+    "positional_points_per_goal": {
+      "label": "FPL points per goal by position",
+      "range": "CONTROL!B197:D201",
+      "table": [
+        { "element_type": 1, "POS": "GK", "GOAL": 10, "CS": 4 },
+        { "element_type": 2, "POS": "DEF", "GOAL": 6, "CS": 4 },
+        { "element_type": 3, "POS": "MID", "GOAL": 5, "CS": 1 },
+        { "element_type": 4, "POS": "FWD", "GOAL": 4, "CS": 0 }
+      ],
+      "usage": "MODEL!DT (Goal) and PPts!AI (Goal) both look up this table by position via nested IFs (not a direct INDEX/MATCH against the table, despite the table existing in tabular form). Matches the real-world FPL scoring rule exactly (GK/DEF=6pts pre-2025/26 rule changes are out of date in general FPL knowledge, but this workbook's cached table reads GK=10, DEF=6, MID=5, FWD=4 for the 2026-27 season modeled)."
+    },
+    "points_per_assist": {
+      "label": "FPL points per assist (all positions)",
+      "cells": ["MODEL!DP (literal 3)", "PPts!AE (literal 3)"],
+      "value": 3,
+      "usage": "Hardcoded literal 3 in two places (MODEL!DP and PPts!AE), not sourced from CONTROL. Matches the real-world FPL assist rule (3 points, all positions, uniform)."
+    }
+  },
+  "formula_map": {
+    "MODEL_sheet": {
+      "note": "Column letters and headers verified against the live workbook; every formula string below was re-read after writing and matched character-for-character.",
+      "raw_source_lookup_columns": {
+        "PS_A_AE": {
+          "header": "PS A",
+          "formula": "=IFERROR(INDEX(PSAPI[assists],MATCH(MODEL[[#This Row],[Code]],PSAPI[code],0)),0)",
+          "meaning": "Previous-season total assists, looked up from the PSAPI sheet (a saved snapshot of the FPL API's 'assists' field) by player code.",
+          "downstream_usage": "DEAD END -- only feeds AF (PS A/St) below, which itself is never referenced by any other formula in the workbook (verified: no formula anywhere references MODEL[PS A/St])."
+        },
+        "PS_A_St_AF": {
+          "header": "PS A/St",
+          "formula": "=IFERROR((MODEL[[#This Row],[PS A]]/MODEL[[#This Row],[PS Mins]])*90*MODEL[[#This Row],[PS Mn/St %]],0)",
+          "meaning": "Previous-season assists-per-90-played, rescaled to a per-start basis via PS Mn/St%. Structurally identical rescaling pattern to the live LF/SF columns, but built from raw assist counts (not xA) and the full season total (not a rolling window).",
+          "downstream_usage": "DEAD END -- not referenced anywhere downstream. See spreadsheet_quirks.dead_end_ps_a_and_this_season_a."
+        },
+        "PS_xA_AG": {
+          "header": "PS xA",
+          "formula": "=IFERROR(INDEX(PSAPI[expected_assists],MATCH(MODEL[[#This Row],[Code]],PSAPI[code],0)),0)",
+          "meaning": "Previous-season total expected assists from PSAPI.",
+          "downstream_usage": "DEAD END -- only feeds AH (PS xA/St) below, itself unreferenced downstream."
+        },
+        "PS_xA_St_AH": {
+          "header": "PS xA/St",
+          "formula": "=IFERROR((MODEL[[#This Row],[PS xA]]/MODEL[[#This Row],[PS Mins]])*90*MODEL[[#This Row],[PS Mn/St %]],0)",
+          "downstream_usage": "DEAD END -- not referenced anywhere downstream."
+        },
+        "This_season_A_BI": {
+          "header": "A",
+          "formula": "=IFERROR(INDEX(API[assists],MATCH(MODEL[[#This Row],[Code]],API[code],0)),0)",
+          "meaning": "This-season total assists from the live API sheet. Always 0 for every player in the extracted snapshot (preseason, no current-season matches played).",
+          "downstream_usage": "DEAD END -- only feeds BJ (A/St), itself unreferenced downstream."
+        },
+        "This_season_A_St_BJ": {
+          "header": "A/St",
+          "formula": "=IFERROR((MODEL[[#This Row],[A]]/MODEL[[#This Row],[Mins]])*90*MODEL[[#This Row],[Mn/St %]],0)",
+          "downstream_usage": "DEAD END -- not referenced anywhere downstream."
+        },
+        "This_season_xA_BK": {
+          "header": "xA",
+          "formula": "=IFERROR(INDEX(API[expected_assists],MATCH(MODEL[[#This Row],[Code]],API[code],0)),0)",
+          "downstream_usage": "DEAD END -- only feeds BL (xA/St), itself unreferenced downstream."
+        },
+        "This_season_xA_St_BL": {
+          "header": "xA/St",
+          "formula": "=IFERROR((MODEL[[#This Row],[xA]]/MODEL[[#This Row],[Mins]])*90*MODEL[[#This Row],[Mn/St %]],0)",
+          "downstream_usage": "DEAD END -- not referenced anywhere downstream."
+        },
+        "dead_end_summary": "AE,AF,AG,AH,BI,BJ,BK,BL (PS A, PS A/St, PS xA, PS xA/St, A, A/St, xA, xA/St) form two parallel season-total-based assist/xA computations that are NEVER read by any other formula in MODEL or PPts. The live goal/assist pipeline runs entirely through the LF/SF (rolling-window) columns below, not through these season-total columns. This was verified by an exhaustive formula-string search across both sheets' row-2 formulas for column references to each of these 8 headers -- zero matches found outside the columns' own internal chain (AE->AF, AG->AH, BI->BJ, BK->BL)."
+      },
+      "windowed_source_columns": {
+        "PT_CODE_ROW_MATCH_BS": {
+          "header": "PT CODE ROW MATCH",
+          "formula": "=MATCH(MODEL[[#This Row],[Code]],MINS!$A$1001:$A$1999,0)",
+          "meaning": "Row-index lookup into the MINS/xG/xA/PL/DC pivot-table sheets, shared by all windowed (LF/SF) column families."
+        },
+        "LF_G+A_Mins_BM": {
+          "header": "LF G+A Mins",
+          "formula": "=IFERROR(SUM(INDEX(MINS!$B$1001:$CZ$1999,MODEL[[#This Row],[PT CODE ROW MATCH]],CONTROL!$E$2-CONTROL!$D$56+1-CONTROL!$C$56):INDEX(MINS!$B$1001:$CZ$1999,MODEL[[#This Row],[PT CODE ROW MATCH]],CONTROL!$E$2-CONTROL!$E$56)),0)",
+          "meaning": "Sum of minutes played over the Long Form window (CONTROL!B56=38 GWs, offset by B3/preseason state via D56/E56)."
+        },
+        "LF_xA_BN": {
+          "header": "LF xA",
+          "formula": "=IFERROR(SUM(INDEX(xA!$B$1001:$CZ$1999,MODEL[[#This Row],[PT CODE ROW MATCH]],CONTROL!$E$2-CONTROL!$D$56+1-CONTROL!$C$56):INDEX(xA!$B$1001:$CZ$1999,MODEL[[#This Row],[PT CODE ROW MATCH]],CONTROL!$E$2-CONTROL!$E$56)),0)",
+          "meaning": "Sum of expected assists over the Long Form window, from the xA pivot-table sheet."
+        },
+        "LF_xA_St_BO": {
+          "header": "LF xA/St",
+          "formula": "=IFERROR((MODEL[[#This Row],[LF xA]]/MODEL[[#This Row],[LF G+A Mins]])*90*((MODEL[[#This Row],[PS Mn/St %]]*CONTROL!$B$62)+(CONTROL!$B$63*MODEL[[#This Row],[Mn/St %]])),0)",
+          "meaning": "(LF total xA / LF total minutes played) * 90 = xA per 90 minutes actually played over the window, then rescaled by the blended Mn/St% (B62/B63-weighted) to approximate a per-start rate. THIS answers modelling question 1: the denominator is 'minutes actually played in the window', not 90, not appearances, and not starts -- the per-start conversion is a second, separate multiplication step, not the primary denominator."
+        },
+        "LF_xG_BP": {
+          "header": "LF xG",
+          "formula": "=IFERROR(SUM(INDEX(xG!$B$1001:$CZ$1999,MODEL[[#This Row],[PT CODE ROW MATCH]],CONTROL!$E$2-CONTROL!$D$56+1-CONTROL!$C$56):INDEX(xG!$B$1001:$CZ$1999,MODEL[[#This Row],[PT CODE ROW MATCH]],CONTROL!$E$2-CONTROL!$E$56)),0)"
+        },
+        "LF_xG_St_BQ": {
+          "header": "LF xG/St",
+          "formula": "=IFERROR((MODEL[[#This Row],[LF xG]]/MODEL[[#This Row],[LF G+A Mins]])*90*((MODEL[[#This Row],[PS Mn/St %]]*CONTROL!$B$62)+(CONTROL!$B$63*MODEL[[#This Row],[Mn/St %]])),0)",
+          "meaning": "Same construction as LF xA/St but for expected goals. Verified by hand for Haaland: (25.5/2953)*90*0.9555555555555556 = 0.7426346088723332, matching cache exactly."
+        },
+        "LF_Pl_BR": {
+          "header": "LF Pl",
+          "formula": "=IFERROR(SUM(INDEX(PL!$B$1001:$CZ$1999,MODEL[[#This Row],[PT CODE ROW MATCH]],CONTROL!$E$2-CONTROL!$D$56+1-CONTROL!$C$56):INDEX(PL!$B$1001:$CZ$1999,MODEL[[#This Row],[PT CODE ROW MATCH]],CONTROL!$E$2-CONTROL!$E$56)),0)",
+          "meaning": "Count of matches played (nonzero minutes) over the Long Form window, from the PL ('Played') pivot-table sheet. Not itself used in the goal/assist rate formulas (they divide by minutes, not match count), but present for reference/diagnostic use elsewhere in the workbook."
+        },
+        "SF_Mins_CC": {
+          "header": "SF Mins",
+          "formula": "=IFERROR(SUM(INDEX(MINS!$B$1001:$CZ$1999,MODEL[[#This Row],[PT CODE ROW MATCH]],CONTROL!$E$2-CONTROL!$D$57+1-CONTROL!$C$57):INDEX(MINS!$B$1001:$CZ$1999,MODEL[[#This Row],[PT CODE ROW MATCH]],CONTROL!$E$2-CONTROL!$E$57)),0)",
+          "meaning": "Short Form (CONTROL!B57=6 GWs) mirror of LF G+A Mins."
+        },
+        "SF_xA_CD": {
+          "header": "SF xA",
+          "formula": "=IFERROR(SUM(INDEX(xA!$B$1001:$CZ$1999,MODEL[[#This Row],[PT CODE ROW MATCH]],CONTROL!$E$2-CONTROL!$D$57+1-CONTROL!$C$57):INDEX(xA!$B$1001:$CZ$1999,MODEL[[#This Row],[PT CODE ROW MATCH]],CONTROL!$E$2-CONTROL!$E$57)),0)"
+        },
+        "SF_xA_St_CE": {
+          "header": "SF xA/St",
+          "formula": "=IFERROR((MODEL[[#This Row],[SF xA]]/MODEL[[#This Row],[SF Mins]])*90*((MODEL[[#This Row],[PS Mn/St %]]*CONTROL!$B$62)+(CONTROL!$B$63*MODEL[[#This Row],[Mn/St %]])),0)"
+        },
+        "SF_xG_CF": {
+          "header": "SF xG",
+          "formula": "=IFERROR(SUM(INDEX(xG!$B$1001:$CZ$1999,MODEL[[#This Row],[PT CODE ROW MATCH]],CONTROL!$E$2-CONTROL!$D$57+1-CONTROL!$C$57):INDEX(xG!$B$1001:$CZ$1999,MODEL[[#This Row],[PT CODE ROW MATCH]],CONTROL!$E$2-CONTROL!$E$57)),0)"
+        },
+        "SF_xG_St_CG": {
+          "header": "SF xG/St",
+          "formula": "=IFERROR((MODEL[[#This Row],[SF xG]]/MODEL[[#This Row],[SF Mins]])*90*((MODEL[[#This Row],[PS Mn/St %]]*CONTROL!$B$62)+(CONTROL!$B$63*MODEL[[#This Row],[Mn/St %]])),0)"
+        },
+        "SF_Pl_CH": {
+          "header": "SF Pl",
+          "formula": "=IFERROR(SUM(INDEX(PL!$B$1001:$CZ$1999,MODEL[[#This Row],[PT CODE ROW MATCH]],CONTROL!$E$2-CONTROL!$D$57+1-CONTROL!$C$57):INDEX(PL!$B$1001:$CZ$1999,MODEL[[#This Row],[PT CODE ROW MATCH]],CONTROL!$E$2-CONTROL!$E$57)),0)"
+        }
+      },
+      "minutes_scaling_columns": {
+        "G_A_PSxTS_Mn_Start_AK": {
+          "header": "G+A PSxTS Mn/Start",
+          "formula": "=(MODEL[[#This Row],[PS Mn/St %]]*CONTROL!$B$62)+(CONTROL!$B$63*MODEL[[#This Row],[Mn/St %]])",
+          "meaning": "The blended Mn/St% factor used inside every LF/SF xA-St and xG/St formula above, computed once and reused (also embedded inline in BO/BQ/CE/CG rather than referenced by name -- both the standalone AK column and the inline recomputation exist and are numerically identical since they use the same inputs)."
+        },
+        "G_A_PSxTS_Mn_Sub_AL": {
+          "header": "G+A PSxTS Mn/Sub",
+          "formula": "=(MODEL[[#This Row],[PS Mn/Sub %]]*CONTROL!$B$62)+(CONTROL!$B$63*MODEL[[#This Row],[Mn/Sub %]])",
+          "meaning": "Substitute-cameo mirror of AK, using Mn/Sub% instead of Mn/St%. This is where the substitute-minutes ratio used in PPts!BF originates."
+        }
+      },
+      "points_scaled_columns": {
+        "Assist_points_constant_DP": { "header": "Assist", "formula": "3", "type": "literal_constant" },
+        "LF_pct7_DQ": { "header": "LF %7", "formula": "=MODEL[[#This Row],[LF xA/St]]" },
+        "SF_pct7_DR": { "header": "SF %7", "formula": "=MODEL[[#This Row],[SF xA/St]]" },
+        "assist_rate_7_DS": {
+          "header": "7",
+          "formula": "=((MODEL[[#This Row],[LF %7]]*CONTROL!$B$59)+(MODEL[[#This Row],[SF %7]]*CONTROL!$B$60))*MODEL[[#This Row],[Assist]]",
+          "meaning": "Blended (80% LF, 20% SF) xA/St, multiplied by the flat 3-points-per-assist constant. THIS IS ALREADY A POINTS VALUE, not a raw rate -- important because PPts!AB divides it back by 3 to recover the rate (see PPts formula map)."
+        },
+        "Goal_points_lookup_DT": {
+          "header": "Goal",
+          "formula": "=IF(MODEL[[#This Row],[POS]]=\"GK\",CONTROL!$C$198,IF(MODEL[[#This Row],[POS]]=\"DEF\",CONTROL!$C$199,IF(MODEL[[#This Row],[POS]]=\"MID\",CONTROL!$C$200,IF(MODEL[[#This Row],[POS]]=\"FWD\",CONTROL!$C$201,0))))",
+          "meaning": "Positional points-per-goal (10/6/5/4), looked up via nested IF against CONTROL!C198:C201, not the more idiomatic INDEX/MATCH used elsewhere in the workbook for similar table lookups."
+        },
+        "LF_pct8_DU": { "header": "LF %8", "formula": "=MODEL[[#This Row],[LF xG/St]]" },
+        "SF_pct8_DV": { "header": "SF %8", "formula": "=MODEL[[#This Row],[SF xG/St]]" },
+        "goal_rate_8_DW": {
+          "header": "8",
+          "formula": "=((MODEL[[#This Row],[LF %8]]*CONTROL!$B$59)+(MODEL[[#This Row],[SF %8]]*CONTROL!$B$60))*MODEL[[#This Row],[Goal]]",
+          "meaning": "Blended (80% LF, 20% SF) xG/St, multiplied by the positional points-per-goal constant. Also already a points value, divided back out by PPts!AG (see below)."
+        }
+      }
+    },
+    "PPts_sheet": {
+      "fixture_adjustment_columns": {
+        "VS_Q": {
+          "header": "VS",
+          "formula": "=IFERROR(IFERROR(INDEX(FIXHELPER[AWAYABRV],MATCH(PPts[[#This Row],[Team]]&PPts[[#This Row],[GW3]],FIXHELPER[HOMEABRVCODE],0)),LOWER(INDEX(FIXHELPER[HOMEABRV],MATCH(PPts[[#This Row],[Team]]&PPts[[#This Row],[GW3]],FIXHELPER[AWAYABRVCODE],0)))),\"-\")",
+          "meaning": "Opponent abbreviation, uppercase for a home fixture, lowercase for away. Same mechanism as the H/A column documented in the appearance extraction."
+        },
+        "VS_xG_90_R": {
+          "header": "VS xG/90",
+          "formula": "=IFERROR((CONTROL!$B$97*INDEX(TABLES[LF xG/90],MATCH(PPts[[#This Row],[VS]],TABLES[ABVR],0)))+(CONTROL!$B$98*INDEX(TABLES[SF xG/90],MATCH(PPts[[#This Row],[VS]],TABLES[ABVR],0))),0)",
+          "meaning": "Opponent's own attacking xG/90, blended 80% LF / 20% SF (team-level, not player-level -- from the TABLES sheet)."
+        },
+        "VS_xGC_90_S": {
+          "header": "VS xGC/90",
+          "formula": "=IFERROR((CONTROL!$B$97*INDEX(TABLES[LF xGC/90],MATCH(PPts[[#This Row],[VS]],TABLES[ABVR],0)))+(CONTROL!$B$98*INDEX(TABLES[SF xGC/90],MATCH(PPts[[#This Row],[VS]],TABLES[ABVR],0))),0)",
+          "meaning": "Opponent's own defensive xG-conceded/90, blended 80% LF / 20% SF. THIS is the figure used to scale both goal and assist rates (via W below), representing 'how weak is this opponent defensively'."
+        },
+        "LA_xG_90_T": {
+          "header": "LA xG/90",
+          "formula": "=IFERROR((PSTABLE!$N$24*CONTROL!$B$110)+(CONTROL!$B$111*TABLE!$N$24),0)",
+          "meaning": "League-average xG/90, blended previous-season/this-season via B110/B111. Row 24 of PSTABLE/TABLE is (per its structure) a league-wide average/summary row, not audited further (out of scope: team-aggregate sheet)."
+        },
+        "LA_xGC_90_U": {
+          "header": "LA xGC/90",
+          "formula": "=IFERROR((PSTABLE!$O$24*CONTROL!$B$110)+(CONTROL!$B$111*TABLE!$O$24),0)"
+        },
+        "VS_xG_90_LA_V": {
+          "header": "VS xG/90/LA",
+          "formula": "=IFERROR(1+(1-(PPts[[#This Row],[VS xG/90]]/PPts[[#This Row],[LA xG/90]])),0)",
+          "meaning": "Opponent's attacking strength relative to league average, INVERTED (1 + (1 - ratio)): a WEAKER-attacking opponent than average produces a ratio <1, so this yields a value >1. USED ONLY for the Bonus-points fixture adjustment (PPts!Y), NOT for goals or assists -- verified by an exhaustive search of row-2 formulas referencing 'VS xG/90/LA'; the only match was column Y (xBonus/Start X)."
+        },
+        "VS_xGC_90_LA_W": {
+          "header": "VS xGC/90/LA",
+          "formula": "=PPts[[#This Row],[VS xGC/90]]/PPts[[#This Row],[LA xGC/90]]",
+          "meaning": "Opponent's defensive weakness relative to league average, NOT inverted (plain ratio). A HIGHER-than-average goals-conceded rate for the opponent produces a ratio >1, boosting the player's expected goals/assists. THIS is the fixture-adjustment multiplier actually applied to both AC (assist) and AH (goal) below. Note the asymmetry with V: V is inverted (1+(1-ratio)) for bonus, W is a plain ratio for goals/assists/CS -- two different transformation shapes for conceptually similar 'opponent relative to league average' figures, not explained anywhere in CONTROL (flagged as ambiguity)."
+        }
+      },
+      "assist_component_columns": {
+        "LFxSF_xA_St_AB": {
+          "header": "LFxSF xA/St",
+          "formula": "=INDEX(MODEL[7],MATCH(PPts[[#This Row],[Code]],MODEL[Code],0))/3",
+          "meaning": "Recovers the pure blended xA/St RATE by dividing MODEL!7 (which is already xA/St*3-points-per-assist) back by the literal 3. This round-trip (multiply by 3 in MODEL, divide by 3 in PPts) only makes sense if MODEL!7 is also used standalone elsewhere in the workbook (plausible but not verified in this extraction -- flagged as an ambiguity, since within the goal/assist chain itself the *3 and /3 are pure no-ops that cancel exactly)."
+        },
+        "LFxSF_xA_St_X_AC": {
+          "header": "LFxSF xA/St X",
+          "formula": "=PPts[[#This Row],[LFxSF xA/St]]*PPts[[#This Row],[VS xGC/90/LA]]",
+          "meaning": "Fixture-adjusted xA/St rate: multiply the recovered rate by the opponent's defensive-weakness-relative-to-league-average ratio."
+        },
+        "FA_BOOST_AD": {
+          "header": "FA BOOST",
+          "formula": "=PPts[[#This Row],[LFxSF xA/St X]]*(1+CONTROL!$B$65)",
+          "meaning": "Apply the flat +40% Fantasy Assist Boost (CONTROL!B65=0.4) to the fixture-adjusted rate. No equivalent boost exists for goals."
+        },
+        "Assist_points_constant_AE": {
+          "header": "Assist",
+          "formula": "3",
+          "type": "literal_constant"
+        },
+        "assist_xpts_component_AF": {
+          "header": "7",
+          "formula": "=PPts[[#This Row],[FA BOOST]]*PPts[[#This Row],[Assist]]",
+          "meaning": "Final assist xPts-if-start component = fixture-and-boost-adjusted xA/St rate * 3. Verified by hand for Gabriel: (0.14727272727272728/3)*1.0439184094839085*1.4*3 = 0.21523699570086402, matching cache exactly to full float precision."
+        }
+      },
+      "goal_component_columns": {
+        "LFxSF_xG_St_AG": {
+          "header": "LFxSF xG/St",
+          "formula": "=IFERROR(INDEX(MODEL[8],MATCH(PPts[[#This Row],[Code]],MODEL[Code],0))/INDEX(MODEL[Goal],MATCH(PPts[[#This Row],[Code]],MODEL[Code],0)),0)",
+          "meaning": "Recovers the pure blended xG/St RATE by dividing MODEL!8 (already xG/St*positional-goal-points) back by MODEL!Goal (the same positional points constant used to build it). Mirrors AB's *3/divide-by-3 pattern, but the division uses a live re-lookup of MODEL!Goal for this specific player's position rather than a literal, which is necessary here (unlike Assist, Goal points vary by position, so a literal divisor would be wrong)."
+        },
+        "LFxSF_xG_St_X_AH": {
+          "header": "LFxSF xG/St X",
+          "formula": "=PPts[[#This Row],[LFxSF xG/St]]*PPts[[#This Row],[VS xGC/90/LA]]",
+          "meaning": "Fixture-adjusted xG/St rate, same mechanism as AC for assists."
+        },
+        "Goal_points_lookup_AI": {
+          "header": "Goal",
+          "formula": "=IF(PPts[[#This Row],[POS]]=\"GK\",CONTROL!$C$198,IF(PPts[[#This Row],[POS]]=\"DEF\",CONTROL!$C$199,IF(PPts[[#This Row],[POS]]=\"MID\",CONTROL!$C$200,IF(PPts[[#This Row],[POS]]=\"FWD\",CONTROL!$C$201,0))))",
+          "meaning": "Independent re-lookup of the same positional points-per-goal table on the PPts sheet (duplicated logic from MODEL!DT, not a cross-sheet reference to it)."
+        },
+        "goal_xpts_component_AJ": {
+          "header": "8",
+          "formula": "=PPts[[#This Row],[LFxSF xG/St X]]*PPts[[#This Row],[Goal]]",
+          "meaning": "Final goal xPts-if-start component = fixture-adjusted xG/St rate * positional points-per-goal. Verified by hand for Haaland: (2.9665818595025777/4)*0.9575214285509455*4 = 2.8405657000242286, matching cache exactly to full float precision."
+        }
+      },
+      "how_components_feed_totals": {
+        "note": "Full BA/BG/BI structural formulas are documented in docs/research/benchwarmers_appearance_reference.json; summarized here specifically for the goal (column '8') and assist (column '7') components.",
+        "IF_START_TOTAL_BA": "BA = (sum of all 11 component columns, including '7' and '8') * H/A. Goals and assists here are counted at their FULL fixture-adjusted, boosted rate, exactly as if the player were certain to start.",
+        "IF_NOT_START_TOTAL_BG": "BG = (columns 4,5,6,7,8,10 only) * (PSxTS Mn/Sub / Mn/St ratio, i.e. PPts!BF) * H/A. Goals ('8') and assists ('7') ARE included in the not-start branch, scaled down by the substitute-cameo-minutes-to-starting-minutes ratio (BF) to reflect a substitute's reduced expected minutes. Columns 2 (60+ mins), 3 (3x saves), 9 (CS), 11 (DC) are excluded from this branch -- these are either start-gated or don't scale linearly with cameo minutes the same way.",
+        "TRUE_TOTAL_BI": "BI = (T1 + (sum of all 11 components, including '7'/'8') * Start% + BG * (1 - Start%)) * H/A. The goal and assist contribution to the final expected points is therefore: [full rate * Start%] + [cameo-scaled rate * (1-Start%)], both wrapped in the same H/A-applied-twice mechanism documented for the appearance extraction (BG already includes one H/A factor; BI's outer multiplication applies a second one, affecting the not-start portion of goals/assists specifically, not just cards/bonus/DC).",
+        "where_appearance_probability_enters": "Appearance/start probability (BH!Start%, which is Chance of Playing * PSxTS Starts/Squads Made, or the manual override) enters ONLY at this final blending stage (BA vs BG weighting in BI). It is NEVER present anywhere inside MODEL!7, MODEL!8, PPts!AB, AC, AD, AF, AG, AH, or AJ -- verified by an exhaustive formula-string search of all of those columns' row-2 formulas for the substrings 'Chance' and 'Start', with zero matches. This directly answers modelling question 3: appearance probability is applied LATER, not baked into the goal/assist rate components themselves."
+      }
+    }
+  },
+  "golden_cases": [
+    {
+      "label": "elite_high_xg_forward",
+      "player_code": 223094,
+      "player_name": "Erling Haaland",
+      "web_name": "Haaland",
+      "team": "MCI",
+      "position": "FWD",
+      "sheet_refs": { "MODEL_row": 421, "PPts_row_GW1": 421 },
+      "inputs": {
+        "MODEL!PS Starts": 34,
+        "MODEL!PS Mn/St": 86,
+        "MODEL!PS Mn/St %": 0.9555555555555556,
+        "MODEL!LF G+A Mins": 2953,
+        "MODEL!LF xA": 2.67,
+        "MODEL!LF xG": 25.5,
+        "MODEL!LF Pl": 38,
+        "MODEL!SF Mins": 450,
+        "MODEL!SF xA": 0.73,
+        "MODEL!SF xG": 3.8599999999999994,
+        "MODEL!SF Pl": 6,
+        "MODEL!Goal (positional pts, FWD)": 4,
+        "MODEL!Assist (pts)": 3,
+        "PPts!VS": "BOU",
+        "PPts!H/A": 1.05,
+        "PPts!VS xGC/90/LA": 0.9575214285509455
+      },
+      "cached_intermediate_values": {
+        "MODEL!LF xA/St": 0.07775821198780901,
+        "MODEL!LF xG/St": 0.7426346088723332,
+        "MODEL!SF xA/St": 0.1395111111111111,
+        "MODEL!SF xG/St": 0.7376888888888888,
+        "MODEL!7 (assist rate*3)": 0.27032637543740823,
+        "MODEL!8 (goal rate*4)": 2.9665818595025777,
+        "PPts!AB LFxSF xA/St": 0.0901087918124694,
+        "PPts!AC LFxSF xA/St X": 0.08628109906127544,
+        "PPts!AD FA BOOST": 0.12079353868578561,
+        "PPts!AF '7' (assist xPts if start)": 0.36238061605735683,
+        "PPts!AG LFxSF xG/St": 0.7416454648756444,
+        "PPts!AH LFxSF xG/St X": 0.7101414250060571,
+        "PPts!AJ '8' (goal xPts if start)": 2.8405657000242286,
+        "PPts!MODEL 1 / T1": 0.9625,
+        "PPts!Start %": 0.9444444444444444,
+        "PPts!IF NOT START TOTAL": 0.9572374088270229,
+        "PPts!IF START TOTAL": 6.631631411233627,
+        "PPts!TRUE TOTAL": 6.338004626124446
+      },
+      "expected_outputs": {
+        "goal_xpts_if_start": 2.8405657000242286,
+        "assist_xpts_if_start": 0.36238061605735683,
+        "start_probability": 0.9444444444444444,
+        "note": "Independently hand-recomputed goal component: (MODEL!8 / MODEL!Goal) * VS_xGC_90_LA * MODEL!Goal = (2.9665818595025777/4)*0.9575214285509455*4 = 2.8405657000242286, matching cache exactly (see independent_calculation_checks). Haaland's elite LF xG/St (0.74, i.e. ~0.74 expected goals per start-equivalent) dominates his xPts-if-start figure; his assist rate is comparatively low (0.09 xA/St), correctly reflecting a poacher profile."
+      }
+    },
+    {
+      "label": "high_output_midfielder",
+      "player_code": 244851,
+      "player_name": "Cole Palmer",
+      "web_name": "Palmer",
+      "team": "CHE",
+      "position": "MID",
+      "sheet_refs": { "MODEL_row": 157, "PPts_row_GW1": 157 },
+      "inputs": {
+        "MODEL!PS Starts": 24,
+        "MODEL!PS Mn/St": 79,
+        "MODEL!LF G+A Mins": 1954,
+        "MODEL!LF xA": 2.49,
+        "MODEL!LF xG": 10.55,
+        "MODEL!SF Mins": 448,
+        "MODEL!SF xA": 0.3900000000000001,
+        "MODEL!SF xG": 1.6800000000000015,
+        "MODEL!Goal (positional pts, MID)": 5,
+        "PPts!VS": "ful",
+        "PPts!H/A": 0.95,
+        "PPts!VS xGC/90/LA": 1.0569143460169708
+      },
+      "cached_intermediate_values": {
+        "MODEL!LF xA/St": 0.10067041965199591,
+        "MODEL!LF xG/St": 0.4265353121801433,
+        "MODEL!SF xA/St": 0.06877232142857145,
+        "MODEL!SF xG/St": 0.29625000000000024,
+        "MODEL!7": 0.2828724000219331,
+        "MODEL!8": 2.0023912487205733,
+        "PPts!AB LFxSF xA/St": 0.09429080000731103,
+        "PPts!AC LFxSF xA/St X": 0.09965729922514413,
+        "PPts!AD FA BOOST": 0.13952021891520178,
+        "PPts!AF '7'": 0.41856065674560533,
+        "PPts!AG LFxSF xG/St": 0.40047824974411467,
+        "PPts!AH LFxSF xG/St X": 0.42327120742232205,
+        "PPts!AJ '8'": 2.1163560371116104,
+        "PPts!Start %": 0.8888888888888888,
+        "PPts!IF NOT START TOTAL": 1.1179593862046653,
+        "PPts!IF START TOTAL": 4.788238375470277,
+        "PPts!TRUE TOTAL": 4.435440935628516
+      },
+      "expected_outputs": {
+        "goal_xpts_if_start": 2.1163560371116104,
+        "assist_xpts_if_start": 0.41856065674560533,
+        "start_probability": 0.8888888888888888,
+        "note": "Chosen over Saka for the 'high-output midfielder' slot because Saka is reused as the manual-override case; Palmer has both a strong goal rate (LF xG/St=0.43) and a strong assist rate (LF xA/St=0.10) with no manual override, an away fixture (H/A=0.95), and a below-average-difficulty opponent (VS xGC/90/LA=1.057, i.e. Fulham concede slightly more than league average), giving a clean unadjusted case."
+      }
+    },
+    {
+      "label": "manual_start_override_midfielder",
+      "player_code": 223340,
+      "player_name": "Bukayo Saka",
+      "web_name": "Saka",
+      "team": "ARS",
+      "position": "MID",
+      "sheet_refs": { "MODEL_row": 13, "PPts_row_GW1": 13, "PREDICT_row": 24 },
+      "inputs": {
+        "MODEL!PS Starts": 25,
+        "MODEL!LF G+A Mins": 2218,
+        "MODEL!LF xA": 7.16,
+        "MODEL!LF xG": 7.57,
+        "MODEL!SF Mins": 223,
+        "MODEL!SF xA": 1.4100000000000001,
+        "MODEL!SF xG": 0.5800000000000001,
+        "MODEL!Goal (positional pts, MID)": 5,
+        "PREDICT!Manual Start %": 0.6,
+        "PPts!VS": "COV",
+        "PPts!H/A": 1.05,
+        "PPts!VS xGC/90/LA": 1.0439184094839085
+      },
+      "cached_intermediate_values": {
+        "MODEL!LF xA/St": 0.26470694319206495,
+        "MODEL!LF xG/St": 0.27986474301172226,
+        "MODEL!SF xA/St": 0.51847533632287,
+        "MODEL!SF xG/St": 0.21327354260089687,
+        "MODEL!7": 0.946381865454678,
+        "MODEL!8": 1.3327325146477857,
+        "PPts!AB LFxSF xA/St": 0.315460621818226,
+        "PPts!AC LFxSF xA/St X": 0.3293151505832872,
+        "PPts!AD FA BOOST": 0.46104121081660204,
+        "PPts!AF '7'": 1.3831236324498062,
+        "PPts!AG LFxSF xG/St": 0.26654650292955717,
+        "PPts!AH LFxSF xG/St X": 0.27825280139172126,
+        "PPts!AJ '8'": 1.3912640069586062,
+        "PPts!M Start %": 0.6,
+        "PPts!MODEL 1": 0.9590625,
+        "PPts!T1": 0.983625,
+        "PPts!Start %": 0.6,
+        "PPts!IF NOT START TOTAL": 1.1934895042351927,
+        "PPts!IF START TOTAL": 6.284704851210814,
+        "PPts!TRUE TOTAL": 4.674894752505269
+      },
+      "expected_outputs": {
+        "goal_xpts_if_start": 1.3912640069586062,
+        "assist_xpts_if_start": 1.3831236324498062,
+        "start_probability_used_for_goal_assist_weighting": 0.6,
+        "note": "MATERIALITY CHECK: the manual Start % override (0.6, vs Saka's historical-rate-derived BB!PSxTS Starts/Squads Made of 0.78125) materially changes the weighting BETWEEN the start-branch and not-start-branch goal/assist contributions in TRUE TOTAL (BI uses BH!Start%=0.6 directly, not BB=0.78125). It does NOT change the goal/assist RATE components themselves (AF, AJ, and everything upstream of them are entirely unaffected by M Start % -- confirmed by formula-string search, see how_components_feed_totals). The override's effect on goals/assists is entirely mediated through BI's blending weight, same mechanism as its effect documented for T1 in the appearance extraction, but note T1/BE plays NO role in the goal/assist columns -- T1 only affects the '1' (appearance) component's own contribution."
+      }
+    },
+    {
+      "label": "attacking_defender",
+      "player_code": 226597,
+      "player_name": "Gabriel dos Santos Magalh\u00e3es",
+      "web_name": "Gabriel",
+      "team": "ARS",
+      "position": "DEF",
+      "sheet_refs": { "MODEL_row": 5, "PPts_row_GW1": 5 },
+      "inputs": {
+        "MODEL!PS Starts": 30,
+        "MODEL!PS Mn/St": 90,
+        "MODEL!LF G+A Mins": 2750,
+        "MODEL!LF xA": 1.75,
+        "MODEL!LF xG": 2.94,
+        "MODEL!SF Mins": 495,
+        "MODEL!SF xA": 0.09000000000000008,
+        "MODEL!SF xG": 0.96,
+        "MODEL!Goal (positional pts, DEF)": 6,
+        "PPts!VS": "COV",
+        "PPts!H/A": 1.05,
+        "PPts!VS xGC/90/LA": 1.0439184094839085
+      },
+      "cached_intermediate_values": {
+        "MODEL!LF xA/St": 0.057272727272727274,
+        "MODEL!LF xG/St": 0.09621818181818181,
+        "MODEL!SF xA/St": 0.01636363636363638,
+        "MODEL!SF xG/St": 0.17454545454545453,
+        "MODEL!7": 0.14727272727272728,
+        "MODEL!8": 0.6713018181818181,
+        "PPts!AB LFxSF xA/St": 0.049090909090909095,
+        "PPts!AC LFxSF xA/St X": 0.051246903738300965,
+        "PPts!AD FA BOOST": 0.07174566523362134,
+        "PPts!AF '7'": 0.21523699570086402,
+        "PPts!AG LFxSF xG/St": 0.11188363636363635,
+        "PPts!AH LFxSF xG/St X": 0.11679738772000324,
+        "PPts!AJ '8'": 0.7007843263200194,
+        "PPts!Start %": 0.9375,
+        "PPts!IF NOT START TOTAL": 0.6960374584826476,
+        "PPts!IF START TOTAL": 6.976585686529088,
+        "PPts!TRUE TOTAL": 6.641351539333944
+      },
+      "expected_outputs": {
+        "goal_xpts_if_start": 0.7007843263200194,
+        "assist_xpts_if_start": 0.21523699570086402,
+        "start_probability": 0.9375,
+        "note": "Independently hand-recomputed assist component: (MODEL!7/3)*VS_xGC_90_LA*(1+B65)*3 = (0.14727272727272728/3)*1.0439184094839085*1.4*3 = 0.21523699570086402, matching cache exactly (see independent_calculation_checks). Gabriel's DEF-position 6-points-per-goal multiplier makes his modest LF xG/St (0.096) worth nearly as much per-goal-chance as a MID's higher xG/St at 5pts/goal -- illustrates the positional-points effect distinctly from the underlying attacking output."
+      }
+    },
+    {
+      "label": "rotation_prone_substitute",
+      "player_code": 223541,
+      "player_name": "Federico Chiesa",
+      "web_name": "Chiesa",
+      "team": "LIV",
+      "position": "MID",
+      "sheet_refs": { "MODEL_row": 379, "PPts_row_GW1": 379 },
+      "inputs": {
+        "MODEL!PS Starts": 1,
+        "MODEL!PS Subs": 25,
+        "MODEL!PS UnSub": 10,
+        "MODEL!LF G+A Mins": 317,
+        "MODEL!LF xA": 0.61,
+        "MODEL!LF xG": 1.45,
+        "MODEL!SF Mins": 40,
+        "MODEL!SF xA": 0,
+        "MODEL!SF xG": 0.08999999999999986,
+        "MODEL!G+A PSxTS Mn/Start": 0.6666666666666666,
+        "MODEL!G+A PSxTS Mn/Sub": 0.12222222222222222,
+        "MODEL!Goal (positional pts, MID)": 5,
+        "PPts!VS": "new",
+        "PPts!H/A": 0.95,
+        "PPts!VS xGC/90/LA": 1.007453034982522
+      },
+      "cached_intermediate_values": {
+        "MODEL!LF xA/St": 0.11545741324921135,
+        "MODEL!LF xG/St": 0.27444794952681384,
+        "MODEL!SF xA/St": 0,
+        "MODEL!SF xG/St": 0.1349999999999998,
+        "MODEL!7": 0.2770977917981073,
+        "MODEL!8": 1.2327917981072551,
+        "PPts!AB LFxSF xA/St": 0.0923659305993691,
+        "PPts!AC LFxSF xA/St X": 0.09305433711131939,
+        "PPts!AD FA BOOST": 0.13027607195584714,
+        "PPts!AF '7'": 0.39082821586754146,
+        "PPts!AG LFxSF xG/St": 0.24655835962145103,
+        "PPts!AH LFxSF xG/St X": 0.24839596770094294,
+        "PPts!AJ '8'": 1.2419798385047147,
+        "PPts!PSxTS Mn/Sub / Mn/St (BF)": 0.18333333333333335,
+        "PPts!Start %": 0.027777777777777776,
+        "PPts!IF NOT START TOTAL (BG)": 0.27427072571066713,
+        "PPts!full component sum (cols 2..11)": 2.3078739029653423,
+        "PPts!IF START TOTAL": 3.142480207817075,
+        "PPts!TRUE TOTAL": 0.9934717177137987
+      },
+      "expected_outputs": {
+        "goal_xpts_if_start": 1.2419798385047147,
+        "assist_xpts_if_start": 0.39082821586754146,
+        "start_probability": 0.027777777777777776,
+        "true_total_xpts": 0.9934717177137987,
+        "note": "PRIMARY rotation/substitute case. Independently hand-recomputed TRUE TOTAL end-to-end (T1 + sum(2..11)*Start% + BG*(1-Start%)) * H/A = (0.715 + 2.3078739029653423*0.027777777777777776 + 0.27427072571066713*0.9722222222222222) * 0.95 = 0.9934717177137987, matching cache exactly (see independent_calculation_checks). Also independently verified BG = (sum of cols 4,5,6,7,8,10) * BF * H/A = 1.5747601476210553 * 0.18333333333333335 * 0.95 = 0.27427072571066713. Chiesa's goal/assist rates (AJ=1.24, AF=0.39) are individually large relative to his rare-starter profile, but his near-zero Start% (0.0278) means the START-branch value of those rates barely matters -- almost all of his final TRUE TOTAL comes from the not-start branch, where AJ/AF are scaled down by BF=0.183 (his cameo-to-start minutes ratio) before being weighted by (1-Start%)=0.972."
+      }
+    },
+    {
+      "label": "zero_attacking_output_control",
+      "player_code": 216616,
+      "player_name": "Dara O'Shea",
+      "web_name": "O'Shea",
+      "team": "IPS",
+      "position": "DEF",
+      "sheet_refs": { "MODEL_row": 311, "PPts_row_GW1": 311 },
+      "inputs": {
+        "MODEL!PS Starts": 46,
+        "MODEL!PS Subs": 0,
+        "MODEL!PS UnSub": 0,
+        "MODEL!PS A": 0,
+        "MODEL!PS xA": 0,
+        "MODEL!LF G+A Mins": 0,
+        "MODEL!LF xA": 0,
+        "MODEL!LF xG": 0,
+        "MODEL!LF Pl": 0,
+        "MODEL!SF Mins": 0,
+        "MODEL!SF xA": 0,
+        "MODEL!SF xG": 0,
+        "MODEL!SF Pl": 0,
+        "MODEL!Goal (positional pts, DEF)": 6,
+        "PPts!VS": "SUN",
+        "PPts!H/A": 1.05,
+        "PPts!VS xGC/90/LA": 1.0526472755845
+      },
+      "cached_intermediate_values": {
+        "MODEL!LF xA/St": 0,
+        "MODEL!LF xG/St": 0,
+        "MODEL!SF xA/St": 0,
+        "MODEL!SF xG/St": 0,
+        "MODEL!7": 0,
+        "MODEL!8": 0,
+        "PPts!AB LFxSF xA/St": 0,
+        "PPts!AC LFxSF xA/St X": 0,
+        "PPts!AD FA BOOST": 0,
+        "PPts!AF '7'": 0,
+        "PPts!AG LFxSF xG/St": 0,
+        "PPts!AH LFxSF xG/St X": 0,
+        "PPts!AJ '8'": 0,
+        "PPts!Start %": 1,
+        "PPts!IF NOT START TOTAL": 0.014452356492414543,
+        "PPts!IF START TOTAL": 3.5759602876351573,
+        "PPts!TRUE TOTAL": 3.5654602876351578,
+        "note_on_LF_G+A_Mins_zero": "MODEL!LF G+A Mins=0 for O'Shea despite 46 previous-season starts (90 min each, i.e. real minutes clearly exist in PT/PSPT/MINS). This means the MINS pivot-table sheet's row for O'Shea's PT-CODE-ROW-MATCH returned 0 for this GW-window sum -- either a genuine data gap in the MINS sheet for this player (e.g. Championship-level minutes not tracked the same way as Premier League) or a name-match failure in PT CODE ROW MATCH. NOT resolved by this extraction -- see spreadsheet_quirks.zero_output_may_be_data_gap_not_zero_rate."
+      },
+      "expected_outputs": {
+        "goal_xpts_if_start": 0.0,
+        "assist_xpts_if_start": 0.0,
+        "note": "IFERROR(0/0,0) -> 0 division-fallback branch confirmed exercised throughout the entire chain (LF xA/St through PPts!8) for a player whose windowed minutes AND windowed xG/xA are both exactly zero. Every division in the formula_map (xA/Mins, xG/Mins, MODEL!8/MODEL!Goal) resolves to Excel's #DIV/0! before being caught by IFERROR and floored to 0, rather than producing a NaN/error that propagates. Confirms modelling question about division fallbacks: EVERY windowed-rate formula in the goal/assist chain is IFERROR-wrapped with a 0 fallback; only PPts!AG (LFxSF xG/St) and PPts!AI/DT (Goal position lookup) among the PPts-side formulas are similarly wrapped -- PPts!AB, AC, AD, AF, AH, AJ have NO IFERROR wrapper of their own, but never need one in practice since their only division (AB) reads a MODEL-side value that is already IFERROR-floored to 0."
+      }
+    }
+  ],
+  "independent_calculation_checks": [
+    {
+      "id": "goal_component_haaland",
+      "target": "PPts!AJ '8' (goal xPts if start) for Erling Haaland",
+      "formula_recomputed": "AG = MODEL!8 / MODEL!Goal; AH = AG * VS_xGC_90_LA; AJ = AH * MODEL!Goal (== PPts!Goal, same lookup)",
+      "inputs_used": { "MODEL!8": 2.9665818595025777, "MODEL!Goal": 4, "VS_xGC_90_LA": 0.9575214285509455 },
+      "computed_value": 2.8405657000242286,
+      "cached_value": 2.8405657000242286,
+      "match": "EXACT (full float precision, verified via direct float equality after recomputation in Python)"
+    },
+    {
+      "id": "assist_component_gabriel",
+      "target": "PPts!AF '7' (assist xPts if start) for Gabriel",
+      "formula_recomputed": "AB = MODEL!7 / 3; AC = AB * VS_xGC_90_LA; AD = AC * (1 + B65); AF = AD * 3",
+      "inputs_used": { "MODEL!7": 0.14727272727272728, "VS_xGC_90_LA": 1.0439184094839085, "B65": 0.4 },
+      "computed_value": 0.21523699570086402,
+      "cached_value": 0.21523699570086402,
+      "match": "EXACT (full float precision)"
+    },
+    {
+      "id": "rotation_case_chiesa_true_total",
+      "target": "PPts!BI TRUE TOTAL for Federico Chiesa (rotation/substitute case)",
+      "formula_recomputed": "BG_check = (col4+col5+col6+col7+col8+col10) * BF * H/A; BI = (T1 + sum(cols2..11)*Start% + BG*(1-Start%)) * H/A",
+      "inputs_used": {
+        "T1": 0.715,
+        "sum_cols_2_to_11": 2.3078739029653423,
+        "Start_pct": 0.027777777777777776,
+        "BG_rate_scalable_sum_4_5_6_7_8_10": 1.5747601476210553,
+        "BF": 0.18333333333333335,
+        "H_A": 0.95
+      },
+      "computed_value_BG": 0.27427072571066713,
+      "cached_value_BG": 0.27427072571066713,
+      "computed_value_BI": 0.9934717177137987,
+      "cached_value_BI": 0.9934717177137987,
+      "match": "EXACT for both BG and BI (full float precision)"
+    }
+  ],
+  "warnings": [
+    {
+      "type": "cache_staleness_risk",
+      "detail": "Same caveat as the appearance extraction: MODEL.xlsx has calculation.fullCalcOnLoad=True; values here are openpyxl's last-saved cache, read without opening/recalculating in Excel. Workbook file size/mtime/ctime confirmed unchanged from the prior appearance-extraction session, so both extractions read the identical saved state."
+    },
+    {
+      "type": "preseason_state",
+      "detail": "All LF/SF/blend weights relevant to goals/assists (B59/B60, B62/B63, B97/B98, B110/B111) are currently at their 'fully previous-season / fully long-form' effective values in the sense that this-season API assist/xA data is all zero (preseason). Unlike the appearance block, note that B59/B60 (LF/SF blend) and B97/B98 (fixture LF/SF blend) are NOT 1/0 -- they are a genuine 0.8/0.2 blend between two windows that are BOTH drawn from previous-season data right now (the 'short form' window is just the last 6 GWs of last season, not a because-preseason fallback). This is a materially different mechanism from the appearance block's B8/B9 100/0 split and should not be conflated with it in a Python port."
+    },
+    {
+      "type": "scan_coverage",
+      "detail": "MODEL rows 2-800 (799 data rows) scanned for the goal/assist-relevant columns listed in extraction_scope; zero None/error/stale values found among the 7 golden-case rows or the wider scan used to select them. xG/xA/PL/MINS/TABLES pivot-table sheets were inspected for structure only (header rows, a handful of spot-checked formulas), not exhaustively audited row-by-row."
+    },
+    {
+      "type": "dead_end_columns_not_further_traced",
+      "detail": "MODEL!PS A, PS A/St, PS xA, PS xA/St, A, A/St, xA, xA/St (8 columns) were confirmed to have zero downstream references anywhere in MODEL or PPts row-2 formulas, via exhaustive string search. This extraction does not claim these columns are used nowhere in the entire workbook (e.g. a pivot chart, a manually-typed cell reference elsewhere, or a different sheet not audited in this pass) -- only that they play no role in the appearance-to-goal/assist-to-TRUE-TOTAL calculation chain that was traced."
+    }
+  ],
+  "spreadsheet_quirks": [
+    {
+      "id": "dead_end_ps_a_and_this_season_a",
+      "title": "Two full parallel assist/xA computations (raw-count based) exist but are never used",
+      "detail": "MODEL!PS A/PS A/St and MODEL!A/A/St (raw assist counts from PSAPI/API) plus MODEL!PS xA/PS xA/St and MODEL!xA/xA/St (season-total xA from PSAPI/API) are fully computed, formula-driven columns that are never referenced by any other formula in the workbook. The LIVE goal/assist pipeline instead runs entirely through LF xA / LF xG / SF xA / SF xG (rolling-window sums from the dedicated xA/xG pivot-table sheets). This strongly suggests the season-total columns are either a legacy/superseded approach kept for reference, or a manual cross-check a human analyst reads visually but that no formula depends on. Not a bug per se (doesn't affect any cached number), but a maintenance/clarity smell worth flagging: a future spreadsheet edit to CONTROL weights intended to affect 'the assist model' could silently do nothing if applied to the wrong parallel column family."
+    },
+    {
+      "id": "mn_st_blend_weight_duplication",
+      "title": "Goals/assists use a separate Mn/St blend weight pair (B62/B63) from appearance's B8/B9, currently identical but independently editable",
+      "detail": "The appearance extraction documented CONTROL!B8/B9 (1-60 min blend) and B19/B20 (60+ min blend). This extraction found a THIRD pair, B62/B63 ('Mins/Start Previous Season' / 'This Season'), used exclusively by the goal/assist minutes-scaling columns (MODEL!AK, AL, and inline in BO/BQ/CE/CG). All three pairs currently hold the same 1/0 value, which could easily be mistaken for a single shared knob. They are not: changing B8/B9 alone (e.g. to model in-season blending for appearance) would NOT affect the goal/assist rate scaling, and vice versa. A Python port must expose these as genuinely independent parameters, not a single shared 'previous vs current season weight'."
+    },
+    {
+      "id": "fantasy_assist_boost_has_no_goal_counterpart",
+      "title": "The +40% Fantasy Assist Boost applies only to assists, with no equivalent constant for goals",
+      "detail": "PPts!AD (FA BOOST) multiplies the fixture-adjusted assist rate by (1 + CONTROL!B65 = 1.4) before the final *3-points multiplication. No analogous boost/multiplier exists anywhere in the goal chain (PPts!AH -> AJ goes straight from fixture-adjustment to the final positional-points multiplication). This is very likely intentional (assists may be systematically under-predicted by pure xA in the source data, motivating a deliberate correction), but CONTROL!B65's label ('Fantasy Assist Boost') gives no quantitative justification for the specific value 0.4, and there is no parallel 'Fantasy Goal Boost' cell to compare against. Flagged as an intentional-looking asymmetry whose magnitude is unexplained."
+    },
+    {
+      "id": "redundant_multiply_divide_round_trip",
+      "title": "MODEL!7/MODEL!8 are pre-multiplied by points constants, then PPts!AB/AG immediately divide them back out",
+      "detail": "MODEL!DS ('7') = blended xA/St * 3 (points-per-assist). PPts!AB immediately computes MODEL[7]/3, recovering the original rate before any other calculation happens to it. Likewise MODEL!DW ('8') = blended xG/St * positional-goal-points, and PPts!AG immediately divides by MODEL!Goal to recover the rate. Within the goal/assist chain itself these operations are mathematically inert (multiply-then-divide-by-the-same-value cancels exactly, confirmed by the exact-match independent recomputations above). This is consistent with MODEL!7/8 being deliberately pre-scaled to points for use as a STANDALONE display/summary figure elsewhere in the workbook (the MODEL sheet is likely read directly by a human analyst, where seeing point values in columns literally labelled '7'/'8' aligned with the FPL 11-component scoring breakdown is more useful than raw rates), with PPts re-deriving the rate for its own fixture-adjustment pipeline. Not verified against a specific consuming formula elsewhere (out of scope), so recorded as a probable-benign quirk, not a confirmed one."
+    },
+    {
+      "id": "v_vs_w_transformation_asymmetry",
+      "title": "The two 'opponent relative to league average' columns (V and W) use different transformation shapes",
+      "detail": "PPts!V (VS xG/90/LA, opponent attacking strength) = 1 + (1 - ratio) -- an inverted, mirrored-around-1 transformation. PPts!W (VS xGC/90/LA, opponent defensive weakness) = ratio, plain division, no inversion. V feeds only the Bonus component (column Y); W feeds both goals and assists (AC, AH) as well as, presumably, clean-sheet-adjacent components (out of scope). Since goals/assists use W exclusively, this asymmetry does not directly affect the goal/assist chain's correctness, but it does mean a Python port that tries to build one generic 'fixture adjustment factor' function for both bonus and goals/assists would need two different transformation branches, not one parameterized formula. Not explained anywhere in CONTROL; flagged as an ambiguity."
+    },
+    {
+      "id": "zero_output_may_be_data_gap_not_zero_rate",
+      "title": "O'Shea's LF/SF G+A Mins are exactly 0 despite 46 real previous-season starts, suggesting a possible data-matching gap rather than a genuine zero attacking-output rate",
+      "detail": "O'Shea's MODEL!PS Starts=46 (from PSPT, i.e. the appearance-tracking source) but MODEL!LF G+A Mins=0 and MODEL!LF Pl=0 (from the MINS/PL pivot-table sheets, via PT CODE ROW MATCH). Since O'Shea plainly played meaningful previous-season minutes, a true zero in the MINS pivot table for his PT-CODE-ROW-MATCH row implies either (a) his Understat/underlying-data-provider code genuinely has no minutes on record for a lower-tier competition not covered by that data source, or (b) the PT CODE ROW MATCH lookup failed to find his row and IFERROR silently floored the SUM to 0. This extraction cannot distinguish between these two explanations without inspecting the MINS sheet's raw player-code index directly (out of scope). Practically, this means MODEL!8=0 and MODEL!7=0 for O'Shea could represent either 'this player has a genuinely negligible attacking role' (plausible for a centre-back) or 'this player's goal/assist rate is simply unmeasured, defaulting to zero by IFERROR fallback rather than by evidence' -- these have very different modelling implications and are indistinguishable from the PPts/MODEL sheets alone."
+    },
+    {
+      "id": "ha_double_application_extends_to_goals_assists",
+      "title": "The H/A-applied-twice quirk (documented for the appearance extraction) mechanically includes goals and assists whenever Start% < 1",
+      "detail": "This is not a new quirk but an explicit confirmation that the previously-documented H/A double-application on PPts!BG (IF NOT START TOTAL) applies to the goal ('8') and assist ('7') components specifically, since both are among BG's summed columns (4,5,6,7,8,10). Verified end-to-end on Chiesa (rotation_prone_substitute golden case): his goal and assist rates flow through BG, which bakes in one H/A factor, then BI's outer multiplication applies a second one to the whole blended total. The magnitude of the overstatement scales with (1-Start%) and with how large a share of BG comes from goals/assists specifically -- for a heavy-rotation attacking player like Chiesa, goals/assists ARE the dominant contributors to BG (columns 7+8 = 0.39+1.24 = 1.63 out of a rate-scalable-sum of 1.57 -- note columns 4,5,6,10 are small/negative for this player), so this quirk has real, non-negligible magnitude specifically for rotation-prone attacking players, more so than for the appearance-only components discussed in the prior extraction."
+    }
+  ],
+  "unresolved_ambiguities": [
+    {
+      "id": "why_ha_uses_negative_of_upper_string",
+      "note": "Not goal/assist-specific (documented in the appearance extraction) but re-confirmed present in the fixture columns used here (PPts!Q, AZ)."
+    },
+    {
+      "id": "why_v_and_w_use_different_transformation_shapes",
+      "note": "See spreadsheet_quirks.v_vs_w_transformation_asymmetry. Not resolved -- no comment or CONTROL documentation explains why bonus uses an inverted-around-1 transform while goals/assists/CS use a plain ratio."
+    },
+    {
+      "id": "why_fantasy_assist_boost_has_no_goal_equivalent",
+      "note": "See spreadsheet_quirks.fantasy_assist_boost_has_no_goal_counterpart. The 0.4 magnitude and its assist-only scope are unexplained by any CONTROL comment or nearby formula."
+    },
+    {
+      "id": "whether_model_7_and_8_are_consumed_elsewhere_as_points_values",
+      "note": "See spreadsheet_quirks.redundant_multiply_divide_round_trip. Whether MODEL!7/8's points-scaled form is read directly by some other part of the workbook (a chart, a summary sheet, a different PPts-like consumer not audited here) was not verified -- only that within the traced chain the *pts/divide-by-pts round trip is a no-op."
+    },
+    {
+      "id": "oshea_zero_output_data_gap_vs_genuine",
+      "note": "See spreadsheet_quirks.zero_output_may_be_data_gap_not_zero_rate. Requires inspecting the MINS/xG/xA/PL sheets' raw row index for O'Shea's specific PT-CODE-ROW-MATCH value to resolve, which was out of scope for this extraction."
+    },
+    {
+      "id": "why_goal_lookup_uses_nested_if_not_index_match",
+      "note": "MODEL!DT and PPts!AI both use a 4-way nested IF to look up positional goal points, despite CONTROL!B197:D201 being laid out as a proper lookup table that an INDEX/MATCH (as used for almost every other lookup in this workbook) could read directly. Purely a style inconsistency as far as this extraction can tell -- both approaches are verified to produce identical cached values for all 4 positions represented in the golden cases -- but flagged since a Python port should decide once whether to hardcode the FPL 6/5/4/... table or make it data-driven, rather than mirroring the spreadsheet's inconsistency."
+    }
+  ]
+}

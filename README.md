@@ -119,8 +119,8 @@ See `THIRD_PARTY_NOTICES.md`.
 - [ ] Canonical player ID bridge across providers
 
 ### Sprint 2 — Benchwarmers baseline
-- [ ] Reproduce appearance/start/minutes logic
-- [ ] Goal / assist components
+- [x] Reproduce appearance/start/minutes logic
+- [x] Goal / assist components
 - [ ] Clean sheet / goals-conceded components
 - [ ] Saves / cards / bonus / DefCon
 - [ ] Fixture and home-away adjustments

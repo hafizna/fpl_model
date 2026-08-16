@@ -129,3 +129,25 @@ Known spreadsheet wiring quirks are research references, not baseline behavior. 
 Python component does not copy the `T1` manual-start point boost or the double application of the
 home/away multiplier on the non-start branch. Those choices are locked by golden tests so that any
 future exact-compatibility mode would need to be explicit and isolated.
+
+### Goal/assist foundation
+
+The goal/assist reference extraction lives in
+`docs/research/benchwarmers_goals_assists_reference.json`. The Python component preserves the live
+workbook path:
+
+1. convert long-form and short-form xG/xA totals to per-90 rates using minutes actually played;
+2. rescale those rates by the expected fraction of a match played when starting;
+3. blend the long and short windows;
+4. apply the opponent's defensive xGC rate relative to league average;
+5. convert contributions to FPL points, including positional goal scoring and the explicit
+   workbook assist boost.
+
+The rate stage remains conditional on starting and contains no appearance probability. A separate
+exposure step converts it to unconditional xPts using
+`P(start) + P(substitute appearance) * substitute/start minutes ratio`.
+
+This deliberately differs from the spreadsheet's final not-start branch, which uses
+`1 - P(start)` and therefore treats genuine absences as substitute cameos. Home/away adjustment is
+also excluded from this component so it can be introduced once, in the dedicated fixture layer,
+instead of inheriting the spreadsheet's double-application bug.
