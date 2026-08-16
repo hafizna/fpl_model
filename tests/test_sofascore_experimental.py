@@ -71,6 +71,35 @@ def test_discovers_team_event_from_daily_schedule():
     assert [event["id"] for event in events] == [101]
 
 
+def test_flattens_match_level_average_positions():
+    client = client_with(
+        {
+            "event/101/average-positions": DummyResponse(
+                {
+                    "home": [
+                        {
+                            "player": {
+                                "id": 9001,
+                                "name": "Example Wing Back",
+                                "shortName": "E. Wing Back",
+                                "position": "D",
+                            },
+                            "averageX": 77,
+                            "averageY": 88,
+                        }
+                    ],
+                    "away": [],
+                }
+            )
+        }
+    )
+
+    positions = client.normalised_average_positions(101)
+    assert positions.loc[0, "sofascore_player_id"] == 9001
+    assert positions.loc[0, "normalised_x"] == pytest.approx(0.77)
+    assert positions.loc[0, "normalised_y"] == pytest.approx(0.88)
+
+
 def test_flattens_lineups_and_normalises_heatmap():
     client = client_with(
         {
