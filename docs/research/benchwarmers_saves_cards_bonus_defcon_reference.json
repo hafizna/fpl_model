@@ -1,0 +1,696 @@
+{
+  "$schema_note": "Reference-only extraction from the Benchwarmers 2026/27 spreadsheet model, covering saves, cards/disciplinary, bonus, and defensive-contribution (DefCon) expected-points logic. Read-only, formulas + cached values as of the timestamps below. This does not imply spreadsheet parity is implemented in Python. No Python code was written or modified to produce this file.",
+  "extraction_date": "2026-08-18",
+  "extraction_scope": {
+    "in_scope": [
+      "MODEL sheet: saves (CZ:DC), cards (DD:DK), bonus (DL:DO), DefCon (BY:CB, CN:CQ, EF:EI) columns",
+      "PPts sheet: saves (L:N), cards (O:P), bonus (X:AA), DefCon (AS:AX) columns and how they feed AY/BA/BG/BI",
+      "CONTROL sheet assumptions referenced by the above (B25/B26, B31/B32, B37/B38, B43/B44/B45/B46/B48/B49/B51/B52, B62/B63 reused, B86/B87, B89/B90, F198:F201)",
+      "DC, FDRDC, PT, PSPT, API, PSAPI, PTS, TABLES, TABLE, PSTABLE, MINS, PL sheets (structure and formulas for source events, windows, and any fixture/league-average adjustment)",
+      "Search for penalty-saves, penalty-misses, and own-goals handling across MODEL/PPts",
+      "Dead-pipeline and dead-sheet identification (FDRDC, PTS, DCSCORE-adjacent AS/AT/AU)",
+      "Lookahead audit of the DefCon LF/SF rolling-window offset arithmetic (CONTROL!B83/B84 and their C/D/E offset formulas)"
+    ],
+    "out_of_scope": [
+      "Appearance, goal/assist, clean-sheet/goals-conceded components except where needed to show shared formulas (PPts!BA/BG/BI) or shared CONTROL blocks",
+      "Full row-by-row audit of the DC/PL/MINS pivot tables beyond the promoted-team and missing-join spot checks performed",
+      "Resolving the exact cell range or Excel Table definition behind the 'DCSCORE' structured-table reference (confirmed unused downstream, so not pursued further)",
+      "Any change to src/fpl_model or tests"
+    ],
+    "reused_findings": "The appearance/start-probability formula map (PPts!BA:BI structural formulas), the goal/assist fixture-adjustment mechanism, and the clean-sheet/goals-conceded Poisson mechanism were already extracted in the three prior reference JSONs and are not re-derived from scratch here; this file cross-references them and adds only the saves/cards/bonus/DefCon-specific columns and their upstream sources."
+  },
+  "workbooks": {
+    "MODEL.xlsx": {
+      "path": "C:\\Users\\hafizna.fadhli\\Downloads\\MODEL.xlsx",
+      "size_bytes": 71300490,
+      "mtime_iso": "2026-08-16T21:40:30.440420",
+      "note": "Timestamp unchanged from all three prior extraction sessions, confirming the workbook has not been modified in between.",
+      "role": "Primary source for MODEL, PPts, CONTROL, DC, FDRDC, PT, PSPT, API, PSAPI, PTS, TABLES, TABLE, PSTABLE, MINS, PL sheet formulas used in this extraction."
+    },
+    "SOLVER.xlsx": {
+      "path": "C:\\Users\\hafizna.fadhli\\Downloads\\SOLVER.xlsx",
+      "size_bytes": 200650,
+      "mtime_iso": "2026-08-16T21:38:21.005117",
+      "role": "Downstream squad-optimizer workbook. Not a source of saves/cards/bonus/DefCon formulas; not used in this extraction."
+    },
+    "SIMPLE MODEL.xlsx": {
+      "path": "C:\\Users\\hafizna.fadhli\\Downloads\\SIMPLE MODEL.xlsx",
+      "size_bytes": 946907,
+      "mtime_iso": "2026-08-16T21:38:20.417391",
+      "role": "Simplified/derivative workbook without the MODEL/PPts sheets. Not used in this extraction."
+    }
+  },
+  "component_number_map": {
+    "note": "Determined by reading MODEL row-1 headers directly above each numbered column, not assumed. Columns 1-2 (appearance/60-min) and 7-10 (assist/goal/CS/2+GC) were already mapped in prior extractions and are restated here only for completeness.",
+    "1": "Appearance (1-60 mins) -- see benchwarmers_appearance_reference.json",
+    "2": "60+ mins -- see benchwarmers_appearance_reference.json",
+    "3": "3x Saves (goalkeeper saves, '1 point per 3 saves' rate) -- THIS EXTRACTION",
+    "4": "Yellow Cards (YC, disciplinary) -- THIS EXTRACTION",
+    "5": "Red Cards (RC, disciplinary) -- THIS EXTRACTION",
+    "6": "Bonus Points -- THIS EXTRACTION",
+    "7": "Assist -- see benchwarmers_goals_assists_reference.json",
+    "8": "Goal -- see benchwarmers_goals_assists_reference.json",
+    "9": "Clean Sheet (CS) -- see benchwarmers_clean_sheets_goals_conceded_reference.json",
+    "10": "2+ Goals Conceded -- see benchwarmers_clean_sheets_goals_conceded_reference.json",
+    "11": "DC (Defensive Contributions / DefCon) -- THIS EXTRACTION",
+    "unaccounted_fpl_scoring_events": {
+      "penalty_saves": "NOT present in any numbered column or elsewhere in MODEL/PPts. API!BA (penalties_saved) exists as a raw data field but is never referenced by any formula in MODEL or PPts -- confirmed by exhaustive search.",
+      "penalty_misses": "NOT present anywhere. API!BB (penalties_missed) exists as a raw field but is never referenced.",
+      "own_goals": "NOT present anywhere. API!AZ (own_goals) exists as a raw field but is never referenced.",
+      "conclusion": "All three of these real FPL scoring events (penalty save +5, penalty miss -2, own goal -2) are structurally absent from the entire 1-11 component chain. The workbook does not fold them into saves, cards, or any other column -- they are simply not modelled."
+    }
+  },
+  "control_assumptions": [
+    {
+      "cells": ["B25", "B26"],
+      "label": "3x Saves: Previous Season vs This Season weight",
+      "formula": "B26 = 1-B25",
+      "cached_value": { "B25": 1, "B26": 0 },
+      "downstream_effect": "Blends MODEL!DA (PS %3 = PS Saves/90 / 3) and MODEL!DB (%3 = Saves/90 / 3) into MODEL!DC ('3'). Currently 100% previous-season, same preseason pattern as the appearance block.",
+      "independently_editable": true,
+      "independently_editable_note": "A distinct pair from every other Previous/This-Season weight documented across all four extractions (B8/B9, B19/B20, B31/B32, B37/B38, B51/B52, B62/B63, B72/B73, B78/B79, B86/B87, B89/B90, B97/B98, B110/B111 -- 12 total pairs now confirmed workbook-wide, all currently either 1/0 or 0.8/0.2, none linked to each other)."
+    },
+    {
+      "cells": ["B31", "B32"],
+      "label": "Yellow Cards: Previous Season vs This Season weight",
+      "formula": "B32 = 1-B31",
+      "cached_value": { "B31": 1, "B32": 0 },
+      "downstream_effect": "Blends MODEL!DE (PS %4 = PS YC/St) and MODEL!DF (%4 = YC/90) into MODEL!DG ('4'). NOTE: PS %4 is scaled by PS Mn/St% inside PS YC/St's own formula, but %4 (this-season YC/90) is NOT scaled by any minutes-per-start factor -- an asymmetry between the two inputs being blended here (see spreadsheet_quirks.yc_asymmetric_minutes_scaling).",
+      "independently_editable": true,
+      "independently_editable_note": "Distinct from B25/B26, B37/B38, and every other pair."
+    },
+    {
+      "cells": ["B37", "B38"],
+      "label": "Red Cards: Previous Season vs This Season weight",
+      "formula": "Both B37 and B38 are LITERAL VALUES, not a complementary pair (B38 is NOT '=1-B37')",
+      "cached_value": { "B37": 0, "B38": 0 },
+      "downstream_effect": "MODEL!DK ('5', red card points) = ((PS%5 * 0) + (0 * %5)) * RC(-3) = 0, UNCONDITIONALLY, for every player, regardless of their actual red-card history. This is the only weight pair anywhere in the four extractions where both weights are independently zero rather than summing to 1 -- see likely_bugs.red_card_component_disabled.",
+      "independently_editable": true,
+      "independently_editable_note": "Structurally different from every other pair (both cells are literals, not a formula-linked complement)."
+    },
+    {
+      "cells": ["B43", "B44", "B45", "B46", "B48", "B49", "B51", "B52"],
+      "label": "Bonus Points block: BPS/Bonus averages, filter threshold, Bonus-vs-BPS weight, Previous/This-Season weight",
+      "formula": "B45 = B44/B43; B49 = 1-B48; B52 = 1-B51",
+      "cached_value": {
+        "B43_Average_BPS_per_Start": 14.862318964622457,
+        "B44_Average_Bonus_per_Start": 0.29431670795024134,
+        "B45_Average_Bonus_per_BPS_per_Start": 0.019802879257995912,
+        "B46_Bonus_or_BPS_Starts_Filter": 5,
+        "B48_Bonus_weight": 1,
+        "B49_BPS_weight": 0,
+        "B51_Previous_Season_weight": 1,
+        "B52_This_Season_weight": 0
+      },
+      "downstream_effect": "B46 (=5) gates MODEL!DM/DN (PS %6, %6): a player with MORE than 5 previous-season starts uses their own Bonus/Start (blended with BPS/Start at B48/B49 weight, currently 100% Bonus/Start); a player with 5 OR FEWER starts falls back to using ONLY their own BPS/Start * the league-wide average Bonus-per-BPS ratio (B45), regardless of B48/B49. B43/B44 are themselves LEAGUE-WIDE AVERAGES computed once (not per-player), used both as this fallback multiplier's B45 input and, separately, as the CONTROL!$B$43/$B$44 IFERROR fallback constants inside MODEL!AC (PS BPS/Start) and MODEL!AD (PS Bonus/Start) when a player has zero previous-season starts.",
+      "independently_editable": true,
+      "independently_editable_note": "B48/B49 (Bonus-vs-BPS weight) and B51/B52 (Previous/This-Season weight) are two SEPARATE pairs governing different axes of the same blend, both currently 1/0."
+    },
+    {
+      "cells": ["B86", "B87"],
+      "label": "Defensive Contributions: Long Form vs Short Form weight",
+      "formula": "B87 = 1-B86",
+      "cached_value": { "B86": 1, "B87": 0 },
+      "downstream_effect": "Blends MODEL!EG (LF %11 = LF DC %) and MODEL!EH (SF %11 = SF DC %) into MODEL!EI ('11'). UNLIKE the goals/assists LF/SF weight (B59/B60=0.8/0.2, a genuine blend) or the fixture LF/SF weight (B97/B98=0.8/0.2), DefCon's own LF/SF blend is currently 100%/0% -- a THIRTEENTH distinct weight pair, degenerate like the appearance block's B8/B9 rather than a genuine blend like B59/B60.",
+      "independently_editable": true,
+      "independently_editable_note": "Distinct from B59/B60 (goals/assists LF/SF), B72/B73 (dead CS LF/SF), B78/B79 (dead 2+GC LF/SF), B97/B98 (fixture LF/SF) -- five LF/SF-labelled pairs now confirmed, three currently 0.8/0.2 and two (including this one) currently 1/0."
+    },
+    {
+      "cells": ["B89", "B90"],
+      "label": "Defensive Contributions: Mins/Start Previous Season vs This Season weight",
+      "formula": "B90 = 1-B89",
+      "cached_value": { "B89": 1, "B90": 0 },
+      "downstream_effect": "Used inside MODEL!CA/CP (LF/SF DC/St) to blend PS Mn/St% and this-season Mn/St% for the minutes-scaling factor multiplying the raw DCs-per-90 rate.",
+      "independently_editable": true,
+      "independently_editable_note": "A DISTINCT cell pair from B62/B63 (goals/assists and dead-CS Mins/Start weight), despite an identical current value and near-identical label ('Mins/Start Previous Season'/'This Season'). Confirmed by direct formula reference: MODEL!CA reads CONTROL!$B$89/$B$90, not $B$62/$B$63."
+    },
+    {
+      "cells": ["F198", "F199", "F200", "F201"],
+      "label": "FPL points awarded at the DefCon threshold, by position",
+      "cached_value": [
+        { "POS": "GK", "DC": 0 },
+        { "POS": "DEF", "DC": 2 },
+        { "POS": "MID", "DC": 2 },
+        { "POS": "FWD", "DC": 2 }
+      ],
+      "downstream_effect": "Looked up via nested IF in MODEL!EF and independently re-looked-up via nested IF in PPts!AW. GK=0 means goalkeepers are structurally excluded from ever earning DefCon points, matching the real DefCon rule's GK exclusion as represented by the workbook -- this extraction records the workbook's own encoded value only, per the instruction not to assert real-rule correctness beyond what the workbook itself represents.",
+      "independently_editable": true,
+      "independently_editable_note": "Same duplication pattern (nested IF in two places) already documented for CS/2+GC/Goal points in the prior extractions."
+    }
+  ],
+  "formula_map": {
+    "MODEL_sheet": {
+      "saves": {
+        "gk_gate_CZ": { "header": "3x Saves", "formula": "=IF(MODEL[[#This Row],[POS]]=\"GK\",1,0)", "meaning": "Binary positional gate: 1 for goalkeepers, 0 for every outfield position. Multiplied into the final rate at DC, so any non-GK player's saves component is forced to exactly 0 regardless of their raw Saves/90 data (relevant since outfield players structurally have Saves=0 anyway, but this makes the gate explicit and unconditional)." },
+        "PS_pct3_DA": { "header": "PS %3", "formula": "=MODEL[[#This Row],[PS Saves/90]]/3", "meaning": "Previous-season saves-per-90 divided by 3 -- directly encodes the '1 point per 3 saves' FPL rule as a CONTINUOUS RATE (an expected fraction of a save-bundle per 90 minutes), not a discrete floor(saves/3) count. No minutes-per-start rescaling is applied here (unlike PS YC/St, which does rescale) -- this is a raw per-90-of-minutes-played rate, not a per-start rate." },
+        "pct3_thisseason_DB": { "header": "%3", "formula": "=MODEL[[#This Row],[Saves/90]]/3", "meaning": "This-season mirror of DA. Always 0 during the current preseason snapshot since Saves/90 (this season) is 0 for every player." },
+        "rate_3_DC": { "header": "3", "formula": "=((MODEL[[#This Row],[PS %3]]*CONTROL!$B$25)+(CONTROL!$B$26*MODEL[[#This Row],[%3]]))*MODEL[[#This Row],[3x Saves]]", "meaning": "Blended (PS%3 * B25 + %3 * B26) times the GK gate (CZ). Verified by hand for Dubravka: (3.628571.../3)*1 * 1 = 1.2095238095238094, matching cache exactly." },
+        "source_PS_Saves_T": { "header": "PS Saves", "formula": "=IFERROR(INDEX(PSAPI[saves],MATCH(MODEL[[#This Row],[Code]],PSAPI[code],0)),0)", "meaning": "Previous-season total saves from the PSAPI (saved snapshot of FPL API 'saves' field) sheet, IFERROR-floored to 0." },
+        "source_PS_Saves_90_U": { "header": "PS Saves/90", "formula": "=IFERROR((MODEL[[#This Row],[PS Saves]]/MODEL[[#This Row],[PS Mins]])*90,0)", "meaning": "Season-total saves converted to a per-90-minutes-played rate. No per-start rescaling anywhere in the saves chain." },
+        "source_ThisSeason_Saves_AX": { "header": "Saves", "formula": "=IFERROR(INDEX(API[saves],MATCH(MODEL[[#This Row],[Code]],API[code],0)),0)" },
+        "source_ThisSeason_Saves_90_AY": { "header": "Saves/90", "formula": "=IFERROR((MODEL[[#This Row],[Saves]]/MODEL[[#This Row],[Mins]])*90,0)" }
+      },
+      "cards": {
+        "YC_points_constant_DD": { "header": "YC", "formula": "-1", "type": "literal_constant", "meaning": "FPL yellow-card point penalty, as represented by the workbook." },
+        "PS_pct4_DE": { "header": "PS %4", "formula": "=MODEL[[#This Row],[PS YC/St]]", "meaning": "Direct alias of PS YC/St (itself already a per-start-scaled rate, see source_field_definitions)." },
+        "pct4_thisseason_DF": { "header": "%4", "formula": "=MODEL[[#This Row],[YC/90]]", "meaning": "Direct alias of YC/90 -- a per-90-MINUTES-PLAYED rate, NOT per-start-scaled, unlike PS %4. See spreadsheet_quirks.yc_asymmetric_minutes_scaling." },
+        "rate_4_DG": { "header": "4", "formula": "=((MODEL[[#This Row],[PS %4]]*CONTROL!$B$31)+(CONTROL!$B$32*MODEL[[#This Row],[%4]]))*MODEL[[#This Row],[YC]]", "meaning": "Blended yellow-card rate times -1. Verified by hand for Chiesa: 0.5678233438485805 * 1 * (-1) = -0.5678233438485805, matching cache exactly. Always <= 0 for any nonneg input rate (a genuinely bounded/floored negative event, since the rate itself, PS YC/St, cannot be negative)." },
+        "RC_points_constant_DH": { "header": "RC", "formula": "-3", "type": "literal_constant" },
+        "PS_pct5_DI": { "header": "PS %5", "formula": "=MODEL[[#This Row],[PS RC/90]]" },
+        "pct5_thisseason_DJ": { "header": "%5", "formula": "=MODEL[[#This Row],[RC/90]]" },
+        "rate_5_DK": { "header": "5", "formula": "=((MODEL[[#This Row],[PS %5]]*CONTROL!$B$37)+(CONTROL!$B$38*MODEL[[#This Row],[%5]]))*MODEL[[#This Row],[RC]]", "meaning": "Structurally identical shape to DG, but B37=B38=0 (both literal, not complementary) forces this to exactly 0 for every player regardless of their actual PS %5/%5 values -- see likely_bugs.red_card_component_disabled." },
+        "source_PS_YCs_V": { "header": "PS YCs", "formula": "=IFERROR(INDEX(PSAPI[yellow_cards],MATCH(MODEL[[#This Row],[Code]],PSAPI[code],0)),0)" },
+        "source_PS_YC_St_W": { "header": "PS YC/St", "formula": "=IFERROR((MODEL[[#This Row],[PS YCs]]/MODEL[[#This Row],[PS Mins]])*90*MODEL[[#This Row],[PS Mn/St %]],0)", "meaning": "Season-total YCs converted to per-90-played, THEN rescaled by PS Mn/St% to approximate a per-start rate -- the SAME construction pattern as the goals/assists LF xA/St formula." },
+        "source_PS_RCs_X": { "header": "PS RCs", "formula": "=IFERROR(INDEX(PSAPI[red_cards],MATCH(MODEL[[#This Row],[Code]],PSAPI[code],0)),0)" },
+        "source_PS_RC_90_Y": { "header": "PS RC/90", "formula": "=IFERROR((MODEL[[#This Row],[PS RCs]]/MODEL[[#This Row],[PS Mins]])*90,0)", "meaning": "NOTE: unlike PS YC/St, this is NOT rescaled by PS Mn/St% -- a per-90-played rate only. Moot in practice since DK is always 0 anyway (B37=B38=0), but the formula asymmetry exists in the spreadsheet regardless." },
+        "source_ThisSeason_YCs_AZ": { "header": "YCs", "formula": "=IFERROR(INDEX(API[yellow_cards],MATCH(MODEL[[#This Row],[Code]],API[code],0)),0)" },
+        "source_ThisSeason_YC_90_BA": { "header": "YC/90", "formula": "=IFERROR((MODEL[[#This Row],[YCs]]/MODEL[[#This Row],[Mins]])*90,0)", "meaning": "This-season YC rate, NOT rescaled by Mn/St% -- confirms the PS-side/this-season-side asymmetry is real and not a one-off typo isolated to the previous-season column; the this-season pair (YC/90 vs PS YC/St) differs in the SAME direction (this-season lacks the minutes-scaling factor that the PS-side has)." },
+        "source_ThisSeason_RCs_BB": { "header": "RCs", "formula": "=IFERROR(INDEX(API[red_cards],MATCH(MODEL[[#This Row],[Code]],API[code],0)),0)" },
+        "source_ThisSeason_RC_90_BC": { "header": "RC/90", "formula": "=IFERROR((MODEL[[#This Row],[RCs]]/MODEL[[#This Row],[Mins]])*90,0)" }
+      },
+      "bonus": {
+        "Bonus_points_constant_DL": { "header": "Bonus Pts", "formula": "1", "type": "literal_constant", "meaning": "A literal multiplier of 1 -- functionally a no-op in the DO formula, present for structural symmetry with the other numbered-column constants (Assist=3, Goal=position-lookup, etc.)." },
+        "PS_pct6_DM": {
+          "header": "PS %6",
+          "formula": "=IF(MODEL[[#This Row],[PS Starts]]>CONTROL!$B$46,(MODEL[[#This Row],[PS Bonus/Start]]*CONTROL!$B$48)+(CONTROL!$B$49*MODEL[[#This Row],[PS BPS/Start]]*CONTROL!$B$45),MODEL[[#This Row],[PS BPS/Start]]*CONTROL!$B$45)",
+          "meaning": "Answers the bonus-source question directly: for a player with MORE than 5 (CONTROL!B46) previous-season starts, this blends their OWN historical Bonus/Start (weight B48) with their own BPS/Start converted to an implied-bonus rate via the league-average Bonus-per-BPS ratio (weight B49, times B45). For a player with 5 or fewer starts (a small-sample guard), it uses ONLY their own BPS/Start * B45, ignoring B48/B49 entirely -- BPS is treated as the more reliable small-sample signal, historical Bonus points as the less reliable one. Currently (B48=1,B49=0) the >5-starts branch collapses to using historical Bonus/Start alone, making this distinction currently invisible in cached output but structurally real in the formula."
+        },
+        "pct6_thisseason_DN": { "header": "%6", "formula": "=IF(MODEL[[#This Row],[Starts]]>CONTROL!$B$46,(MODEL[[#This Row],[Bonus/Start]]*CONTROL!$B$48)+(CONTROL!$B$49*MODEL[[#This Row],[BPS/Start]]*CONTROL!$B$45),MODEL[[#This Row],[BPS/Start]]*CONTROL!$B$45)", "meaning": "This-season mirror. During preseason, this-season Starts=0 for every player (<=5), so this ALWAYS falls to the BPS/Start*B45 branch -- but this-season BPS/Start is itself an IFERROR fallback to CONTROL!B43 (average BPS/Start) since Start BPS/Starts=0/0, making %6 currently equal to B43*B45 = B44 (the league-average Bonus/Start) for every player uniformly." },
+        "rate_6_DO": { "header": "6", "formula": "=(MODEL[[#This Row],[PS %6]]*CONTROL!$B$51)+(CONTROL!$B$52*MODEL[[#This Row],[%6]])*MODEL[[#This Row],[Bonus Pts]]", "meaning": "SPREADSHEET QUIRK: due to Excel operator precedence, this parses as PS%6*B51 + (B52*%6*BonusPts), NOT (PS%6*B51 + B52*%6)*BonusPts -- the Bonus Pts(1) multiplier only applies to the SECOND additive term, not the whole blended sum, unlike every other numbered-column formula in this family (DC, DG, DK, EA, EE, EI all wrap their ENTIRE blended sum in one closing paren before the final positional-points multiplication). Currently invisible in cached output ONLY because Bonus Pts=1 (a no-op either way) AND B52=0 (so the missing-parenthesis term is multiplied by zero) -- if Bonus Pts were ever changed to something other than 1, or B52 made nonzero, this formula would silently compute PS%6*B51 + 0 instead of the intended (PS%6*B51+B52*%6)*BonusPts. See likely_bugs.bonus_missing_parenthesis." }
+      },
+      "defensive_contributions": {
+        "LF_DCs_BY": { "header": "LF DCs", "formula": "=IFERROR(SUM(INDEX(DC!$B$1001:$CZ$1999,MODEL[[#This Row],[PT CODE ROW MATCH]],CONTROL!$E$2-CONTROL!$D$83+1-CONTROL!$C$83):INDEX(DC!$B$1001:$CZ$1999,MODEL[[#This Row],[PT CODE ROW MATCH]],CONTROL!$E$2-CONTROL!$E$83)),0)", "meaning": "Sum of the player's raw defensive_contribution counts (a SINGLE pre-aggregated FPL-API stat, as represented in the DC pivot sheet) over the 38-GW Long Form window (CONTROL!B83), matched by PT CODE ROW MATCH (a player-code row lookup, shared with the appearance/goals/assists windowed columns)." },
+        "LF_DC_Mins_BZ": { "header": "LF DC Mins", "formula": "=IFERROR(SUM(INDEX(MINS!$B$1001:$CZ$1999,MODEL[[#This Row],[PT CODE ROW MATCH]],CONTROL!$E$2-CONTROL!$D$83+1-CONTROL!$C$83):INDEX(MINS!$B$1001:$CZ$1999,MODEL[[#This Row],[PT CODE ROW MATCH]],CONTROL!$E$2-CONTROL!$E$83)),0)" },
+        "LF_DC_St_CA": { "header": "LF DC/St", "formula": "=IFERROR((MODEL[[#This Row],[LF DCs]]/MODEL[[#This Row],[LF DC Mins]])*90*((MODEL[[#This Row],[PS Mn/St %]]*CONTROL!$B$89)+(CONTROL!$B$90*MODEL[[#This Row],[Mn/St %]])),0)", "meaning": "Raw DCs-per-90-played, rescaled by the blended Mn/St% (using B89/B90, NOT B62/B63) to approximate a per-start rate -- the Poisson lambda for the threshold-crossing probability below." },
+        "LF_DC_pct_CB": { "header": "LF DC %", "formula": "=1-_xlfn.POISSON.DIST(IF(MODEL[[#This Row],[POS]]=\"DEF\",9,11),MODEL[[#This Row],[LF DC/St]],TRUE)", "meaning": "P(X > threshold) for a Poisson(lambda=LF DC/St) variable, i.e. 1 - P(X<=threshold). Threshold = 9 for DEF (i.e. needs 10+ to score), 11 for every OTHER position INCLUDING GK (i.e. needs 12+) -- the IF-ladder has only two branches (DEF vs not-DEF), not four; GK's threshold value is moot in practice only because CONTROL!F198=0 zeroes out GK's points downstream, not because the threshold formula itself excludes GK. THIS IS A DISCRETE PROBABILITY OF CROSSING A NONLINEAR THRESHOLD, computed via a genuine cumulative-distribution formula, not a continuous rate divided by a constant (contrast with saves' 'rate/3' continuous approximation)." },
+        "SF_DCs_CN": { "header": "SF DCs", "formula": "=IFERROR(SUM(INDEX(DC!$B$1001:$CZ$1999,MODEL[[#This Row],[PT CODE ROW MATCH]],CONTROL!$E$2-CONTROL!$D$84+1-CONTROL!$C$84):INDEX(DC!$B$1001:$CZ$1999,MODEL[[#This Row],[PT CODE ROW MATCH]],CONTROL!$E$2-CONTROL!$E$84)),0)", "meaning": "Short Form window (CONTROL!B84=10 GWs -- NOTE: 10, not the 6 GWs used by every other component family's Short Form window)." },
+        "SF_DC_Mins_CO": { "header": "SF DC Mins", "formula": "=IFERROR(SUM(INDEX(MINS!$B$1001:$CZ$1999,MODEL[[#This Row],[PT CODE ROW MATCH]],CONTROL!$E$2-CONTROL!$D$84+1-CONTROL!$C$84):INDEX(MINS!$B$1001:$CZ$1999,MODEL[[#This Row],[PT CODE ROW MATCH]],CONTROL!$E$2-CONTROL!$E$84)),0)" },
+        "SF_DC_St_CP": { "header": "SF DC/St", "formula": "=IFERROR((MODEL[[#This Row],[SF DCs]]/MODEL[[#This Row],[SF DC Mins]])*90*((MODEL[[#This Row],[PS Mn/St %]]*CONTROL!$B$89)+(CONTROL!$B$90*MODEL[[#This Row],[Mn/St %]])),0)" },
+        "SF_DC_pct_CQ": { "header": "SF DC %", "formula": "=1-_xlfn.POISSON.DIST(IF(MODEL[[#This Row],[POS]]=\"DEF\",9,11),MODEL[[#This Row],[SF DC/St]],TRUE)" },
+        "DC_points_lookup_EF": { "header": "DC", "formula": "=IF(MODEL[[#This Row],[POS]]=\"GK\",CONTROL!$F$198,IF(MODEL[[#This Row],[POS]]=\"DEF\",CONTROL!$F$199,IF(MODEL[[#This Row],[POS]]=\"MID\",CONTROL!$F$200,IF(MODEL[[#This Row],[POS]]=\"FWD\",CONTROL!$F$201,0))))" },
+        "LF_pct11_EG": { "header": "LF %11", "formula": "=MODEL[[#This Row],[LF DC %]]" },
+        "SF_pct11_EH": { "header": "SF %11", "formula": "=MODEL[[#This Row],[SF DC %]]" },
+        "rate_11_EI": { "header": "11", "formula": "=((MODEL[[#This Row],[LF %11]]*CONTROL!$B$86)+(MODEL[[#This Row],[SF %11]]*CONTROL!$B$87))*MODEL[[#This Row],[DC]]", "meaning": "Blended (currently 100% LF, 0% SF per B86/B87) threshold-crossing probability times positional DC points. Verified by hand for Senesi (DEF): (1-POISSON.DIST(9,11.341545012165449,TRUE))*2 = 0.6953779433835643*2 = 1.390755886767129 (via LF only, since B87=0), matching cache to full practical precision. For Cook (MID, threshold=11): (1-POISSON.DIST(11,14.759174311926605,TRUE))*2 = 0.7987687254839549*2 = 1.5975374509679099, matching cache." }
+      }
+    },
+    "PPts_sheet": {
+      "note": "Three DIFFERENT wiring patterns are used across these four components, contrasting with the single 'PPts recomputes independently' pattern seen for goals/assists and the single 'MODEL side is entirely dead' pattern seen for clean-sheets/goals-conceded.",
+      "saves": {
+        "wiring_pattern": "PPts DIRECTLY LOOKS UP MODEL!3 (like bonus), then applies its OWN fixture adjustment (unlike bonus's shared-with-goals-assists adjustment) on top.",
+        "L_3xSaves_90": { "formula": "=INDEX(MODEL[3],MATCH(PPts[[#This Row],[Code]],MODEL[Code],0))", "meaning": "Direct lookup of MODEL!3 (the blended saves-per-3 rate, GK-gated)." },
+        "M_3xSaves_90_X": { "formula": "=PPts[[#This Row],[VS xG/90]]/PPts[[#This Row],[LA xG/90]]", "meaning": "Fixture adjustment: the OPPONENT's own attacking xG/90 relative to league average -- a busier attacking opponent implies more shots faced, hence more save opportunities. This REUSES the same PPts!R (VS xG/90) and PPts!T (LA xG/90) columns already documented in the goals/assists extraction, but is a DIFFERENT ratio direction/purpose from that extraction's use of VS_xGC_90_LA. Verified by hand for Dubravka: 1.7146140350877197/1.5294868421052636 = 1.1210387614238233, matching cache exactly." },
+        "N_3": { "formula": "=PPts[[#This Row],[3xSaves/90]]*PPts[[#This Row],[3xSaves/90 X]]", "meaning": "Final saves xPts-if-eligible = MODEL!3 * fixture multiplier. Verified by hand for Dubravka: 1.2095238095238094*1.1210387614238233=1.3559230733411958, matching cache exactly." }
+      },
+      "cards": {
+        "wiring_pattern": "PPts DIRECTLY LOOKS UP MODEL!4/MODEL!5 with NO fixture adjustment applied anywhere -- the only one of the six now-extracted component families (appearance, goals, assists, CS, GC, saves, bonus, DefCon) with zero opponent-relative scaling of any kind.",
+        "O_4": { "formula": "=INDEX(MODEL[4],MATCH(PPts[[#This Row],[Code]],MODEL[Code],0))", "meaning": "Direct, unmodified lookup of MODEL!4. Verified for Chiesa: matches cached -0.5678233438485805 exactly, with no multiplication by any VS/LA ratio." },
+        "P_5": { "formula": "=INDEX(MODEL[5],MATCH(PPts[[#This Row],[Code]],MODEL[Code],0))", "meaning": "Direct lookup of MODEL!5, which is always 0 (see red_card_component_disabled)." }
+      },
+      "bonus": {
+        "wiring_pattern": "PPts DIRECTLY LOOKS UP MODEL!6, then applies a POSITION-DEPENDENT choice of fixture signal.",
+        "X_xBonus_Start": { "formula": "=INDEX(MODEL[6],MATCH(PPts[[#This Row],[Code]],MODEL[Code],0))", "meaning": "Direct lookup of MODEL!6." },
+        "Y_xBonus_Start_X": {
+          "formula": "=IF(OR(PPts[[#This Row],[POS]]=\"GK\",PPts[[#This Row],[POS]]=\"DEF\"),PPts[[#This Row],[xBonus/Start]]*PPts[[#This Row],[VS xG/90/LA]],PPts[[#This Row],[xBonus/Start]]*PPts[[#This Row],[VS xGC/90/LA]])",
+          "meaning": "THE EXACT USE OF PPts!V requested by the task: for GK/DEF, bonus is scaled by PPts!V (VS xG/90/LA, the opponent's attacking strength expressed via the INVERTED-around-1 transform 1+(1-ratio), documented in the CS/GC extraction as used ONLY here and for the dead damping calc). For MID/FWD, bonus is scaled by PPts!W (VS xGC/90/LA, the opponent's defensive weakness, a PLAIN ratio). This is a deliberate positional split: defenders/keepers are assumed to earn more BPS-driven bonus against a stronger attacking opponent (more clearances/blocks/saves-adjacent BPS actions), while attackers earn more bonus against a weaker defence (more goal/assist-adjacent BPS actions) -- consistent with, but a DIFFERENT mechanism from, the CS/goals fixture adjustments already documented. Verified by hand for Haaland (FWD, uses VS_xGC_90_LA): 1.2647058823529411*0.9575214285509455=1.2109829831673722, matching cache exactly."
+        },
+        "Z_Bonus": { "formula": "1", "type": "literal_constant" },
+        "AA_6": { "formula": "=PPts[[#This Row],[xBonus/Start X]]*PPts[[#This Row],[Bonus]]", "meaning": "Final bonus xPts-if-eligible = fixture-adjusted MODEL!6 * 1 (no-op multiplier)." }
+      },
+      "defensive_contributions": {
+        "wiring_pattern": "PPts DIRECTLY LOOKS UP MODEL!11 (like bonus/saves), and a SEPARATE, entirely self-contained fixture-adjustment attempt (AS/AT/AU) exists but is NEVER actually applied to the live AV/AX calculation -- confirmed dead by exhaustive search.",
+        "AS_dead": { "header": "VS DC/90 POS2", "formula": "=IFERROR(INDEX(DCSCORE[],MATCH(PPts[[#This Row],[VS]],DCSCORE[ABVR],0),MATCH(PPts[[#This Row],[POS2]],DCSCORE[#Headers],0)),0)", "meaning": "Attempts a position-specific (POS2, a more granular tactical-position field than POS) opponent DefCon-concession rate lookup against a 'DCSCORE' structured table. This table was not located as a separate sheet or workbook-level defined name -- it is presumably an Excel Table object scoped to a cell range within one of the existing sheets, not independently resolved in this extraction since it is confirmed dead regardless (see below)." },
+        "AT_dead": { "header": "LA DC/90 POS2", "formula": "=IFERROR(INDEX(TABLES!$E$53:$N$53,MATCH(PPts[[#This Row],[POS2]],DCSCORE[[#Headers],[CB]:[CF]],0)),0)", "meaning": "League-average DefCon rate by tactical position, read from a plain (non-structured-table) cell range TABLES!E53:N53 sitting below the TABLES Excel Table's own header row (row 1) and last data row (row ~21) -- an 'Averages' / '25/26 Averages' block confirmed present at TABLES!C52/C53 with real cached values (e.g. TABLES!E53=8.760961310779887)." },
+        "AU_dead": { "header": "DC/90 POS2 X", "formula": "=IFERROR(PPts[[#This Row],[VS DC/90 POS2]]/PPts[[#This Row],[LA DC/90 POS2]],0)", "meaning": "Would-be fixture-adjustment ratio (opponent's position-specific DefCon-concession rate relative to league average), structurally identical in shape to the saves fixture multiplier (M). CONFIRMED NEVER REFERENCED by AV, AX, or any other formula anywhere in MODEL or PPts -- an exhaustive search found zero matches for 'DC/90 POS2 X' outside its own defining cell." },
+        "AV_LFxSF_DC_St": { "formula": "=INDEX(MODEL[11],MATCH(PPts[[#This Row],[Code]],MODEL[Code],0))/2", "meaning": "Direct lookup of MODEL!11, divided by 2. THE DIVISION BY 2 IS UNEXPLAINED -- no comment, and no corresponding *2 anywhere downstream to cancel it (contrast with the goals/assists MODEL!7//3-then-PPts!*3 round-trip, or the CS/GC MODEL!Goal division-then-remultiplication, both of which are exact inverses). Verified by hand for Senesi: 1.390755886767129/2=0.6953779433835645, matching cache. See likely_bugs.defcon_divide_by_two_unexplained." },
+        "AW_DC": { "formula": "=IF(PPts[[#This Row],[POS]]=\"GK\",CONTROL!$F$198,IF(PPts[[#This Row],[POS]]=\"DEF\",CONTROL!$F$199,IF(PPts[[#This Row],[POS]]=\"MID\",CONTROL!$F$200,IF(PPts[[#This Row],[POS]]=\"FWD\",CONTROL!$F$201,0))))", "meaning": "Independent re-lookup of the same positional DC-points table (duplicated logic from MODEL!EF, same pattern as every other positional constant across all four extractions)." },
+        "AX_11": { "formula": "=PPts[[#This Row],[DC]]*PPts[[#This Row],[LFxSF DC/St]]", "meaning": "Final DefCon xPts-if-eligible = positional DC points * (MODEL!11/2). Because AV already divides by 2 and AX then multiplies by the SAME positional points constant used inside MODEL!11's own EI formula (CONTROL!F198:F201), the net effect is DC_points * (DC_points * threshold_probability) / 2 = (DC_points^2 * threshold_probability)/2 -- for DEF/MID/FWD where DC_points=2, this simplifies to (4*threshold_probability)/2 = 2*threshold_probability, i.e. NUMERICALLY IDENTICAL to what a single, non-doubled points multiplication would give (2*threshold_probability). Verified by hand for Senesi: AV=0.6953779433835645, AX=2*0.6953779433835645=1.390755886767129 -- which equals MODEL!11 itself exactly. So the /2 and the re-multiplication by DC_points cancel out ARITHMETICALLY ONLY BECAUSE DC_points happens to equal 2 for every position that scores DefCon points; if a future CONTROL edit ever set a non-2 points value for one position, AV's fixed /2 would silently stop cancelling correctly. See likely_bugs.defcon_divide_by_two_unexplained for the full analysis." }
+      },
+      "how_components_feed_totals": {
+        "note": "Structural formulas (BA, BG, BI) already fully documented in the appearance, goals/assists, and CS/GC reference JSONs; summarized here specifically for columns '3' (saves), '4'/'5' (cards), '6' (bonus), '11' (DefCon).",
+        "IF_START_TOTAL_BA": "BA sums ALL 11 component columns including '3','4','5','6','11', H/A-adjusted once. All four component families are counted at full value here, as if the player were certain to start.",
+        "IF_NOT_START_TOTAL_BG": "BG = (columns 4,5,6,7,8,10 ONLY) * BF * H/A. CARDS ('4','5') AND BONUS ('6') ARE INCLUDED in the not-start branch (scaled by the substitute-cameo-minutes ratio) -- a substitute can accrue card/bonus risk. SAVES ('3') AND DEFCON ('11') ARE EXCLUDED, joining CLEAN SHEETS ('9') as the three columns structurally zeroed for any non-starter, regardless of Start% or minutes. This is a real and precise three-way split: {9, 3, 11} always zero for substitutes; {4, 5, 6, 7, 8, 10} scaled down but nonzero.",
+        "TRUE_TOTAL_BI": "Same H/A-applied-twice mechanism documented in all three prior extractions mechanically includes cards and bonus (columns 4,5,6) in its overstated not-start contribution, but structurally CANNOT affect saves or DefCon (columns 3, 11), which are absent from BG entirely -- extending the pattern already found for clean sheets to two more components.",
+        "where_start_and_appearance_probability_enter": "Identical mechanism to every other component family: BH!Start% (Chance of Playing * PSxTS Starts/Squads Made, or the manual override) is the ONLY place appearance/start probability touches saves/cards/bonus/DefCon, applied at the final BA-vs-BG blend in BI. Confirmed by exhaustive search that none of MODEL!3/4/5/6/11 or PPts!L/M/N/O/P/X/Y/Z/AA/AS/AT/AU/AV/AW/AX contain any reference to Chance, Start, or MODEL!2 anywhere in their formulas."
+      }
+    }
+  },
+  "source_field_definitions": {
+    "PSAPI_and_API": "Saved snapshots of the FPL API's per-player season-total fields. PSAPI = previous season (2025-26), API = this season (2026-27, currently all-zero/blank for most stat fields since preseason). Fields used: saves, yellow_cards, red_cards, bonus, bps. Fields present but UNUSED anywhere: penalties_saved, penalties_missed, own_goals, clearances_blocks_interceptions, recoveries, tackles, defensive_contribution (this last one IS used, but via the separate DC pivot sheet, not directly from API/PSAPI in the live chain -- see DC_pivot_sheet below).",
+    "DC_pivot_sheet": "A player-by-GW pivot table (structurally identical to xG/xA/xGC/MINS/PL) whose data field is 'Sum of defensive_contribution' -- i.e. it re-exposes the FPL API's OWN single pre-aggregated defensive_contribution count per GW, NOT a hand-built sum of clearances_blocks_interceptions + recoveries + tackles (those three raw fields exist on the API sheet but are confirmed unreferenced anywhere). This means the workbook's DefCon source data is exactly whatever the FPL API itself reports as 'defensive_contribution' for each GW, whatever CBIT/CBIRT definition the API applies server-side -- the workbook does not independently reconstruct or verify that definition from more granular stats.",
+    "PT_CODE_ROW_MATCH": "The same row-index lookup (MATCH(Code, MINS!$A$1001:$A$1999, 0)) already documented in the appearance extraction, reused here to index into the DC pivot sheet's matching row. Confirmed to return a VALID row index for a player even when that row's actual minutes/DC data is entirely zero (verified for O'Shea: PT CODE ROW MATCH=534, a real row number, with LF DC Mins=0 and LF DCs=0 at that row) -- i.e. a genuine data-coverage gap in the underlying pivot sheet, NOT a failed MATCH/IFERROR fallback.",
+    "FDRDC_sheet": "A team-and-tactical-role-by-GW pivot table ('Sum of GW-DC'), with row labels combining team abbreviation and a role code (e.g. 'ARS-CB', 'ARS-AM', 'ars-DM'), each further split into home/away sub-rows. CONFIRMED ENTIRELY UNREFERENCED by any formula in MODEL, PPts, or TABLES -- an exhaustive search for the string 'FDRDC' across both sheets' row-2 formulas found zero matches. This appears to be an abandoned attempt at a role-and-fixture-specific DefCon concession model, structurally more granular than (and never wired up in place of) the simpler AS/AT/AU attempt described below, which is itself also dead.",
+    "PTS_sheet": "A player-by-GW pivot table ('Sum of total_points') -- raw historical FPL total points per player per GW. CONFIRMED ENTIRELY UNREFERENCED anywhere in MODEL or PPts. The bonus calculation instead uses PSAPI/API's season-total 'bonus' and 'bps' fields directly, never this GW-windowed points pivot.",
+    "DCSCORE_structured_table": "Referenced by name in PPts!AS/AT (as DCSCORE[] and DCSCORE[ABVR]/DCSCORE[#Headers]/DCSCORE[[#Headers],[CB]:[CF]]) but not found as a separate sheet or a workbook-level defined name via openpyxl's defined_names collection -- almost certainly an Excel Table object scoped to a specific cell range within one of the existing sheets (the same mechanism as MODEL, PPts, TABLES, FIXHELPER being Table names rather than sheet names). Its exact location was not resolved in this extraction, since AS/AT/AU (the only cells that reference it) are themselves confirmed dead -- resolving DCSCORE's location would not change any live cached value.",
+    "PT_and_PSPT_sheets": "Player-level appearance-tracking sheets (Playing Time / Starts / Subs / Team Success columns), already documented structurally in the appearance extraction as the source for Starts1/Subs1/UnSub1 etc. via 4-alias name matching. Confirmed to be a DIFFERENT data source from the DC/MINS/xG/xA pivot sheets (Understat-derived), explaining why a player like O'Shea can have real PS Starts (from PSPT, which apparently covers Championship-level data) alongside zero LF DC Mins (from the MINS/DC pivots, which apparently do not)."
+  },
+  "positional_scoring_rules": {
+    "saves_points_denominator": { "GK": 3, "DEF": null, "MID": null, "FWD": null, "note": "'1 point per 3 saves', modelled as a continuous rate (raw_saves_per_90 / 3), gated to exactly 0 for every non-GK position via the CZ (3x Saves) binary marker." },
+    "yellow_card_penalty": -1,
+    "red_card_penalty_as_represented": -3,
+    "red_card_component_live_value": 0,
+    "bonus_points_range_represented": "The workbook computes a continuous expected value with no explicit clamping formula anywhere in the traced chain -- see warnings.bonus_range_not_clamped for whether cached values were observed to exceed 0-3 for the golden cases inspected.",
+    "defcon_points_by_position": { "GK": 0, "DEF": 2, "MID": 2, "FWD": 2 },
+    "defcon_threshold_by_position": { "DEF": "greater than 9 (i.e. 10+)", "MID_FWD_and_GK_formula_value": "greater than 11 (i.e. 12+)", "note": "The threshold IF-ladder is IF(POS='DEF',9,11) -- a two-branch ladder, not four-branch. GK receives the same 11-threshold formula value as MID/FWD (there is no separate GK branch in the THRESHOLD formula), but GK's DC_points constant (F198=0) makes the threshold value moot for scoring purposes. Recorded exactly as represented; whether this matches real DefCon rules for goalkeepers specifically was not asserted by this extraction."},
+    "source": "CONTROL!D198:F201 (DC column, F) plus the literal -1/-3 constants at MODEL!DD/DH and PPts' independent re-lookups. Recorded exactly as cached in the workbook; this extraction does not assert these values match real 2026/27 FPL rules beyond stating what the workbook itself encodes."
+  },
+  "dependency_flow": {
+    "saves_flow": [
+      "1. MODEL!T/U (PS Saves, PS Saves/90) <- PSAPI[saves] / PS Mins * 90",
+      "2. MODEL!DA (PS %3) = PS Saves/90 / 3",
+      "3. MODEL!DC ('3') = (PS%3*B25 + %3*B26) * GK_gate(CZ)",
+      "4. PPts!L (3xSaves/90) = direct lookup of MODEL!3",
+      "5. PPts!M (3xSaves/90 X) = VS_xG_90 / LA_xG_90 (opponent attacking strength, reused columns from the goals/assists fixture chain)",
+      "6. PPts!N ('3') = L * M -- saves xPts-if-eligible",
+      "7. PPts!BA includes '3' at full value, H/A-adjusted once; PPts!BG EXCLUDES '3' entirely (substitutes earn zero saves xPts)",
+      "8. PPts!BI blends as usual: saves contribution to final TRUE TOTAL = N * Start% * H/A (plus the T1 term's own internal handling, unaffected by column 3 specifically)"
+    ],
+    "cards_flow": [
+      "1. MODEL!V/W (PS YCs, PS YC/St) <- PSAPI[yellow_cards] / PS Mins * 90 * PS_Mn_St_pct (rescaled)",
+      "2. MODEL!DG ('4') = (PS_YC_St*B31 + YC_90*B32) * (-1)",
+      "3. PPts!O ('4') = direct lookup of MODEL!4, NO fixture adjustment applied",
+      "4. Same for Red Cards (MODEL!DK always 0 due to B37=B38=0; PPts!P ('5') = direct lookup, also always 0)",
+      "5. PPts!BA includes '4'/'5' at full value; PPts!BG INCLUDES '4'/'5' (scaled by BF, the substitute-minutes ratio) -- unlike saves/CS/DefCon, a substitute DOES carry card risk",
+      "6. PPts!BI blends as usual, subject to the same H/A-applied-twice mechanism on the not-start portion"
+    ],
+    "bonus_flow": [
+      "1. MODEL!AA/AC (PS BPS, PS BPS/Start) and MODEL!Z/AD (PS Bonus, PS Bonus/Start) <- PSAPI[bps]/[bonus], with IFERROR fallbacks to the league-wide averages B43/B44 when PS Starts=0",
+      "2. MODEL!DM (PS %6) = IF(PS_Starts > 5, Bonus/Start*B48 + BPS/Start*B45*B49, BPS/Start*B45) -- small-sample guard favouring BPS over historical Bonus for <=5-start players",
+      "3. MODEL!DO ('6') = PS%6*B51 + (B52*%6*BonusPts) [note: NOT (PS%6*B51+B52*%6)*BonusPts, due to a missing parenthesis -- currently a no-op since BonusPts=1 and B52=0]",
+      "4. PPts!X (xBonus/Start) = direct lookup of MODEL!6",
+      "5. PPts!Y (xBonus/Start X) = X * VS_xG_90_LA (GK/DEF) or X * VS_xGC_90_LA (MID/FWD) -- position-dependent fixture-signal choice, THE exact use of PPts!V requested by this task",
+      "6. PPts!AA ('6') = Y * 1 -- bonus xPts-if-eligible",
+      "7. PPts!BA includes '6' at full value; PPts!BG INCLUDES '6' (scaled by BF) -- substitutes carry bonus risk",
+      "8. PPts!BI blends as usual"
+    ],
+    "defcon_flow": [
+      "1. MODEL!BY/BZ (LF DCs, LF DC Mins) <- SUM over the DC/MINS pivot sheets' 38-GW Long Form window, keyed by PT CODE ROW MATCH",
+      "2. MODEL!CA (LF DC/St) = (LF_DCs/LF_DC_Mins)*90*blended_Mn_St_pct(B89/B90) -- the Poisson lambda",
+      "3. MODEL!CB (LF DC %) = 1 - POISSON.DIST(threshold, LF_DC_St, TRUE), threshold=9 for DEF else 11",
+      "4. Steps 1-3 repeated for the 10-GW Short Form window (CN:CQ)",
+      "5. MODEL!EI ('11') = (LF%11*B86 + SF%11*B87) * DC_points(positional, F198:F201)",
+      "6. PPts!AV (LFxSF DC/St) = MODEL!11 / 2 -- an unexplained division",
+      "7. PPts!AW (DC) = independent re-lookup of the same positional DC_points constant",
+      "8. PPts!AX ('11') = AW * AV = DC_points * (MODEL!11/2) -- arithmetically equals MODEL!11 exactly whenever DC_points=2 (true for every position that scores DefCon points in the current CONTROL table), but this is a coincidence of the current constant value, not a structural guarantee",
+      "9. A parallel fixture-adjustment attempt (AS/AT/AU, reading a DCSCORE table and TABLES!E53:N53 league-average block) exists but is confirmed NEVER applied to AV or AX -- DefCon has NO live opponent/fixture adjustment of any kind, unlike every other scored component",
+      "10. PPts!BA includes '11' at full value; PPts!BG EXCLUDES '11' entirely (substitutes earn zero DefCon xPts, joining saves and clean sheets)",
+      "11. PPts!BI blends as usual"
+    ]
+  },
+  "golden_cases": [
+    {
+      "label": "high_save_goalkeeper",
+      "player_code": 67089,
+      "player_name": "Martin Dubravka",
+      "web_name": "Dubravka",
+      "team": "TOT",
+      "position": "GK",
+      "sheet_refs": { "MODEL_row": 514, "PPts_row_GW1": 514 },
+      "inputs": {
+        "MODEL!PS Saves/90": 3.628571428571428,
+        "MODEL!PS Starts": "not individually captured this session; PS Bonus/Start=0.29431670795024134 indicates <=5 PS starts (league-average BPS/Bonus fallback)",
+        "PPts!Q VS": "bre",
+        "PPts!R VS xG/90 (Brentford attacking, away fixture for TOT)": 1.7146140350877197,
+        "PPts!T LA xG/90": 1.5294868421052636,
+        "PPts!AZ H/A (away)": 0.95,
+        "PPts!BH Start %": 0,
+        "PPts!BB PSxTS Starts/Squads Made": 0
+      },
+      "cached_intermediate_values": {
+        "MODEL!DA PS %3": 1.2095238095238094,
+        "MODEL!DC '3'": 1.2095238095238094,
+        "PPts!L 3xSaves/90": 1.2095238095238094,
+        "PPts!M 3xSaves/90 X": 1.1210387614238233,
+        "PPts!N '3'": 1.3559230733411958,
+        "PPts!O '4'": -0.02857142857142857,
+        "PPts!AA '6'": 0.258692978153607,
+        "PPts!AX '11'": 0,
+        "PPts!BG IF NOT START TOTAL": -0.035505933879876724,
+        "PPts!BA IF START TOTAL": 3.418835260260931,
+        "PPts!BI TRUE TOTAL": -0.024230637185882885
+      },
+      "expected_outputs": {
+        "saves_xpts_if_eligible": 1.3559230733411958,
+        "start_probability": 0,
+        "true_total_xpts": -0.024230637185882885,
+        "note": "PRIMARY saves independent-recomputation case. Also a SECONDARY zero-appearance-history control case: Dubravka's Start%=0 (backup keeper behind Vicario at Spurs) makes TRUE TOTAL collapse to BG*H/A alone, and BG is slightly negative (card penalty dominates the small BPS-average-driven bonus figure), producing a NEGATIVE TRUE TOTAL for a genuinely high-save-RATE goalkeeper who is nonetheless very unlikely to play -- the same 'negative TRUE TOTAL for a non-starter' pattern already documented for Ben Wilson in the appearance extraction, now confirmed to recur in this component family too."
+      }
+    },
+    {
+      "label": "low_save_elite_goalkeeper",
+      "player_code": 154561,
+      "player_name": "David Raya Mart\u00edn",
+      "web_name": "Raya",
+      "team": "ARS",
+      "position": "GK",
+      "sheet_refs": { "MODEL_row": 2, "PPts_row_GW1": 2 },
+      "inputs": {
+        "MODEL!PS Saves/90": 1.6216216216216217,
+        "PPts!Q VS": "COV",
+        "PPts!R VS xG/90": 1.26369,
+        "PPts!T LA xG/90": 1.5294868421052636,
+        "PPts!AZ H/A": 1.05,
+        "PPts!BH Start %": 1
+      },
+      "cached_intermediate_values": {
+        "MODEL!DA PS %3": 0.5405405405405406,
+        "MODEL!DC '3'": 0.5405405405405406,
+        "PPts!L 3xSaves/90": 0.5405405405405406,
+        "PPts!M 3xSaves/90 X": 0.8262182878674476,
+        "PPts!N '3'": 0.44660447992835006,
+        "PPts!O '4'": -0.027027027027027025,
+        "PPts!AA '6'": 0.3489621306340021,
+        "PPts!AX '11'": 0,
+        "PPts!BI TRUE TOTAL": 4.840471146125662
+      },
+      "expected_outputs": {
+        "saves_xpts_if_eligible": 0.44660447992835006,
+        "start_probability": 1,
+        "note": "Contrast case with Dubravka: Raya's elite-defense team means a lower raw save rate (1.62 vs 3.63 saves/90) AND the fixture multiplier for Arsenal's weak-attacking opponent (Coventry, VS_xG_90=1.264 vs league average 1.529) further discounts the already-lower base rate (M=0.826 vs Dubravka's 1.121). Combined effect: saves_xpts_if_eligible is roughly a third of Dubravka's despite both being nailed-on starters when fit."
+      }
+    },
+    {
+      "label": "card_prone_and_rotation_prone_midfielder",
+      "player_code": 223541,
+      "player_name": "Federico Chiesa",
+      "web_name": "Chiesa",
+      "team": "LIV",
+      "position": "MID",
+      "sheet_refs": { "MODEL_row": 379, "PPts_row_GW1": 379 },
+      "inputs": {
+        "MODEL!PS YC/St": 0.5678233438485805,
+        "PPts!Q VS": "new",
+        "PPts!AZ H/A": 0.95,
+        "PPts!BF PSxTS Mn/Sub / Mn/St": 0.18333333333333335,
+        "PPts!BH Start %": 0.027777777777777776
+      },
+      "cached_intermediate_values": {
+        "MODEL!DE PS %4": 0.5678233438485805,
+        "MODEL!DG '4'": -0.5678233438485805,
+        "PPts!O '4'": -0.5678233438485805,
+        "PPts!AV LFxSF DC/St": 0.013765436196253478,
+        "PPts!AX '11'": 0.027530872392506955,
+        "PPts!BG IF NOT START TOTAL": 0.27427072571066713,
+        "PPts!BI TRUE TOTAL": 0.9934717177137987
+      },
+      "expected_outputs": {
+        "cards_xpts_if_eligible": -0.5678233438485805,
+        "start_probability": 0.027777777777777776,
+        "note": "PRIMARY cards/disciplinary independent-recomputation case (highest PS YC/St ratio observed in the wider scan). ALSO the rotation/substitute final-blend case already partially verified in the CS/GC extraction, now extended: with the full 11-column sum (including this session's 3/4/5/6/11 values), BG and BI were independently re-verified to match cache exactly (see independent_calculation_checks). Chiesa's card penalty ('4') is among the columns INCLUDED in BG, unlike his (near-zero, since MID threshold=11 and his rate is only 5.68) DefCon contribution, which is excluded."
+      }
+    },
+    {
+      "label": "strong_historical_bonus_forward",
+      "player_code": 223094,
+      "player_name": "Erling Haaland",
+      "web_name": "Haaland",
+      "team": "MCI",
+      "position": "FWD",
+      "sheet_refs": { "MODEL_row": 421, "PPts_row_GW1": 421 },
+      "inputs": {
+        "MODEL!PS Bonus/Start": 1.2647058823529411,
+        "MODEL!PS BPS/Start": 27.725025397900442,
+        "PPts!Q VS": "BOU",
+        "PPts!W VS xGC/90/LA (used for FWD)": 0.9575214285509455,
+        "PPts!AZ H/A": 1.05,
+        "PPts!BH Start %": 0.9444444444444444
+      },
+      "cached_intermediate_values": {
+        "MODEL!DM PS %6": 1.2647058823529411,
+        "MODEL!DO '6'": 1.2647058823529411,
+        "PPts!X xBonus/Start": 1.2647058823529411,
+        "PPts!Y xBonus/Start X": 1.2109829831673722,
+        "PPts!AA '6'": 1.2109829831673722,
+        "PPts!AX '11'": 0.000155991697424529,
+        "PPts!BI TRUE TOTAL": 6.338004626124446
+      },
+      "expected_outputs": {
+        "bonus_xpts_if_eligible": 1.2109829831673722,
+        "start_probability": 0.9444444444444444,
+        "note": "PRIMARY bonus independent-recomputation case. Haaland's PS Bonus/Start (1.26, well above the league-average B44=0.294) directly drives PS%6 since he comfortably exceeds the 5-PS-starts filter and B48=1 (Bonus weight). His FWD position routes through VS_xGC_90_LA (opponent defensive weakness) rather than VS_xG_90_LA -- confirms the position-dependent PPts!Y branch precisely."
+      }
+    },
+    {
+      "label": "high_defcon_defender",
+      "player_code": 221466,
+      "player_name": "Marcos Senesi Bar\u00f3n",
+      "web_name": "Senesi",
+      "team": "TOT",
+      "position": "DEF",
+      "sheet_refs": { "MODEL_row": 515, "PPts_row_GW1": 515, "PREDICT_row": "not individually captured; PPts!BC=0.6 confirms a manual start override exists" },
+      "inputs": {
+        "MODEL!LF DC/St": 11.341545012165449,
+        "PREDICT!Manual Start %": 0.6,
+        "PPts!Q VS": "bre",
+        "PPts!AZ H/A": 0.95,
+        "PPts!BH Start %": 0.6
+      },
+      "cached_intermediate_values": {
+        "MODEL!CB LF DC % (threshold=9)": 0.6953779433835643,
+        "MODEL!EI '11'": 1.390755886767129,
+        "PPts!AV LFxSF DC/St": 0.6953779433835645,
+        "PPts!AX '11'": 1.390755886767129,
+        "PPts!BC M Start %": 0.6,
+        "PPts!BE T1": 0.996,
+        "PPts!BI TRUE TOTAL": 3.1561868405713724
+      },
+      "expected_outputs": {
+        "defcon_xpts_if_eligible": 1.390755886767129,
+        "note": "PRIMARY defender-DefCon independent-recomputation case. Independently recomputed via scipy.stats.poisson: 1-poisson.cdf(9, 11.341545012165449) = 0.6953779433835643, *2 (DEF DC points) = 1.390755886767129, matching cache to full practical precision. ALSO a secondary manual-start-override example (BC=0.6, distinct from Saka's 0.6 override documented in the appearance/goals extractions) -- confirms the T1 quirk (0.996 here, vs MODEL_1=0.99) is entirely unrelated to and does not interact with the DefCon calculation."
+      }
+    },
+    {
+      "label": "high_defcon_midfielder",
+      "player_code": 155408,
+      "player_name": "Alex Cook",
+      "web_name": "Cook",
+      "team": "BOU",
+      "position": "MID",
+      "sheet_refs": { "MODEL_row": 72, "PPts_row_GW1": 72 },
+      "inputs": {
+        "MODEL!LF DC/St": 14.759174311926605,
+        "PPts!Q VS": "mci",
+        "PPts!AZ H/A (away)": 0.95,
+        "PPts!BH Start %": 0.42105263157894735
+      },
+      "cached_intermediate_values": {
+        "MODEL!CB LF DC % (threshold=11)": 0.7987687254839549,
+        "MODEL!EI '11'": 1.5975374509679097,
+        "PPts!AV LFxSF DC/St": 0.7987687254839548,
+        "PPts!AX '11'": 1.5975374509679097,
+        "PPts!BG IF NOT START TOTAL": 0.04986977901969256,
+        "PPts!BI TRUE TOTAL": 2.1323854921768515
+      },
+      "expected_outputs": {
+        "defcon_xpts_if_eligible": 1.5975374509679097,
+        "start_probability": 0.42105263157894735,
+        "note": "PRIMARY midfielder/forward-DefCon independent-recomputation case, demonstrating the DEF-vs-other threshold split precisely: Cook's raw rate (14.76) is HIGHER than Senesi's (11.34) but Cook needs to clear the higher MID threshold (11, vs DEF's 9), producing a broadly similar resulting probability (0.799 vs 0.695) despite the different underlying rate and threshold. Independently recomputed via scipy: 1-poisson.cdf(11,14.759174311926605)=0.7987687254839549, *2=1.5975374509679099, matching cache to full practical precision (a ~2e-16 difference from floating point noise)."
+      }
+    },
+    {
+      "label": "promoted_team_missing_join_defender",
+      "player_code": 216616,
+      "player_name": "Dara O'Shea",
+      "web_name": "O'Shea",
+      "team": "IPS",
+      "position": "DEF",
+      "sheet_refs": { "MODEL_row": 311, "PPts_row_GW1": 311 },
+      "inputs": {
+        "MODEL!PT CODE ROW MATCH": 534,
+        "MODEL!LF DCs": 0,
+        "MODEL!LF DC Mins": 0,
+        "MODEL!LF DC/St": 0,
+        "MODEL!PS Starts": 46,
+        "PPts!Q VS": "SUN",
+        "PPts!AZ H/A": 1.05,
+        "PPts!BH Start %": 1
+      },
+      "cached_intermediate_values": {
+        "MODEL!CB LF DC % (lambda=0)": 0,
+        "MODEL!EI '11'": 0,
+        "PPts!AV LFxSF DC/St": 0,
+        "PPts!AX '11'": 0,
+        "PPts!L 3xSaves/90": 0,
+        "PPts!O '4'": 0,
+        "PPts!AA '6'": 0.3628743898453446,
+        "PPts!BI TRUE TOTAL": 3.5654602876351578
+      },
+      "expected_outputs": {
+        "defcon_xpts_if_eligible": 0.0,
+        "note": "PRIMARY promoted-team/missing-data case for THIS component family. CRITICALLY DIFFERENT MECHANISM from the CS/GC extraction's promoted-team finding: that was a genuine TEAM-LEVEL lump-sum estimate (a real, nonzero number, just concentrated in one GW column). O'Shea's DefCon zero is instead a PLAYER-LEVEL missing join/coverage gap -- PT CODE ROW MATCH resolves to a valid row (534) but that row's minutes AND DC counts are both genuinely 0 in the underlying (Understat-sourced) MINS/DC pivot sheets, most likely because those sheets do not cover Championship-level competition where O'Shea actually earned his PS Starts=46 (sourced from the separately-covering PSPT sheet instead). Confirmed NOT team-wide: a teammate (Diop, DEF) shows a real nonzero LF DC/St=6.69 despite fewer PS starts (8), proving Ipswich as a team is not uniformly blank in these pivot sheets -- this is a per-player provider-coverage gap, not a deliberate promoted-team estimate."
+      }
+    }
+  ],
+  "independent_calculation_checks": [
+    {
+      "id": "saves_component_dubravka",
+      "target": "PPts!N '3' (saves xPts-if-eligible) for Martin Dubravka",
+      "formula_recomputed": "PS%3 = PS_Saves_90/3; MODEL!3 = PS%3*B25 (GK gate=1); M = VS_xG_90/LA_xG_90; N = MODEL!3 * M",
+      "inputs_used": { "PS_Saves_90": 3.628571428571428, "B25": 1, "VS_xG_90": 1.7146140350877197, "LA_xG_90": 1.5294868421052636 },
+      "computed_value": 1.3559230733411958,
+      "cached_value": 1.3559230733411958,
+      "match": "EXACT (full float precision)"
+    },
+    {
+      "id": "cards_component_chiesa",
+      "target": "MODEL!DG '4' (yellow-card xPts) for Federico Chiesa",
+      "formula_recomputed": "MODEL!4 = PS_YC_St * B31 * (-1)",
+      "inputs_used": { "PS_YC_St": 0.5678233438485805, "B31": 1 },
+      "computed_value": -0.5678233438485805,
+      "cached_value": -0.5678233438485805,
+      "match": "EXACT (full float precision); PPts!O confirmed to pass this through unmodified (no fixture adjustment exists for cards)"
+    },
+    {
+      "id": "bonus_component_haaland",
+      "target": "PPts!AA '6' (bonus xPts-if-eligible) for Erling Haaland",
+      "formula_recomputed": "PS%6 = PS_Bonus_per_Start (since PS_Starts=34 > B46=5, and B48=1/B49=0); MODEL!6 = PS%6*B51; Y = MODEL!6 * VS_xGC_90_LA (FWD branch); AA = Y*1",
+      "inputs_used": { "PS_Bonus_per_Start": 1.2647058823529411, "B46": 5, "PS_Starts": 34, "B51": 1, "VS_xGC_90_LA": 0.9575214285509455 },
+      "computed_value": 1.2109829831673722,
+      "cached_value": 1.2109829831673722,
+      "match": "EXACT (full float precision)"
+    },
+    {
+      "id": "defender_defcon_senesi",
+      "target": "PPts!AX '11' (DefCon xPts-if-eligible) for Marcos Senesi (DEF)",
+      "formula_recomputed": "LF%11 = 1 - poisson.cdf(9, LF_DC_St); MODEL!11 = LF%11 * DC_points_DEF(2); AV = MODEL!11/2; AX = 2*AV",
+      "inputs_used": { "LF_DC_St": 11.341545012165449, "threshold": 9, "DC_points_DEF": 2 },
+      "computed_value": 1.390755886767129,
+      "cached_value": 1.390755886767129,
+      "match": "EXACT (full float precision, via scipy.stats.poisson.cdf)"
+    },
+    {
+      "id": "midfielder_defcon_cook",
+      "target": "PPts!AX '11' (DefCon xPts-if-eligible) for Alex Cook (MID)",
+      "formula_recomputed": "LF%11 = 1 - poisson.cdf(11, LF_DC_St); MODEL!11 = LF%11 * DC_points_MID(2); AV = MODEL!11/2; AX = 2*AV",
+      "inputs_used": { "LF_DC_St": 14.759174311926605, "threshold": 11, "DC_points_MID": 2 },
+      "computed_value": 1.5975374509679099,
+      "cached_value": 1.5975374509679097,
+      "match": "MATCH to 15 significant figures (difference ~2e-16, pure float64/library rounding noise, not a discrepancy)"
+    },
+    {
+      "id": "rotation_substitute_full_blend_yoro",
+      "target": "PPts!BI TRUE TOTAL for Leny Yoro (rotation defender), using the FULL 11-column sum including this session's saves/cards/bonus/DefCon values",
+      "formula_recomputed": "BG_check = (col4+col5+col6+col7+col8+col10, EXCLUDING col3/9/11) * BF * H/A; BI = (T1 + sum(cols2..11)*Start% + BG*(1-Start%)) * H/A",
+      "inputs_used": {
+        "col3_saves": 0, "col4_cards": -0.04739884393063584, "col5_RC": 0, "col6_bonus": 0.07970515280036018,
+        "col7_assist": 0.1565843468345024, "col8_goal": 0.508046064789911, "col9_CS": 2.0038375595806905,
+        "col10_2plusGC": -0.15276233115996563, "col11_DefCon": 0.42323513228586673,
+        "T1": 0.8562162162162162, "Start_pct": 0.4864864864864865, "BF": 0.24390243902439024, "H_A": 0.95
+      },
+      "computed_value_sum_2_to_11": 3.911247081200729,
+      "computed_value_BG": 0.12608918777255204,
+      "computed_value_BI": 2.682546889941271,
+      "cached_value_BG": 0.12608918777255204,
+      "cached_value_BI": 2.682546889941271,
+      "match": "EXACT for both BG and BI (full float precision); independently confirms columns 3 and 11 (saves, DefCon) are absent from BG's summed inputs, joining column 9 (CS), while columns 4/5/6 (cards, bonus) ARE present"
+    },
+    {
+      "id": "promoted_team_missing_data_oshea",
+      "target": "PPts!AX '11' (DefCon xPts) for Dara O'Shea (Ipswich, promoted-team/missing-join case)",
+      "formula_recomputed": "LF_DC_St=0 (LF_DCs=0/LF_DC_Mins=0, IFERROR floor); LF%11 = 1-poisson.cdf(9,0) = 1-1.0 = 0; MODEL!11=0; AV=0; AX=0",
+      "inputs_used": { "LF_DCs": 0, "LF_DC_Mins": 0, "LF_DC_St": 0 },
+      "computed_value": 0.0,
+      "cached_value": 0.0,
+      "match": "EXACT; confirmed the zero originates from genuinely zero LF_DC_Mins (a real player-level data-coverage gap, not an IFERROR fallback triggered by a failed MATCH -- PT CODE ROW MATCH itself returned a valid row, 534)"
+    }
+  ],
+  "warnings": [
+    {
+      "type": "cache_staleness_risk",
+      "detail": "Same caveat as all three prior extractions: MODEL.xlsx has calculation.fullCalcOnLoad=True; values here are openpyxl's last-saved cache, read without opening/recalculating in Excel. Workbook file size/mtime confirmed unchanged from all three prior extraction sessions."
+    },
+    {
+      "type": "preseason_state",
+      "detail": "CONTROL!B3=0 (preseason). Most Previous/This-Season weight pairs relevant to this extraction (B25/B26, B31/B32, B51/B52, B86/B87, B89/B90) are currently 1/0 (degenerate, 100% previous-season), matching the appearance block's pattern rather than the goals/assists LF/SF block's genuine 0.8/0.2 blend. B37/B38 (Red Cards) is the sole exception -- both literally 0, disabling the component entirely rather than weighting it toward one season."
+    },
+    {
+      "type": "bonus_range_not_clamped",
+      "detail": "No formula anywhere in the traced bonus chain (MODEL!DM/DN/DO or PPts!X/Y/Z/AA) applies a MIN/MAX/clamp to bound the result within the real FPL bonus system's possible 0-3-points-per-match range. All 6 golden-case cached bonus-if-eligible values observed in this extraction (Raya 0.349, Cook 0.244, O'Shea 0.363, Chiesa 0.510, Haaland 1.211, Senesi 0.333, Dubravka 0.259) fall within a plausible sub-1 to low-1 range for an EXPECTED VALUE (which is not itself required to be an integer or bounded the same way a single match's discrete award is), so no actual out-of-range value was observed in this sample. This is recorded as an absence-of-safeguard finding, not a confirmed bug -- a sufficiently extreme combination of high PS Bonus/Start and a strongly favourable fixture multiplier COULD in principle push xBonus/Start X above 3 without being clamped, but this was not observed in the 6 sampled players."
+    },
+    {
+      "type": "scan_coverage",
+      "detail": "MODEL rows 2-800 (799 data rows) were scanned for the saves/cards/bonus/DefCon-relevant columns listed in extraction_scope to select representative players; a full exhaustive audit of all 799 rows' cached values for staleness/errors was not performed, following the same practice as the three prior extractions (each of which found zero errors in equivalent scans). The 8 golden-case rows' full formula and cached-value chains were individually verified to full float precision."
+    },
+    {
+      "type": "dcscore_table_location_unresolved",
+      "detail": "See source_field_definitions.DCSCORE_structured_table. The exact cell range backing the DCSCORE Excel Table name was not located, since the only formulas referencing it (PPts!AS/AT/AU) are confirmed dead regardless of what DCSCORE actually contains."
+    }
+  ],
+  "spreadsheet_quirks": [
+    {
+      "id": "yc_asymmetric_minutes_scaling",
+      "title": "Previous-season and this-season yellow-card rates are NOT scaled the same way before being blended",
+      "detail": "MODEL!PS YC/St (=W) rescales the raw per-90 rate by PS Mn/St% (a per-start approximation), matching the construction pattern used throughout the goals/assists and DefCon chains. MODEL!YC/90 (=BA), the THIS-SEASON figure blended alongside it in MODEL!DG ('4'), has NO equivalent Mn/St% rescaling -- it is a raw per-90-minutes-played rate. Currently invisible in cached output only because CONTROL!B32 (this-season YC weight) = 0, making the unscaled figure's contribution zero regardless. If B31/B32 were ever changed to give the this-season figure nonzero weight, the blend would silently mix a per-start rate with a per-90-played rate as if they were the same unit."
+    },
+    {
+      "id": "no_fixture_adjustment_for_cards",
+      "title": "Cards (columns 4 and 5) have zero opponent/fixture adjustment of any kind",
+      "detail": "PPts!O and PPts!P are direct, unmultiplied lookups of MODEL!4/MODEL!5. Every other scored component in all four extractions (appearance's 60-min curve aside) applies SOME opponent-relative multiplier -- goals/assists use VS_xGC_90_LA, clean sheets/GC use the Poisson-lambda opponent scaling, saves use VS_xG_90/LA_xG_90, bonus uses a position-dependent VS_xG_90_LA or VS_xGC_90_LA. Cards are the sole exception, treated as a pure historical-rate carry-forward with no fixture context (e.g. no adjustment for a notoriously card-happy referee-adjacent opponent, local derby intensity, etc., none of which this workbook attempts anyway, but the point stands that cards structurally cannot vary by fixture in this model at all)."
+    },
+    {
+      "id": "no_fixture_adjustment_for_defcon",
+      "title": "DefCon (column 11) has zero LIVE opponent/fixture adjustment, despite a dead attempt existing",
+      "detail": "See formula_map.PPts_sheet.defensive_contributions.wiring_pattern and AS/AT/AU. A position-specific (POS2) fixture-adjustment mechanism (AS/AT/AU, referencing a DCSCORE table and a TABLES!E53:N53 league-average block) was built but is never actually multiplied into AV or AX. DefCon's fixture exposure is therefore purely the player's own historical rate -- no adjustment for facing a stronger/weaker attacking or defending opponent, unlike saves (which does have a live fixture adjustment) or bonus (which does too, per position)."
+    },
+    {
+      "id": "twelve_or_more_independent_weight_pairs",
+      "title": "At least 13 similar-looking 'Previous vs This Season' or 'Long Form vs Short Form' CONTROL weight pairs are now confirmed, none linked",
+      "detail": "Cumulative finding across all four extractions: B8/B9 (appearance 1-60), B19/B20 (appearance 60+), B25/B26 (saves), B31/B32 (YC), B37/B38 (RC, degenerate), B51/B52 (bonus season), B59/B60 (goals/assists LF/SF), B62/B63 (goals/assists and dead-CS Mins/Start), B72/B73 (dead CS LF/SF), B78/B79 (dead 2+GC LF/SF), B86/B87 (DefCon LF/SF), B89/B90 (DefCon Mins/Start, DISTINCT from B62/B63 despite the identical label text), B97/B98 (fixture LF/SF), B110/B111 (league-average season). Currently every pair holds either 1/0 or 0.8/0.2, making them easy to mistake for 2-3 shared knobs when they are in fact this many separately-editable CONTROL cells."
+    },
+    {
+      "id": "defcon_dc_short_form_window_length_differs",
+      "title": "DefCon's Short Form window is 10 GWs, not the 6 GWs used by every other component family",
+      "detail": "CONTROL!B84 (Defensive Contributions Short Form Length) = 10, versus B57=6 (goals/assists), B70=6 (dead CS), B95=6 (fixture LF/SF). Not itself a bug (each block's window length is independently configured, as expected), but worth flagging since B86/B87 currently makes this window's data entirely UNUSED anyway (100% Long Form weight) -- so the 10-vs-6 discrepancy is currently dormant, not actively affecting any cached number."
+    }
+  ],
+  "likely_bugs": [
+    {
+      "id": "red_card_component_disabled",
+      "severity": "moderate_silent_zero",
+      "detail": "CONTROL!B37=0 AND B38=0 (both literal values, NOT a complementary B38='=1-B37' pair like every other weight in the workbook). This makes MODEL!DK ('5', red-card points) exactly 0.0 for EVERY player, regardless of actual PS RC/90 or RC/90 history -- verified structurally (the formula reduces to (x*0)+(0*y))*(-3)=0 for any x,y) and spot-checked in all 8 golden cases (P='5' is 0 or absent-from-nonzero-list throughout). This is either a deliberate 'red cards are too rare/noisy to model, treat as always-zero' modelling choice, or an authoring mistake where B38 should have been '=1-B37' like its 11 sibling pairs and B37 should hold a nonzero weight. This extraction records the behavior precisely without asserting which explanation is correct."
+    },
+    {
+      "id": "bonus_missing_parenthesis",
+      "severity": "currently_dormant_would_activate_on_control_edit",
+      "detail": "See formula_map.MODEL_sheet.bonus.rate_6_DO. MODEL!DO ('6') = '=(MODEL[[#This Row],[PS %6]]*CONTROL!$B$51)+(CONTROL!$B$52*MODEL[[#This Row],[%6]])*MODEL[[#This Row],[Bonus Pts]]' parses, by standard operator precedence, as PS%6*B51 + (B52*%6*BonusPts) -- the Bonus Pts(currently=1) multiplier binds only to the second additive term. Every structurally analogous formula elsewhere in the workbook (MODEL!DC, DG, DK, EA, EE, EI) wraps the ENTIRE blended sum in one set of parentheses before the final positional-points multiplication; DO is the sole exception. Currently produces IDENTICAL cached output to the presumably-intended '(...)*BonusPts' form only because Bonus Pts=1 (so the placement of that multiplication doesn't matter numerically) AND CONTROL!B52=0 (so the un-multiplied first term dominates regardless). If Bonus Pts were ever changed to a value other than 1 (there is no indication it currently varies, but it exists as a named, editable column suggesting it might have been intended to), or if B52 were made nonzero, this formula would compute a DIFFERENT and almost certainly unintended result compared to the analogous formulas elsewhere."
+    },
+    {
+      "id": "defcon_divide_by_two_unexplained",
+      "severity": "low_currently_self_cancelling",
+      "detail": "See formula_map.PPts_sheet.defensive_contributions.AV_LFxSF_DC_St and AX_11. PPts!AV divides MODEL!11 by a hardcoded literal 2, then PPts!AX re-multiplies by the SAME positional DC_points constant (2 for every scoring position) that was already baked into MODEL!11 via its own EI formula. The net effect is DC_points^2 * threshold_probability / 2, which only equals the presumably-intended DC_points * threshold_probability (i.e. exactly MODEL!11 unchanged) because DC_points happens to be 2 for every position that scores any DefCon points at all (DEF/MID/FWD) in the CURRENT CONTROL!F199:F201 values. If a future CONTROL edit ever gave DEF and MID/FWD different DC_points values (e.g. a 2026/27 rules change awarding DEF and MID different point totals), this /2-then-remultiply pattern would silently stop being a no-op and would corrupt the DefCon component for whichever position(s) no longer equal 2. No comment explains the purpose of the /2 constant, and no other component's PPts-side formula divides MODEL's already-final value by an unexplained literal in this way."
+    }
+  ],
+  "unresolved_ambiguities": [
+    {
+      "id": "why_red_cards_both_weights_zero",
+      "note": "See likely_bugs.red_card_component_disabled. Whether this is a deliberate 'red cards are unpredictable, model as always-zero-expectation' design choice or an authoring slip (B38 should mirror every other pair's '=1-B_x' pattern) cannot be determined from the spreadsheet alone."
+    },
+    {
+      "id": "why_defcon_lacks_a_live_fixture_adjustment",
+      "note": "A position-specific fixture-adjustment mechanism (AS/AT/AU, referencing DCSCORE and a TABLES league-average block) was clearly built with real, cached intermediate values, but is never wired into the live AV/AX calculation. Whether this was an intentional simplification (defensive-contribution counts may be considered less fixture-dependent than goals/xG-based components) or an incomplete/abandoned feature cannot be determined from the spreadsheet alone."
+    },
+    {
+      "id": "dcscore_table_exact_location_and_content",
+      "note": "See warnings.dcscore_table_location_unresolved. Not resolved in this extraction since it does not affect any live cached value."
+    },
+    {
+      "id": "whether_bonus_pts_or_dc_points_columns_are_ever_edited",
+      "note": "MODEL!DL (Bonus Pts) and the CONTROL!F198:F201 (DC points) constants are both currently at values (1, and {0,2,2,2}) that happen to make the bonus_missing_parenthesis and defcon_divide_by_two_unexplained quirks numerically dormant. Whether these constants are ever adjusted in practice (e.g. for a future rules change) -- which would surface both latent issues -- was not determinable from a single static snapshot of the workbook."
+    },
+    {
+      "id": "why_defcon_uses_a_10_gw_short_form_window",
+      "note": "See spreadsheet_quirks.defcon_dc_short_form_window_length_differs. No comment explains why B84=10 rather than the 6 used by every other Short Form window in the workbook, though it is currently moot since B86/B87=1/0 makes the Short Form window entirely unused for DefCon regardless."
+    }
+  ],
+  "missing_data_and_promoted_team_behavior": {
+    "summary": "TWO STRUCTURALLY DIFFERENT missing-data mechanisms are now confirmed across all four extractions, and this extraction adds a THIRD, distinct instance for DefCon specifically.",
+    "team_level_lump_sum_promoted_team_pattern": "Documented in the CS/GC extraction: xGC/PL pivot data for Coventry/Hull/Ipswich is a real, nonzero, deliberate-looking full-season ESTIMATE concentrated in a single final GW column, not a zero-fallback. This extraction did not find an equivalent lump-sum pattern in the DC pivot sheet specifically -- the DC/MINS gap observed for O'Shea (see below) is zero throughout, not concentrated in one column.",
+    "player_level_missing_join_pattern_new_this_extraction": "O'Shea's (and several other Ipswich defenders') LF DC Mins and LF DCs are genuinely 0 across the entire Long Form window (not concentrated anywhere), while PT CODE ROW MATCH itself resolves successfully to a real row (534). This is NOT an IFERROR-triggered fallback (the MATCH does not fail) and NOT a team-wide promoted-team estimate (a teammate, Diop, shows real nonzero DefCon data). It is best characterised as a PROVIDER COVERAGE GAP: the appearance-tracking source (PSPT, feeding PS Starts=46) evidently covers this player's Championship-season history, while the Understat-derived MINS/DC/xG/xA pivot sources evidently do not, for this specific player (and likely others who played predominantly in a competition/season not covered by that specific data provider).",
+    "fpl_api_direct_fields": "PSAPI/API-sourced fields (saves, yellow_cards, red_cards, bonus, bps) use simple IFERROR-to-0 on the INDEX/MATCH lookup by player code, identical to the pattern already documented in prior extractions for other API-sourced player fields. No promoted-team-specific behavior was found for these fields distinct from the general zero-history handling (e.g. CONTROL!B43/B44 IFERROR fallbacks for PS BPS/Start and PS Bonus/Start apply uniformly to any player with PS Starts=0, promoted or not)."
+  },
+  "lookahead_audit": {
+    "conclusion": "NO lookahead risk identified in the saves/cards/bonus/DefCon rolling-window ranges (saves/cards/bonus do not use rolling GW windows at all -- they are season-total based; only DefCon has a windowed calculation, and it was found lookahead-safe).",
+    "method": "Saves, cards, and bonus all derive from PSAPI/API season-total fields (INDEX/MATCH by player code), not from GW-windowed SUM/INDEX ranges -- there is no rolling window to audit for these three components. DefCon's Long Form window (CONTROL!B83/C83/D83/E83) was traced using the identical method already applied to the CS/GC and goals/assists windows: for the current CONTROL!B3=0 (preseason) state, the window's end offset is CONTROL!E2 - E83 = 41 - 1 = 40, one column short of CONTROL!E2's own position (41, '26-27-GW00') within the DC/MINS sheets' B:CZ header row -- structurally identical to the CS/GC Long Form window's boundary already verified in that extraction.",
+    "structural_argument": "CONTROL!D83/E83 use the same IF-ladder construction (IF(B83-$B$3>76,B83+3,IF(B83-$B$3>38,B83+2,IF(B83-$B$3>0,B83+1,B83)))) already verified in the CS/GC extraction's lookahead_audit to guarantee the window's right edge tracks strictly behind CONTROL!E2 (the current-GW pointer) at every value of B3. The Short Form window (B84/C84/D84/E84) uses the identical construction with a different base length (10 vs 38), and was not independently re-derived in full since it shares the exact same offset formula shape already proven safe.",
+    "caveat": "Verified precisely for the current B3=0 snapshot; argued structurally (not empirically re-verified at other B3 values) for the general case, consistent with the caveat already recorded in the CS/GC extraction's lookahead_audit."
+  }
+}

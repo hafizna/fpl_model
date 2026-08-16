@@ -174,3 +174,31 @@ scoring deducts one point **for every** two goals conceded by a goalkeeper or de
 projection therefore uses `E[floor(goals conceded / 2)]` under the Poisson distribution, while
 retaining the workbook approximation as a separately named diagnostic for golden parity. See the
 [official scoring rules](https://fplchallenge.premierleague.com/help/rules).
+
+### Saves/cards/bonus/DefCon foundation
+
+The final component-family extraction lives in
+`docs/research/benchwarmers_saves_cards_bonus_defcon_reference.json`. The Python translation keeps
+the workbook calculations available as explicit diagnostics and corrects only well-defined scoring
+or exposure issues:
+
+- saves retain the workbook's opponent-attacking-strength adjustment and continuous `saves / 3`
+  value for golden parity; the projection path models save counts as Poisson and evaluates
+  `E[floor(saves / 3)]`;
+- yellow and red-card rates use the official deductions, while `workbook_red_card_xpts_if_start`
+  records the spreadsheet's all-zero red-card branch;
+- bonus retains the five-start BPS fallback, season blend, and position-dependent fixture signal,
+  then bounds the match expectation to the valid 0--3 interval;
+- DefCon uses the workbook's Poisson threshold model: 10 contributions for defenders and 12 for
+  midfielders/forwards, worth two points, with goalkeepers ineligible.
+
+As in the attacking and defensive components, appearance exposure is separate. Linear events use
+the mutually exclusive start and substitute-appearance probabilities. Saves and DefCon recompute
+their nonlinear bundle/threshold probabilities at substitute minutes rather than treating every
+non-start as either a full absence or a fixed cameo.
+
+The workbook does not model penalty saves, penalty misses, or own goals. Those remain explicit
+coverage gaps; no unsupported prior is fabricated. Historical bonus/BPS is also tagged as a
+cross-regime prior because the official 2026/27 BPS rules changed. See the
+[official scoring rules](https://fplchallenge.premierleague.com/help/rules) and
+[2026/27 bonus-system changes](https://www.premierleague.com/en/news/4679946/whats-new-in-202627-fantasy-changes-to-bonus-points-system).

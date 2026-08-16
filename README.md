@@ -122,7 +122,7 @@ See `THIRD_PARTY_NOTICES.md`.
 - [x] Reproduce appearance/start/minutes logic
 - [x] Goal / assist components
 - [x] Clean sheet / goals-conceded components
-- [ ] Saves / cards / bonus / DefCon
+- [x] Saves / cards / bonus / DefCon
 - [ ] Fixture and home-away adjustments
 - [ ] Golden tests against spreadsheet outputs
 
