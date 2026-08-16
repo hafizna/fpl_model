@@ -10,6 +10,7 @@ SofaScore's web endpoints are undocumented. Recent community-maintained referenc
 
 - scheduled football events
 - event lineups
+- match-level average positions
 - player heatmaps
 - player rating-breakdown/event coordinates
 
@@ -23,12 +24,33 @@ Community references used during the spike:
 
 These references are not official SofaScore API documentation.
 
+## Recommended spatial hierarchy
+
+For our use case, **match-level average positions should be attempted before per-player heatmaps**.
+
+```text
+1. average-positions      one request / match, all players
+2. lineups + statistics  role/minutes/context metadata
+3. player heatmap        optional deeper evidence for selected players
+4. rating-breakdown      optional action-level validation
+```
+
+This is much more scalable than downloading a heatmap for every player in every friendly. Average position alone will not capture every inversion/rotation, but it is already enough to distinguish many high-wing-back versus deeper full-back cases. Heatmaps remain useful when the average position is ambiguous.
+
 ## Candidate endpoint flow
 
 ```text
 scheduled-events/{date}
         ↓
 event ID
+        ↓
+event/{event_id}/average-positions
+        ↓
+all player averageX / averageY
+        ↓
+relative height / width signal
+
+(optional deeper path)
         ↓
 event/{event_id}/lineups
         ↓
@@ -68,13 +90,13 @@ python scripts/sofascore_spike.py --date 2026-08-15 --team-id 38
 
 If that date is not returned by the provider, repeat for known preseason dates such as 1, 5, 8, or 9 August 2026.
 
-Then use one returned event ID:
+Then use one returned event ID. This first prints lineups and tries the one-request match-level average-position endpoint:
 
 ```bash
 python scripts/sofascore_spike.py --event-id EVENT_ID
 ```
 
-and inspect one player:
+Only when deeper evidence is useful, inspect one player's full heatmap:
 
 ```bash
 python scripts/sofascore_spike.py --event-id EVENT_ID --player-id PLAYER_ID
@@ -82,21 +104,24 @@ python scripts/sofascore_spike.py --event-id EVENT_ID --player-id PLAYER_ID
 
 ## Coordinate caveat
 
-Community documentation describes heatmap coordinates on a 0..100 pitch. Even if that remains true, orientation must be verified empirically with players whose tactical location is obvious. Do not infer 'high' versus 'deep' from the axis direction until that check passes.
+Community documentation describes these spatial coordinates on a 0..100 pitch. Even if that remains true, orientation must be verified empirically with players whose tactical location is obvious. Do not infer 'high' versus 'deep' from the axis direction until that check passes.
 
 ## What a successful spike produces
 
-For each player-match:
+For each player-match we can begin with:
 
 - average pitch height
 - average lateral position
+- relative height versus teammates / positional peers
+
+For selected player-matches with full heatmap coverage we can add:
+
 - final-third share
 - penalty-box share
 - left / centre / right lane share
-- relative height versus a team reference
 - exploratory Role Attack Index
 
-The final model should also retain the raw points or a reproducible cache key so derived features can be regenerated.
+The final model should retain enough source metadata or local cache information for derived features to be regenerated.
 
 ## What it does *not* mean
 
