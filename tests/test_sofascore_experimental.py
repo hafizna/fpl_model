@@ -4,10 +4,13 @@ from dataclasses import dataclass
 from typing import Any
 
 import pytest
+import requests
 
 from fpl_model.ingest.sofascore_experimental import (
+    DEFAULT_BASE_URL,
     SofaScoreCoverageError,
     SofaScoreExperimentalClient,
+    SofaScoreTransportError,
 )
 
 
@@ -21,7 +24,7 @@ class DummyResponse:
 
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
-            raise RuntimeError(f"HTTP {self.status_code}")
+            raise requests.exceptions.HTTPError(f"HTTP {self.status_code}")
 
 
 class DummySession:
@@ -37,12 +40,31 @@ class DummySession:
         raise AssertionError(f"Unexpected URL: {url}")
 
 
+class SSLFailingSession:
+    def get(self, url: str, **_: Any) -> DummyResponse:
+        raise requests.exceptions.SSLError(f"certificate mismatch for {url}")
+
+
 def client_with(responses: dict[str, DummyResponse]) -> SofaScoreExperimentalClient:
     return SofaScoreExperimentalClient(
         base_url="https://example.test/api/v1",
         min_interval_seconds=0.0,
         session=DummySession(responses),  # type: ignore[arg-type]
     )
+
+
+def test_default_uses_dedicated_api_hostname():
+    assert DEFAULT_BASE_URL == "https://api.sofascore.com/api/v1"
+
+
+def test_tls_failure_is_reported_as_transport_error():
+    client = SofaScoreExperimentalClient(
+        min_interval_seconds=0.0,
+        session=SSLFailingSession(),  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(SofaScoreTransportError, match="TLS verification failed"):
+        client.scheduled_events("2026-08-15")
 
 
 def test_discovers_team_event_from_daily_schedule():
