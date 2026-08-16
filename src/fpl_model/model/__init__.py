@@ -1,5 +1,23 @@
-"""Expected-points component models.
+"""Expected-points component models."""
 
-Sprint 2 will reproduce the Benchwarmers spreadsheet baseline here before any
-contextual adjustments are enabled.
-"""
+from fpl_model.model.appearance import (
+    AppearanceProjection,
+    MinutesScenario,
+    SeasonAppearanceHistory,
+    benchwarmers_appearance_probability,
+    benchwarmers_sixty_minute_given_start_probability,
+    benchwarmers_start_probability,
+    project_appearance,
+    project_benchwarmers_appearance,
+)
+
+__all__ = [
+    "AppearanceProjection",
+    "MinutesScenario",
+    "SeasonAppearanceHistory",
+    "benchwarmers_appearance_probability",
+    "benchwarmers_sixty_minute_given_start_probability",
+    "benchwarmers_start_probability",
+    "project_appearance",
+    "project_benchwarmers_appearance",
+]

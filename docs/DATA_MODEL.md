@@ -99,3 +99,33 @@ The projection table will contain component-level expected points, not only a fi
 - uncertainty/confidence
 
 This makes every difference from the Benchwarmers baseline auditable.
+
+### Appearance/minutes foundation
+
+The read-only Benchwarmers extraction in
+`docs/research/benchwarmers_appearance_reference.json` provides formula references and five golden
+cases for the appearance/start/minutes block. The Python baseline retains the workbook's historical
+appearance prior, zero-history floor, seasonal blend weights, and minutes-per-start 60-minute curve.
+It also accepts a complete set of mutually exclusive player-fixture minute scenarios, including the
+zero-minute outcome, and derives:
+
+- start probability
+- substitute-appearance probability
+- appearance probability
+- 60-minute probability
+- expected minutes
+- one-point appearance xPts
+- additional 60-minute xPts
+
+This preserves the non-linearity of the 60-minute scoring threshold. Later context features may
+change scenario probabilities through calibrated logic; they must not multiply the resulting xPts.
+
+The translation deliberately distinguishes the workbook's conditional `MODEL!2` value,
+`P(60+ | start)`, from the unconditional probability that earns the second appearance point:
+`P(start) * P(60+ | start)`. It also reconciles the workbook's capped appearance prior with its raw
+start rate so that `P(start) <= P(appearance)`.
+
+Known spreadsheet wiring quirks are research references, not baseline behavior. In particular, the
+Python component does not copy the `T1` manual-start point boost or the double application of the
+home/away multiplier on the non-start branch. Those choices are locked by golden tests so that any
+future exact-compatibility mode would need to be explicit and isolated.

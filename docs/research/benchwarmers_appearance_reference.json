@@ -1,0 +1,511 @@
+{
+  "$schema_note": "Reference-only extraction from the Benchwarmers 2026/27 spreadsheet model. Read-only, formulas + cached values as of the timestamps below. This does not imply spreadsheet parity is implemented in Python yet.",
+  "extraction_date": "2026-08-16",
+  "workbooks": {
+    "MODEL.xlsx": {
+      "path": "C:\\Users\\hafizna.fadhli\\Downloads\\MODEL.xlsx",
+      "size_bytes": 71300490,
+      "mtime_iso": "2026-08-16T21:40:30.440420",
+      "ctime_iso": "2026-08-16T21:38:42.334302",
+      "sheets": [
+        "CONTROL", "PREDICT", "MODEL", "PPts", "TABLES", "DATABANK", "API", "PT", "CS",
+        "TABLE", "DBFORM", "PSAPI", "PSPT", "PSTABLE", "TEAMS", "FIXTURES", "MINS",
+        "xG", "xA", "xGC", "PTS", "PL", "DC", "FDRDC"
+      ],
+      "calc_properties": {
+        "calcMode": null,
+        "fullCalcOnLoad": true,
+        "note": "fullCalcOnLoad=true means Excel would recalculate everything on next open in Excel. Values extracted here are openpyxl's cached (last-saved) results, read without opening/recalculating in Excel, so they reflect whatever state the file was saved in."
+      },
+      "role": "Primary source for MODEL and PPts sheet formulas used in this extraction."
+    },
+    "SOLVER.xlsx": {
+      "path": "C:\\Users\\hafizna.fadhli\\Downloads\\SOLVER.xlsx",
+      "size_bytes": 200650,
+      "mtime_iso": "2026-08-16T21:38:21.005117",
+      "ctime_iso": "2026-08-16T21:38:16.474932",
+      "sheets": ["SOLVER Sensitivity 1", "SOLVER"],
+      "role": "Downstream squad-optimizer workbook. Not a source of appearance/minutes formulas; not used in this extraction."
+    },
+    "SIMPLE MODEL.xlsx": {
+      "path": "C:\\Users\\hafizna.fadhli\\Downloads\\SIMPLE MODEL.xlsx",
+      "size_bytes": 946907,
+      "mtime_iso": "2026-08-16T21:38:20.417391",
+      "ctime_iso": "2026-08-16T21:38:13.742047",
+      "sheets": ["SIMPLE", "PSAPI", "TABLE", "TEAMS"],
+      "role": "Simplified/derivative workbook without the MODEL/PPts sheets. Not used in this extraction."
+    }
+  },
+  "control_assumptions": {
+    "sheet": "CONTROL",
+    "note": "Values as cached/saved in MODEL.xlsx. These are user-editable blend weights, not hardcoded model constants.",
+    "season": { "cell": "B2", "value": "2026-27" },
+    "last_gw_pre_season_marker": {
+      "cell": "B3",
+      "value": 0,
+      "meaning": "0 means the workbook is currently in preseason (no current-season GW has been played yet)."
+    },
+    "1_60_mins_blend": {
+      "label": "1-60 mins: Previous Season vs This Season weight",
+      "previous_season_weight": { "cell": "B8", "value": 1 },
+      "this_season_weight": { "cell": "B9", "formula": "=1-B8", "value": 0 },
+      "effect": "With B8=1, B9=0, the '1' (appearance) column is currently driven 100% by previous-season PS %1 and 0% by this-season %1."
+    },
+    "60_plus_mins_blend": {
+      "label": "60+ mins: Previous Season vs This Season weight",
+      "previous_season_weight": { "cell": "B19", "value": 1 },
+      "this_season_weight": { "cell": "B20", "formula": "=1-B19", "value": 0 },
+      "effect": "With B19=1, B20=0, the '2' (60-minute) column is currently driven 100% by previous-season PS %2 and 0% by this-season %2."
+    },
+    "mn_st_trend_table": {
+      "label": "Mn/St lookup table used by CW/CX (PS %2 / %2) TREND() interpolation",
+      "range": "CONTROL!B13:C17",
+      "columns": ["B = Mn/St minutes breakpoint", "C = % below 60 minutes at that Mn/St"],
+      "rows": [
+        { "B13": 90, "C13": 0.00 },
+        { "B14": 80, "C14": 0.05 },
+        { "B15": 70, "C15": 0.15 },
+        { "B16": 60, "C16": 0.50 },
+        { "B17": 50, "C17": 0.50 }
+      ],
+      "usage": "MATCH(Mn/St, B13:B17, -1) finds the bracket (descending lookup), then TREND() linearly interpolates the '% below 60' fraction between the two bracketing points. If Mn/St < 50, the fallback constant 0.5 is used directly instead of TREND()."
+    },
+    "defensive_contributions_short_form_window": {
+      "note": "CONTROL!B84 (Short Form Length=10), C84, D84, E84, and CONTROL!E2 (current GW column match) feed the SF DC columns (CN:CQ). These are DefCon inputs, out of scope for this extraction, included only because CP2 formula reads them.",
+      "not_in_scope": true
+    }
+  },
+  "formula_map": {
+    "MODEL_sheet": {
+      "columns_CR_to_CY": {
+        "note": "All formulas below are identical (structured-table references) across every data row observed (spot-checked rows 2-5, 100, 500, 799). CR and CV are the only two of this block that are literal constants, not formulas.",
+        "CR": {
+          "header": "1-60 mins",
+          "type": "literal_constant",
+          "value": 1,
+          "meaning": "Fixed weight/marker, not a formula. Always 1 for every row."
+        },
+        "CS": {
+          "header": "PS %1",
+          "type": "formula",
+          "formula": "=IF(AND(MODEL[[#This Row],[PS Starts]]=0,MODEL[[#This Row],[PS Subs]]=0),0.01,(1-MODEL[[#This Row],[PS UnSub/SqdsMd]])*0.99)",
+          "meaning": "Previous-season probability of a 1-60-minute appearance. If the player had zero previous-season starts AND zero previous-season subs, hardcode 0.01 (near-zero prior). Otherwise, (1 - PS UnSub/SqdsMd) * 0.99, i.e. 99% times the complement of the 'named in squad but did not play' rate."
+        },
+        "CT": {
+          "header": "%1",
+          "type": "formula",
+          "formula": "=IF(AND(MODEL[[#This Row],[Starts]]=0,MODEL[[#This Row],[Subs]]=0),0.01,(1-MODEL[[#This Row],[UnSub/SqdsMd]])*0.99)",
+          "meaning": "Same logic as CS but using this-season Starts/Subs/UnSub/SqdsMd. During preseason (no GWs played) this-season Starts/Subs are always 0, so this always evaluates to the 0.01 fallback."
+        },
+        "CU": {
+          "header": "1",
+          "type": "formula",
+          "formula": "=IFERROR(((MODEL[[#This Row],[PS %1]]*CONTROL!$B$8)+(MODEL[[#This Row],[%1]]*CONTROL!$B$9))*MODEL[[#This Row],[1-60 mins]]*MODEL[[#This Row],[Chance of Playing]],0)",
+          "meaning": "Blended appearance probability = (PS%1 * previous-season weight + %1 * this-season weight) * CR('1-60 mins' constant, always 1) * Chance of Playing (API-sourced fitness flag, defaults to 1 if blank). Wrapped in IFERROR->0."
+        },
+        "CV": {
+          "header": "60+ mins",
+          "type": "literal_constant",
+          "value": 1,
+          "meaning": "Fixed weight/marker, not a formula. Always 1 for every row, structurally mirrors CR."
+        },
+        "CW": {
+          "header": "PS %2",
+          "type": "formula",
+          "formula": "=IFERROR((0.98-IF(MODEL[[#This Row],[PS Mn/St]]<50,0.5,TREND(\n  INDEX(CONTROL!$C$13:$C$17,MATCH(MODEL[[#This Row],[PS Mn/St]],CONTROL!$B$13:$B$17,-1)):INDEX(CONTROL!$C$13:$C$17,MATCH(MODEL[[#This Row],[PS Mn/St]],CONTROL!$B$13:$B$17,-1)+1),\n  INDEX(CONTROL!$B$13:$B$17,MATCH(MODEL[[#This Row],[PS Mn/St]],CONTROL!$B$13:$B$17,-1)):INDEX(CONTROL!$B$13:$B$17,MATCH(MODEL[[#This Row],[PS Mn/St]],CONTROL!$B$13:$B$17,-1)+1),\n  MODEL[[#This Row],[PS Mn/St]]\n))),0)",
+          "meaning": "Previous-season probability of reaching 60 minutes GIVEN a start, derived as 0.98 minus an interpolated 'chance of being subbed before 60 mins' curve keyed on PS Mn/St (average minutes per previous-season start), using the CONTROL!B13:C17 lookup table. If PS Mn/St < 50, uses a flat 0.5 penalty instead of interpolating."
+        },
+        "CX": {
+          "header": "%2",
+          "type": "formula",
+          "formula": "=IFERROR((0.99-IF(MODEL[[#This Row],[Mn/St]]<50,0.5,TREND(\n  INDEX(CONTROL!$C$13:$C$17,MATCH(MODEL[[#This Row],[Mn/St]],CONTROL!$B$13:$B$17,-1)):INDEX(CONTROL!$C$13:$C$17,MATCH(MODEL[[#This Row],[Mn/St]],CONTROL!$B$13:$B$17,-1)+1),\n  INDEX(CONTROL!$B$13:$B$17,MATCH(MODEL[[#This Row],[Mn/St]],CONTROL!$B$13:$B$17,-1)):INDEX(CONTROL!$B$13:$B$17,MATCH(MODEL[[#This Row],[Mn/St]],CONTROL!$B$13:$B$17,-1)+1),\n  MODEL[[#This Row],[Mn/St]]\n))),0)",
+          "meaning": "This-season analogue of CW, using this-season Mn/St. Base constant is 0.99 (vs 0.98 for PS %2) -- a spreadsheet quirk (see quirks). During preseason, this-season Mn/St is 0, which is <50, so this always uses the flat 0.5 penalty branch: result = 0.99 - 0.5 = 0.49."
+        },
+        "CY": {
+          "header": "2",
+          "type": "formula",
+          "formula": "=((MODEL[[#This Row],[PS %2]]*CONTROL!$B$19)+(CONTROL!$B$20*MODEL[[#This Row],[%2]]))*MODEL[[#This Row],[60+ mins]]",
+          "meaning": "Blended 60+ minute probability (given the player plays) = (PS%2 * previous-season weight + %2 * this-season weight) * CV('60+ mins' constant, always 1). Unlike CU, this has no explicit IFERROR wrapper and no Chance-of-Playing multiplication -- Chance of Playing is not applied to column '2' at the MODEL sheet level."
+        }
+      },
+      "appearance_and_minutes_fields": {
+        "PS_Starts_J": { "formula": "=MODEL[[#This Row],[Previous Season Starts1]]", "source_chain": "EO (Previous Season Starts1) <- dedupe of EK:EN, which are 4 parallel name-matched lookups (FPL_Name/web_name/FBRef_Name/Alt Name 2) into PSPT[Starts]." },
+        "PS_Subs_K": { "formula": "=MODEL[[#This Row],[Previous Season Subs1]]", "source_chain": "FI (Subs1... for PS this is a separate 'Previous Season Subs1' column using the same EO-style dedupe pattern against PSPT[Subs]." },
+        "PS_UnSub_L": { "formula": "=MODEL[[#This Row],[Previous Season UnSub1]]", "source_chain": "Dedupe of 4 name-matched lookups against PSPT[unSub]." },
+        "PS_Mn_St_M": { "formula": "=MODEL[[#This Row],[Previous Season Mn/Start]]", "source_chain": "FS <- dedupe of FO:FR name-matched lookups against PSPT." },
+        "PS_Mn_Sub_N": { "formula": "=MODEL[[#This Row],[Previous Season Mn/Sub]]", "source_chain": "GC <- dedupe of FY:GB name-matched lookups against PSPT." },
+        "PS_Mn_St_pct_O": {
+          "formula": "=IF(MODEL[[#This Row],[POS]]=\"GK\",1,IF(MODEL[[#This Row],[PS Starts]]=0,0.66,MODEL[[#This Row],[PS Mn/St]]/90))",
+          "meaning": "Goalkeepers assumed to play full 90 if they start (1.0). Outfield players with zero previous-season starts default to 0.66 (66% of 90 = 59.4 min, just under the 60-min threshold). Otherwise PS Mn/St / 90."
+        },
+        "PS_Mn_Sub_pct_P": {
+          "formula": "=IF(MODEL[[#This Row],[PS Mn/Sub]]=0,0.2,MODEL[[#This Row],[PS Mn/Sub]]/90)",
+          "meaning": "Default substitute cameo assumption of 0.2 (18 minutes) when there is no previous-season substitute-minutes data."
+        },
+        "PS_Sts_SqdsMd_Q": {
+          "formula": "=IFERROR(MODEL[[#This Row],[PS Starts]]/(MODEL[[#This Row],[PS Starts]]+MODEL[[#This Row],[PS Subs]]+MODEL[[#This Row],[PS UnSub]]),0)",
+          "meaning": "Previous-season starts as a fraction of all squad involvements (start+sub+unused-sub)."
+        },
+        "PS_UnSub_SqdsMd_R": {
+          "formula": "=IFERROR(MODEL[[#This Row],[PS UnSub]]/(MODEL[[#This Row],[PS Starts]]+MODEL[[#This Row],[PS Subs]]+MODEL[[#This Row],[PS UnSub]]),0)",
+          "meaning": "Previous-season 'named but never got on' rate as a fraction of all squad involvements."
+        },
+        "Chance_of_Playing_AM": {
+          "formula": "=IFERROR(IF(INDEX(API[chance_of_playing_next_round],MATCH(API[[#This Row],[code]],API[code],0))=\"\",1,(INDEX(API[chance_of_playing_next_round],MATCH(API[[#This Row],[code]],API[code],0)))/100),0)",
+          "meaning": "Pulled from official FPL API 'chance_of_playing_next_round' (0-100 integer, blank if fully fit). Blank -> 1.0 (fully available). Otherwise divided by 100 to get a 0-1 fraction. IFERROR->0 catches unmatched codes."
+        },
+        "Starts_AN": { "formula": "=MODEL[[#This Row],[Starts1]]", "source_chain": "This-season analogue of PS Starts, deduped against PT (not PSPT)." },
+        "Subs_AO": { "formula": "=MODEL[[#This Row],[Subs1]]" },
+        "UnSub_AP": { "formula": "=MODEL[[#This Row],[UnSub1]]" },
+        "Mn_St_AQ": { "formula": "=MODEL[[#This Row],[Mn/Start1]]" },
+        "Mn_Sub_AR": { "formula": "=MODEL[[#This Row],[Mn/Sub1]]" },
+        "Mn_St_pct_AS": {
+          "formula": "=IF(MODEL[[#This Row],[POS]]=\"GK\",1,IF(MODEL[[#This Row],[Starts]]=0,0.66,MODEL[[#This Row],[Mn/St]]/90))",
+          "meaning": "This-season mirror of PS Mn/St %."
+        },
+        "Mn_Sub_pct_AT": { "formula": "=IF(MODEL[[#This Row],[Mn/Sub]]=0,0.2,MODEL[[#This Row],[Mn/Sub]]/90)" },
+        "St_SqdsMd_AU": {
+          "formula": "=IFERROR(MODEL[[#This Row],[Starts]]/(MODEL[[#This Row],[Starts]]+MODEL[[#This Row],[Subs]]+MODEL[[#This Row],[UnSub]]),0)"
+        },
+        "UnSub_SqdsMd_AV": {
+          "formula": "=IFERROR(MODEL[[#This Row],[UnSub]]/(MODEL[[#This Row],[Starts]]+MODEL[[#This Row],[Subs]]+MODEL[[#This Row],[UnSub]]),0)"
+        },
+        "dedupe_pattern_note": "Starts1/Subs1/UnSub1/Mn-Start1/Mn-Sub1 (and their 'Previous Season ...' counterparts) are each built from 4 parallel name-matched lookups (FPL_Name, web_name, FBRef_Name, Alt Name 2) against a source table (PT for this-season, PSPT for previous-season). The dedupe formula sums all 4 lookups, then IF the sum equals any single one of the 4 values (i.e. only one lookup actually matched, the rest returned 0), uses the sum as-is; otherwise divides by 2. This assumes at most 2 of the 4 name variants can simultaneously match a real row, and divides by 2 to undo double-counting when exactly 2 match. This heuristic would silently miscount if 3 or 4 of the aliases matched simultaneously."
+      }
+    },
+    "PPts_sheet": {
+      "columns_BA_to_BI": {
+        "AY_PRE_HA_TOTAL": {
+          "header": "PRE H/A TOTAL",
+          "formula": "=PPts[[#This Row],[1-60 mins]]+PPts[[#This Row],[2]]+PPts[[#This Row],[3]]+PPts[[#This Row],[4]]+PPts[[#This Row],[5]]+PPts[[#This Row],[6]]+PPts[[#This Row],[7]]+PPts[[#This Row],[8]]+PPts[[#This Row],[9]]+PPts[[#This Row],[10]]+PPts[[#This Row],[11]]",
+          "meaning": "Sum of all 11 component xPts columns (appearance, 60-min, saves, cards, bonus, assists, goals, clean sheets, goals-conceded, DC) before any home/away adjustment. Included for context; not itself in BA:BI but feeds BA."
+        },
+        "AZ_HA": {
+          "header": "H/A",
+          "formula": "=IF(EXACT(PPts[[#This Row],[VS]],UPPER(PPts[[#This Row],[VS]]))=TRUE,1.05,0.95)",
+          "meaning": "Home/away multiplier. VS is the opponent abbreviation; it is stored UPPERCASE for a home fixture and lowercase for an away fixture (see PPts!Q formula), so EXACT(VS, UPPER(VS)) is a case-sensitive test for 'is this string already uppercase' i.e. 'is this a home fixture'. Home -> 1.05, Away -> 0.95."
+        },
+        "BA": {
+          "header": "IF START TOTAL",
+          "formula": "=IF(LEN(PPts[[#This Row],[VS]])<3,0,PPts[[#This Row],[PRE H/A TOTAL]]*PPts[[#This Row],[H/A]])",
+          "meaning": "Zero if there is no valid fixture this row (VS resolves to '-' or blank, length <3). Otherwise PRE H/A TOTAL * H/A: the full component sum, home/away-adjusted once. This is the 'expected points assuming the player starts' figure, before minutes-blending with the not-start branch."
+        },
+        "BB": {
+          "header": "PSxTS Starts/Squads Made",
+          "formula": "=(CONTROL!$B$8*INDEX(MODEL[PS Sts/SqdsMd],MATCH(PPts[[#This Row],[Code]],MODEL[Code],0)))+(CONTROL!$B$9*INDEX(MODEL[St/SqdsMd],MATCH(PPts[[#This Row],[Code]],MODEL[Code],0)))",
+          "meaning": "Blended (Previous-Season weight * PS Sts/SqdsMd) + (This-Season weight * St/SqdsMd), reusing the CONTROL!B8/B9 weights from the MODEL sheet's '1-60 mins' blend. This is effectively the model's estimate of P(start | named in squad)."
+        },
+        "BC": {
+          "header": "M Start %",
+          "formula": "=IF(INDEX(PREDICT[Manual Start %],MATCH(PPts[[#This Row],[Code]],PREDICT[HARD CODE],0))=\"\",\"\",INDEX(PREDICT[Manual Start %],MATCH(PPts[[#This Row],[Code]],PREDICT[HARD CODE],0)))",
+          "meaning": "Pass-through of a hand-entered override from PREDICT!H (Manual Start %), keyed by player code (PREDICT!B, HARD CODE). Empty string when no manual override exists for that player. This is a manual/analyst input, not a derived value."
+        },
+        "BD": {
+          "header": "MODEL 1",
+          "formula": "=INDEX(MODEL[1],MATCH(PPts[[#This Row],[Code]],MODEL[Code],0))",
+          "meaning": "Direct lookup of the MODEL sheet's blended appearance-probability column '1' (MODEL!CU) for this player."
+        },
+        "BE": {
+          "header": "T1",
+          "formula": "=IF(PPts[[#This Row],[M Start %]]=\"\",PPts[[#This Row],[MODEL 1]],(1*PPts[[#This Row],[M Start %]])+((1-PPts[[#This Row],[M Start %]])*PPts[[#This Row],[MODEL 1]]))",
+          "meaning": "SEE QUIRKS: when no manual override, T1 = MODEL 1 (a 0-1 probability). When a manual override IS present, T1 = (1 * M_Start%) + ((1 - M_Start%) * MODEL_1). This blends M_Start% as if it were itself a points value (weight 1, not P(start)-weighted), added to a shrunk residual of MODEL 1. It is NOT a probability-weighted average of two probabilities; the resulting T1 can exceed either input (see Saka golden case: M_Start%=0.6, MODEL_1=0.9590625 -> T1=0.983625, greater than both)."
+        },
+        "BF": {
+          "header": "PSxTS Mn/Sub / Mn/St",
+          "formula": "=INDEX(MODEL[G+A PSxTS Mn/Sub],MATCH(PPts[[#This Row],[Code]],MODEL[Code],0))/INDEX(MODEL[G+A PSxTS Mn/Start],MATCH(PPts[[#This Row],[Code]],MODEL[Code],0))",
+          "meaning": "Ratio of blended expected substitute minutes to blended expected starting minutes for this player (goals+assists blend columns AK/AL on MODEL, reused here as a generic minutes-scaling ratio). Used to scale down the 'if not start' component total to reflect a substitute's reduced minutes versus a starter's."
+        },
+        "BG": {
+          "header": "IF NOT START TOTAL",
+          "formula": "=((PPts[[#This Row],[4]]+PPts[[#This Row],[5]]+PPts[[#This Row],[6]]+PPts[[#This Row],[7]]+PPts[[#This Row],[8]]+PPts[[#This Row],[10]])*PPts[[#This Row],[PSxTS Mn/Sub / Mn/St]]*PPts[[#This Row],[H/A]])",
+          "meaning": "Sum of only the rate-scalable component columns (4,5,6,7,8,10 -- cards/bonus/assists/goals/DC; explicitly EXCLUDES columns 2 '60+ mins', 3 '3x Saves', 9 'CS', and 11 which are either start-gated or non-linear in minutes) times the Mn/Sub-to-Mn/Start ratio (scaling starter-based rates down to substitute-cameo minutes) times H/A. SEE QUIRKS: H/A is applied here."
+        },
+        "BH": {
+          "header": "Start %",
+          "formula": "=IF(PPts[[#This Row],[M Start %]]<>\"\",PPts[[#This Row],[M Start %]],INDEX(MODEL[Chance of Playing],MATCH(PPts[[#This Row],[Code]],MODEL[Code],0))*PPts[[#This Row],[PSxTS Starts/Squads Made]])",
+          "meaning": "The actual probability weight used to blend BA (start branch) and BG (not-start branch) in BI. Uses the manual override directly if present, otherwise Chance of Playing * PSxTS Starts/Squads Made. Note this is a genuine 0-1 probability, unlike T1 (BE) which is not."
+        },
+        "BI": {
+          "header": "TRUE TOTAL",
+          "formula": "=IF(LEN(PPts[[#This Row],[VS]])<3,0,(PPts[[#This Row],[T1]]+((PPts[[#This Row],[2]]+PPts[[#This Row],[3]]+PPts[[#This Row],[4]]+PPts[[#This Row],[5]]+PPts[[#This Row],[6]]+PPts[[#This Row],[7]]+PPts[[#This Row],[8]]+PPts[[#This Row],[9]]+PPts[[#This Row],[10]]+PPts[[#This Row],[11]])*PPts[[#This Row],[Start %]])+(PPts[[#This Row],[IF NOT START TOTAL]]*(1-PPts[[#This Row],[Start %]])))*PPts[[#This Row],[H/A]])",
+          "meaning": "SEE QUIRKS (H/A double-application). Final per-fixture expected points = 0 if no valid fixture. Otherwise: [T1 (quirky start-branch appearance term, NOT itself H/A-adjusted) + (full component sum 2..11 * Start%, i.e. an expected-value blend using the *other* start-probability BH) + (BG not-start branch, which ALREADY has H/A baked in, * (1-Start%))] all multiplied by H/A again."
+        }
+      }
+    }
+  },
+  "golden_cases": [
+    {
+      "label": "certain_starter",
+      "player_code": 154561,
+      "player_name": "David Raya Mart\u00edn",
+      "web_name": "Raya",
+      "team": "ARS",
+      "position": "GK",
+      "sheet_refs": {
+        "MODEL_row": 2,
+        "PPts_row_GW1": 2
+      },
+      "inputs": {
+        "MODEL!J2 PS Starts": 37,
+        "MODEL!K2 PS Subs": 0,
+        "MODEL!L2 PS UnSub": 0,
+        "MODEL!M2 PS Mn/St": 90,
+        "MODEL!Q2 PS Sts/SqdsMd": 1,
+        "MODEL!R2 PS UnSub/SqdsMd": 0,
+        "MODEL!AM2 Chance of Playing": 1,
+        "MODEL!AN2 Starts (this season)": 0,
+        "MODEL!AO2 Subs (this season)": 0,
+        "MODEL!AP2 UnSub (this season)": 0,
+        "PPts!Q2 VS": "COV",
+        "PPts!AZ2 H/A": 1.05
+      },
+      "cached_intermediate_values": {
+        "MODEL!CS2 PS %1": 0.99,
+        "MODEL!CT2 %1": 0.01,
+        "MODEL!CU2 '1'": 0.99,
+        "MODEL!CW2 PS %2": 0.98,
+        "MODEL!CX2 %2": 0.49,
+        "MODEL!CY2 '2'": 0.98,
+        "PPts!BB2 PSxTS Starts/Squads Made": 1,
+        "PPts!BC2 M Start %": null,
+        "PPts!BD2 MODEL 1": 0.99,
+        "PPts!BE2 T1": 0.99,
+        "PPts!BG2 IF NOT START TOTAL": 0.037657280061635656,
+        "PPts!BH2 Start %": 1,
+        "PPts!BA2 IF START TOTAL": 4.850971146125662,
+        "PPts!BI2 TRUE TOTAL": 4.840471146125662
+      },
+      "expected_outputs": {
+        "appearance_probability_MODEL_1": 0.99,
+        "sixty_minute_probability_MODEL_2": 0.98,
+        "note": "With Start %=1, BI collapses to (T1 + full_sum*1)*H/A = (T1+full_sum)*H/A since the not-start branch is weighted by (1-1)=0, so the H/A double-application quirk is invisible for this player -- a useful check case precisely because it ISOLATES the pure start branch."
+      }
+    },
+    {
+      "label": "rotation_prone_starter",
+      "player_code": 201666,
+      "player_name": "Harvey Barnes",
+      "web_name": "Barnes",
+      "team": "NEW",
+      "position": "MID",
+      "sheet_refs": {
+        "MODEL_row": 467,
+        "PPts_row_GW1": 467
+      },
+      "inputs": {
+        "MODEL!J467 PS Starts": 19,
+        "MODEL!K467 PS Subs": 18,
+        "MODEL!L467 PS UnSub": 1,
+        "MODEL!M467 PS Mn/St": 79,
+        "MODEL!N467 PS Mn/Sub": 26,
+        "MODEL!Q467 PS Sts/SqdsMd": 0.5,
+        "MODEL!R467 PS UnSub/SqdsMd": 0.02631578947368421,
+        "MODEL!AM467 Chance of Playing": 1,
+        "PPts!Q467 VS": "LIV",
+        "PPts!AZ467 H/A": 1.05
+      },
+      "cached_intermediate_values": {
+        "MODEL!CS467 PS %1": 0.9639473684210527,
+        "MODEL!CT467 %1": 0.01,
+        "MODEL!CU467 '1'": 0.9639473684210527,
+        "MODEL!CW467 PS %2": 0.9199999999999999,
+        "MODEL!CX467 %2": 0.49,
+        "MODEL!CY467 '2'": 0.9199999999999999,
+        "PPts!BB467 PSxTS Starts/Squads Made": 0.5,
+        "PPts!BC467 M Start %": null,
+        "PPts!BD467 MODEL 1": 0.9639473684210527,
+        "PPts!BE467 T1": 0.9639473684210527,
+        "PPts!BF467 PSxTS Mn/Sub / Mn/St": 0.3291139240506329,
+        "PPts!BG467 IF NOT START TOTAL": 0.7740236578188885,
+        "PPts!BH467 Start %": 0.5,
+        "PPts!BA467 IF START TOTAL": 4.570103061771032,
+        "PPts!BI467 TRUE TOTAL": 3.1785586880825383
+      },
+      "expected_outputs": {
+        "appearance_probability_MODEL_1": 0.9639473684210527,
+        "sixty_minute_probability_MODEL_2": 0.9199999999999999,
+        "note": "Verified by hand: BI = (T1 + sum(cols 2..11)*Start% + BG*(1-Start%)) * H/A = (0.9639473684210527 + 3.3524791064486017*0.5 + 0.7740236578188885*0.5) * 1.05 = 3.1785586880825383, matching cache to full float precision. This confirms the H/A-applied-twice mechanism reproducibly (BG already includes one H/A factor internally)."
+      }
+    },
+    {
+      "label": "frequent_substitute",
+      "player_code": 223541,
+      "player_name": "Federico Chiesa",
+      "web_name": "Chiesa",
+      "team": "LIV",
+      "position": "MID",
+      "sheet_refs": {
+        "MODEL_row": 379,
+        "PPts_row_GW1": 379
+      },
+      "inputs": {
+        "MODEL!J379 PS Starts": 1,
+        "MODEL!K379 PS Subs": 25,
+        "MODEL!L379 PS UnSub": 10,
+        "MODEL!M379 PS Mn/St": 60,
+        "MODEL!N379 PS Mn/Sub": 11,
+        "MODEL!Q379 PS Sts/SqdsMd": 0.027777777777777776,
+        "MODEL!R379 PS UnSub/SqdsMd": 0.2777777777777778,
+        "MODEL!AM379 Chance of Playing": 1,
+        "PPts!Q379 VS": "new",
+        "PPts!AZ379 H/A": 0.95
+      },
+      "cached_intermediate_values": {
+        "MODEL!CS379 PS %1": 0.715,
+        "MODEL!CT379 %1": 0.01,
+        "MODEL!CU379 '1'": 0.715,
+        "MODEL!CW379 PS %2": 0.48,
+        "MODEL!CX379 %2": 0.49,
+        "MODEL!CY379 '2'": 0.48,
+        "PPts!BB379 PSxTS Starts/Squads Made": 0.027777777777777776,
+        "PPts!BC379 M Start %": null,
+        "PPts!BD379 MODEL 1": 0.715,
+        "PPts!BE379 T1": 0.715,
+        "PPts!BF379 PSxTS Mn/Sub / Mn/St": 0.18333333333333335,
+        "PPts!BG379 IF NOT START TOTAL": 0.27427072571066713,
+        "PPts!BH379 Start %": 0.027777777777777776,
+        "PPts!BA379 IF START TOTAL": 3.142480207817075,
+        "PPts!BI379 TRUE TOTAL": 0.9934717177137987
+      },
+      "expected_outputs": {
+        "appearance_probability_MODEL_1": 0.715,
+        "sixty_minute_probability_MODEL_2": 0.48,
+        "note": "PS Mn/St=60 exactly hits the CONTROL!B16=60 breakpoint (C16=0.5), so CW379 = 0.98-0.5 = 0.48 without needing TREND() interpolation -- a useful edge-of-table check. Start%=0.0278 means TRUE TOTAL is dominated almost entirely by the not-start branch (subs cameo scaling), not the start branch, unlike Raya/Barnes."
+      }
+    },
+    {
+      "label": "likely_non_appearance",
+      "player_code": 110690,
+      "player_name": "Ben Wilson",
+      "web_name": "Wilson",
+      "team": "COV",
+      "position": "GK",
+      "sheet_refs": {
+        "MODEL_row": 179,
+        "PPts_row_GW1": 179
+      },
+      "inputs": {
+        "MODEL!J179 PS Starts": 0,
+        "MODEL!K179 PS Subs": 0,
+        "MODEL!L179 PS UnSub": 46,
+        "MODEL!Q179 PS Sts/SqdsMd": 0,
+        "MODEL!R179 PS UnSub/SqdsMd": 1,
+        "MODEL!AM179 Chance of Playing": 1,
+        "PPts!Q179 VS": "ars",
+        "PPts!AZ179 H/A": 0.95
+      },
+      "cached_intermediate_values": {
+        "MODEL!CS179 PS %1": 0.01,
+        "MODEL!CT179 %1": 0.01,
+        "MODEL!CU179 '1'": 0.01,
+        "MODEL!CW179 PS %2": 0.48,
+        "MODEL!CX179 %2": 0.49,
+        "MODEL!CY179 '2'": 0.48,
+        "PPts!BB179 PSxTS Starts/Squads Made": 0,
+        "PPts!BC179 M Start %": null,
+        "PPts!BD179 MODEL 1": 0.01,
+        "PPts!BE179 T1": 0.01,
+        "PPts!BF179 PSxTS Mn/Sub / Mn/St": 0.2,
+        "PPts!BG179 IF NOT START TOTAL": -0.0820487146432367,
+        "PPts!BH179 Start %": 0,
+        "PPts!BA179 IF START TOTAL": 1.4629165563577302,
+        "PPts!BI179 TRUE TOTAL": -0.06844627891107487
+      },
+      "expected_outputs": {
+        "appearance_probability_MODEL_1": 0.01,
+        "sixty_minute_probability_MODEL_2": 0.48,
+        "note": "SPREADSHEET QUIRK: PS Starts=0 AND PS Subs=0 (46 unused-sub appearances only) triggers the CS 'AND(...=0,...=0)' branch giving PS%1=0.01, a near-zero-but-not-zero appearance prior. Start%=0 makes TRUE TOTAL collapse to BG*(1-0)*H/A = BG*H/A = -0.0820487146432367*0.95 = -0.06844627891107487, a NEGATIVE expected-points figure for a permanent benchwarmer, because BG's card/bonus/assist/goal/DC component sum for this GK happens to be slightly negative (dominated by a negative '4' cards component) before scaling. This is a genuine spreadsheet artifact worth flagging, not a modelling choice worth reproducing as-is."
+      }
+    },
+    {
+      "label": "manual_start_override_example",
+      "player_code": 223340,
+      "player_name": "Bukayo Saka",
+      "web_name": "Saka",
+      "team": "ARS",
+      "position": "MID",
+      "sheet_refs": {
+        "MODEL_row": 13,
+        "PPts_row_GW1": 13,
+        "PREDICT_row": 24
+      },
+      "inputs": {
+        "MODEL!J13 PS Starts": 25,
+        "MODEL!K13 PS Subs": 6,
+        "MODEL!L13 PS UnSub": 1,
+        "MODEL!Q13 PS Sts/SqdsMd": 0.78125,
+        "MODEL!AM13 Chance of Playing": 1,
+        "PREDICT!H24 Manual Start %": 0.6,
+        "PPts!Q13 VS": "COV",
+        "PPts!AZ13 H/A": 1.05
+      },
+      "cached_intermediate_values": {
+        "MODEL!CS13 PS %1": 0.9590625,
+        "MODEL!CU13 '1'": 0.9590625,
+        "MODEL!CY13 '2'": 0.94,
+        "PPts!BB13 PSxTS Starts/Squads Made": 0.78125,
+        "PPts!BC13 M Start %": 0.6,
+        "PPts!BD13 MODEL 1": 0.9590625,
+        "PPts!BE13 T1": 0.983625,
+        "PPts!BG13 IF NOT START TOTAL": 1.1934895042351927,
+        "PPts!BH13 Start %": 0.6,
+        "PPts!BA13 IF START TOTAL": 6.284704851210814,
+        "PPts!BI13 TRUE TOTAL": 4.674894752505269
+      },
+      "expected_outputs": {
+        "T1_manual_blend_check": "T1 = 1*0.6 + (1-0.6)*0.9590625 = 0.6 + 0.383625 = 0.983625 (matches cache exactly)",
+        "note": "PRIMARY EXAMPLE for the T1 manual-start-formula quirk (see quirks). Included specifically because PREDICT!H24 has a clean, human-entered Manual Start % (0.6) so the quirky blend formula in BE is directly verifiable by hand, unlike the 4 core golden cases above where M Start % is blank and T1 trivially equals MODEL 1."
+      }
+    }
+  ],
+  "warnings": [
+    {
+      "type": "cache_staleness_risk",
+      "detail": "MODEL.xlsx has calculation.fullCalcOnLoad=True, meaning Excel would recompute all formulas the next time a human opens and saves the file. openpyxl's data_only=True reads only whatever values were cached at last save; this extraction did NOT open the file in Excel and therefore reflects that last-saved cache, which could differ from a fresh recalculation if any upstream source sheet (API, PT, PSPT, MINS, DC, FIXHELPER) changed since the last save without the workbook being reopened and saved in Excel."
+    },
+    {
+      "type": "scan_coverage",
+      "detail": "Rows 2-800 of MODEL (799 data rows) and rows 2-2000 of PPts (per-player GW1 rows only) were scanned for missing/error values in the columns used by this extraction (Chance of Playing, Starts, '1', '2', PS %1, %1, PS %2, %2). Zero None/error values were found in that range. Rows beyond 800 in MODEL, and non-GW1 rows in PPts, were not exhaustively scanned for staleness."
+    },
+    {
+      "type": "preseason_state",
+      "detail": "CONTROL!B3 = 0 ('LAST GW (Pre-Season = 0)') and CONTROL!B8=1/B9=0, B19=1/B20=0 mean the workbook, as extracted, is 100% previous-season-weighted for both the appearance ('1') and 60-minute ('2') columns. This-season Starts/Subs/UnSub/Mn-St/Mn-Sub are all 0 for every player at this point in the season, so '%1' and '%2' (this-season columns) are always at their fallback constants (0.01 and 0.49 respectively) and contribute nothing numerically even though B9/B20 are nonzero in general. Any reference outputs extracted here are therefore a preseason snapshot, not representative of in-season blending behavior once B3 advances past 0."
+    },
+    {
+      "type": "dedupe_dependency_not_traced",
+      "detail": "MODEL!Starts1/Subs1/UnSub1/Mn-Start1/Mn-Sub1 (and PS equivalents) depend on a 4-way name-matching dedupe against PT/PSPT sheets, which were not individually audited row-by-row in this extraction beyond confirming the dedupe formula's structure. If a player's FPL_Name/web_name/FBRef_Name/Alt Name 2 aliases produce 3+ simultaneous matches against PT/PSPT, the /2 correction in the dedupe formula would silently undercount -- not verified either way for the 4 golden-case players."
+    }
+  ],
+  "spreadsheet_quirks": [
+    {
+      "id": "cr_cv_literal_constants",
+      "title": "CR ('1-60 mins') and CV ('60+ mins') are literal 1s, not formulas",
+      "detail": "Despite sharing a header row with formula-driven probability columns, MODEL!CR and MODEL!CV contain the hardcoded literal value 1 in every data row (spot-checked rows 2, 3, 4, 5, 100, 500, 799). They function purely as fixed multipliers inside CU and CY (effectively no-ops at their current value) rather than as computed scenario weights. If a future spreadsheet revision changed these to real formulas, CU/CY's meaning would change; as-is, they can be treated as always-1 constants."
+    },
+    {
+      "id": "t1_manual_start_blend",
+      "title": "T1's manual-start blend is not a probability-weighted average",
+      "detail": "PPts!BE (T1) = IF(M_Start%=\"\", MODEL_1, (1*M_Start%) + ((1-M_Start%)*MODEL_1)). When a manual override is present, this adds M_Start% at full weight (coefficient 1, not M_Start%) to a (1-M_Start%)-shrunk MODEL_1, rather than computing anything resembling P(start)-weighted expected value of two probabilities. Verified on Bukayo Saka (golden case 'manual_start_override_example'): M_Start%=0.6, MODEL_1=0.9590625 -> T1=0.983625, a value greater than either input. T1 feeds only the start-branch numerator in BI; the actual probability used to WEIGHT the start vs not-start branches is the separate BH (Start %) column, which IS a clean probability (uses M_Start% directly when present). So the spreadsheet has two different uses of 'manual start %' in the same row: one as a direct probability weight (BH) and one folded into a non-probabilistic point-boost formula (T1/BE). Any Python reproduction must decide deliberately whether to replicate this asymmetry or treat it as a bug to fix."
+    },
+    {
+      "id": "ha_applied_twice_on_not_start_branch",
+      "title": "H/A (home/away multiplier) is applied twice to the non-start branch's contribution to TRUE TOTAL",
+      "detail": "PPts!BG (IF NOT START TOTAL) = (sum of components 4,5,6,7,8,10) * (Mn/Sub-to-Mn/Start ratio) * H/A -- one H/A factor baked in. PPts!BI (TRUE TOTAL) = (T1 + full_sum*Start% + BG*(1-Start%)) * H/A -- wraps the ENTIRE blended total, including the already-H/A-adjusted BG, in a second H/A multiplication. Verified by hand on Harvey Barnes (golden case 'rotation_prone_starter'): BG=0.7740236578188885 already includes one factor of H/A=1.05 (BG recomputed without H/A = 0.7371653883989414; 0.7371653883989414*1.05 = 0.7740236578188885, matching cache). The T1 term and the full_sum*Start% term are each only H/A-adjusted once (via the outer multiplication), so the double-application is specific to the not-start branch. Net effect: the home/away adjustment is slightly overstated for players with meaningful (1-Start%) substitute-cameo weight, more so for extreme home/away fixtures (H/A=1.05 or 0.95 compounds to 1.1025 or 0.9025 on that portion). This is very likely an unintentional spreadsheet bug rather than a deliberate design choice, since there is no equivalent second H/A factor anywhere in the start-branch path."
+    },
+    {
+      "id": "negative_true_total_possible",
+      "title": "TRUE TOTAL can be negative for permanent non-appearance players",
+      "detail": "For a player with Start%=0 (e.g. Ben Wilson, golden case 'likely_non_appearance'), TRUE TOTAL collapses to BG*H/A alone. BG sums components 4 (cards, can be negative in this model), 5, 6, 7, 8, 10 scaled by the Mn/Sub-to-Mn/Start ratio; for Wilson this sum is slightly negative (-0.0820487146432367 after H/A), producing TRUE TOTAL = -0.06844627891107487 -- a small negative expected-points value for a player who essentially never plays. A points model conventionally floors expected points at 0; this spreadsheet does not, at least not in this column."
+    },
+    {
+      "id": "ps_pct2_vs_pct2_base_constant_mismatch",
+      "title": "PS %2 uses base constant 0.98, %2 (this-season) uses 0.99",
+      "detail": "MODEL!CW (PS %2) formula is '=IFERROR((0.98-IF(...` while MODEL!CX (%2) is '=IFERROR((0.99-IF(...'. Both otherwise share identical structure (same CONTROL!B13:C17 TREND lookup, same <50-minutes fallback of 0.5). The 0.98 vs 0.99 base constant is not explained anywhere in CONTROL and is not parameterized -- it is hardcoded per-formula. Unclear whether this is intentional (e.g. previous-season data assumed slightly noisier / capped 1% lower) or a copy-paste inconsistency. Flagged as an ambiguity, not resolved by this extraction."
+    },
+    {
+      "id": "and_zero_zero_fallback_uses_099_not_100",
+      "title": "The zero-appearance-history fallback for PS %1 / %1 is 0.01, not exactly 0",
+      "detail": "MODEL!CS / CT: IF(Starts=0 AND Subs=0, 0.01, (1-UnSub/SqdsMd)*0.99). A player with truly zero previous appearances (no starts, no subs, regardless of UnSub count) gets a nonzero 1% prior appearance probability rather than 0. This is a deliberate Bayesian-style prior (never fully rule out an appearance) but is worth flagging explicitly since it means MODEL!'1' is never exactly 0 for any player with Chance of Playing > 0, even one who has never played a single previous-season minute (see also Chelsea's Quenda/Emegha in the wider scan, both showing '1'=0.0075 = 0.01*0.75 Chance-of-Playing)."
+    }
+  ]
+}
