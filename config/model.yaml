@@ -1,0 +1,32 @@
+model:
+  name: benchwarmers_plus_context
+  baseline: benchwarmers_2026_27
+  explainable_components: true
+  deadline_safe_backtests: true
+
+weights:
+  attacking:
+    long_form_games: 38
+    short_form_games: 6
+    long_form_weight: 0.80
+    short_form_weight: 0.20
+  defensive_contributions:
+    long_form_games: 38
+    short_form_games: 10
+
+context:
+  promotion_enabled: false
+  manager_regime_enabled: false
+  tournament_readiness_enabled: false
+  congestion_enabled: false
+  tactical_role_enabled: false
+
+spatial:
+  pitch_x_min: 0.0
+  pitch_x_max: 1.0
+  pitch_y_min: 0.0
+  pitch_y_max: 1.0
+  attacking_direction: positive_x
+  final_third_start: 0.6666667
+  box_x_start: 0.83
+  box_half_width: 0.20
