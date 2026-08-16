@@ -15,8 +15,10 @@ from __future__ import annotations
 import argparse
 
 from fpl_model.ingest.sofascore_experimental import (
+    DEFAULT_BASE_URL,
     SofaScoreCoverageError,
     SofaScoreExperimentalClient,
+    SofaScoreTransportError,
 )
 from fpl_model.tactics.spatial import fingerprint
 
@@ -27,12 +29,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--team-id", type=int, help="SofaScore team ID")
     parser.add_argument("--event-id", type=int, help="SofaScore event ID")
     parser.add_argument("--player-id", type=int, help="SofaScore player ID")
+    parser.add_argument(
+        "--base-url",
+        default=DEFAULT_BASE_URL,
+        help=f"SofaScore API base URL (default: {DEFAULT_BASE_URL})",
+    )
     return parser.parse_args()
 
 
-def main() -> None:
-    args = parse_args()
-    client = SofaScoreExperimentalClient()
+def run(args: argparse.Namespace) -> None:
+    client = SofaScoreExperimentalClient(base_url=args.base_url)
+    print(f"SofaScore transport: {client.base_url}")
 
     if args.date and args.team_id:
         events = client.find_team_events(args.date, args.team_id)
@@ -74,6 +81,14 @@ def main() -> None:
 
     if not ((args.date and args.team_id) or args.event_id):
         raise SystemExit("Provide --date + --team-id, or --event-id")
+
+
+def main() -> None:
+    args = parse_args()
+    try:
+        run(args)
+    except SofaScoreTransportError as exc:
+        raise SystemExit(f"SofaScore transport error: {exc}") from exc
 
 
 if __name__ == "__main__":
