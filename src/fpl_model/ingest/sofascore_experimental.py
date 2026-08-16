@@ -8,13 +8,15 @@ Community projects currently document endpoints such as:
 
 - /sport/football/scheduled-events/{YYYY-MM-DD}
 - /event/{event_id}/lineups
+- /event/{event_id}/average-positions
 - /event/{event_id}/player/{player_id}/heatmap
 - /event/{event_id}/player/{player_id}/rating-breakdown
 
-The heatmap endpoint is commonly described as returning 0..100 x/y points. We
-normalise that geometry here, but coordinate orientation must still be verified
-against known matches before derived role metrics are treated as calibrated
-features.
+Average positions are attractive as the first spatial signal because one match-
+level request can return all players. Player heatmaps are denser but require a
+request per player. Community references describe these pitch coordinates on a
+0..100 grid. Coordinate orientation must still be verified against known matches
+before derived role metrics are treated as calibrated model features.
 """
 
 from __future__ import annotations
@@ -30,7 +32,7 @@ import requests
 
 from fpl_model.tactics.spatial import normalise_points
 
-DEFAULT_BASE_URL = "https://api.sofascore.com/api/v1"
+DEFAULT_BASE_URL = "https://www.sofascore.com/api/v1"
 
 
 class SofaScoreCoverageError(RuntimeError):
@@ -119,6 +121,79 @@ class SofaScoreExperimentalClient:
                 )
 
         return pd.DataFrame(rows)
+
+    def average_positions(self, event_id: int) -> dict[str, Any]:
+        """Return the raw match-level average-position payload."""
+        return self._get_json(f"event/{event_id}/average-positions")
+
+    def average_positions_table(self, event_id: int) -> pd.DataFrame:
+        """Flatten averageX/averageY for all covered players in one request."""
+        payload = self.average_positions(event_id)
+        rows: list[dict[str, Any]] = []
+
+        for side in ("home", "away"):
+            items = payload.get(side, [])
+            if not isinstance(items, list):
+                continue
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                player = item.get("player", {})
+                if not isinstance(player, dict) or not player:
+                    continue
+                rows.append(
+                    {
+                        "event_id": event_id,
+                        "side": side,
+                        "sofascore_player_id": player.get("id"),
+                        "player_name": player.get("name"),
+                        "short_name": player.get("shortName"),
+                        "provider_position": player.get("position"),
+                        "average_x": item.get("averageX"),
+                        "average_y": item.get("averageY"),
+                    }
+                )
+
+        frame = pd.DataFrame(rows)
+        if frame.empty:
+            raise SofaScoreCoverageError(f"Average positions unavailable for event={event_id}")
+
+        for column in ("average_x", "average_y"):
+            frame[column] = pd.to_numeric(frame[column], errors="coerce")
+        return frame
+
+    def normalised_average_positions(
+        self,
+        event_id: int,
+        *,
+        flip_x: bool = False,
+        flip_y: bool = False,
+    ) -> pd.DataFrame:
+        """Return average positions on the project's 0..1 pitch convention."""
+        frame = self.average_positions_table(event_id).copy()
+        valid = frame[["average_x", "average_y"]].notna().all(axis=1)
+        frame["normalised_x"] = np.nan
+        frame["normalised_y"] = np.nan
+
+        if valid.any():
+            points = list(
+                zip(
+                    frame.loc[valid, "average_x"],
+                    frame.loc[valid, "average_y"],
+                    strict=True,
+                )
+            )
+            normalised = normalise_points(
+                points,
+                x_max=100.0,
+                y_max=100.0,
+                flip_x=flip_x,
+                flip_y=flip_y,
+            )
+            frame.loc[valid, "normalised_x"] = normalised[:, 0]
+            frame.loc[valid, "normalised_y"] = normalised[:, 1]
+
+        return frame
 
     def player_heatmap(self, event_id: int, player_id: int) -> list[tuple[float, float]]:
         payload = self._get_json(f"event/{event_id}/player/{player_id}/heatmap")
