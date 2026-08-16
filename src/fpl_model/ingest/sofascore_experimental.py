@@ -63,7 +63,6 @@ class SofaScoreExperimentalClient:
     def _get_json(self, path: str) -> dict[str, Any]:
         self._throttle()
         url = f"{self.base_url.rstrip('/')}/{path.lstrip('/')}"
-
         try:
             response = self.session.get(
                 url,

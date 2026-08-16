@@ -76,6 +76,13 @@ using browser-like headers and a deliberately low request rate. Both hosts retur
 
 This does **not** prove that the endpoint pattern is invalid: current community clients document the same endpoints, and SofaScore is known to apply bot/rate-limit controls. It does mean that cloud CI is not a suitable live ingestion environment for this source. The next acceptance test should run from the user's local machine/network. Do not attempt to bypass provider access controls.
 
+A dated local follow-up is recorded in
+[`research/SOFASCORE_LOCAL_PROBE_2026-08-16.md`](research/SOFASCORE_LOCAL_PROBE_2026-08-16.md).
+After an Indonesian network filter was removed with a VPN, both direct hosts returned HTTP `403`;
+the same structured URL returned a Cloudflare challenge response in a normal browser. A
+browser-backed adapter is therefore not currently recommended, and coordinate orientation remains
+unresolved.
+
 ## Chelsea proof-of-concept
 
 SofaScore's public pages show coverage for several Chelsea 2026 preseason friendlies. The first local smoke test should discover those match IDs through the daily schedule rather than hard-code IDs copied from a webpage.
