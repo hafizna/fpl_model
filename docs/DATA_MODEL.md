@@ -99,6 +99,28 @@ The resolution is not start probability and does not directly multiply xPts. It 
 to mutually exclusive start, substitute-appearance, and absence scenarios. Resolution rows and the
 source snapshot remain immutable for later deadline-safe backtesting.
 
+### Appearance-history import boundary
+
+Vaastav's per-GW rows can identify starts, substitute appearances, and played minutes, but a
+zero-minute row does not reveal whether the player was an unused matchday substitute or absent from
+the squad. Those states cannot be conflated because the Benchwarmers appearance prior explicitly
+uses `unused_substitute / squad_selections`.
+
+This was checked against the extracted workbook cases: Vaastav has one zero-minute row for Raya
+while the workbook has zero unused-sub appearances, and 12 for Chiesa while the workbook has 10.
+Promoted-team players may have no prior Premier League rows at all. The preseason pipeline therefore
+imports the workbook's already-resolved player-code keyed fields through a strict CSV boundary:
+
+- starts;
+- substitute appearances;
+- unused substitute appearances;
+- minutes per start;
+- minutes per substitute.
+
+Missing history remains missing; it is not converted to zero history. The initial materialiser is
+restricted to GW1, where the extracted workbook uses 100% previous-season weight. Extending this to
+GW2+ requires a separate deadline-safe current-season squad-status source and explicit blend rules.
+
 ## Projection fact
 
 The projection table will contain component-level expected points, not only a final number:

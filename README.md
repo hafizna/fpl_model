@@ -134,6 +134,17 @@ Reviewed injury/eligibility corrections can be appended with
 `scripts/add_availability_override.py`. The command requires a timestamped source and rationale;
 run a new FPL refresh afterwards when instructed so the override enters a new immutable resolution.
 
+After exporting the workbook's resolved previous-season appearance fields, import and materialise
+the GW1 appearance projection with:
+
+```bash
+python scripts/import_appearance_history.py \
+  --csv data/raw/workbooks/benchwarmers_appearance_history_2025_26.csv \
+  --season 2025-26 \
+  --source-label "MODEL.xlsx resolved previous-season appearance fields"
+python scripts/project_preseason_appearance.py --gameweek 1 --previous-season 2025-26
+```
+
 See `docs/PIPELINE_ARCHITECTURE.md` for the weekly refresh, injury/eligibility snapshot, and Excel
 output contract.
 

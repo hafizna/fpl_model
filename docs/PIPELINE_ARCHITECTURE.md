@@ -155,3 +155,20 @@ python scripts/add_availability_override.py \
 The command rejects evidence observed after the deadline. If the evidence is newer than the latest
 FPL snapshot—or that snapshot has already been resolved—it asks for another FPL refresh so the old
 resolution remains immutable.
+
+The workbook appearance-history boundary is documented in
+`docs/research/CLAUDE_APPEARANCE_HISTORY_EXPORT_PROMPT.md`. Once that read-only export exists, the
+validated GW1 handoff is:
+
+```bash
+python scripts/import_appearance_history.py \
+  --csv data/raw/workbooks/benchwarmers_appearance_history_2025_26.csv \
+  --season 2025-26 \
+  --source-label "MODEL.xlsx resolved previous-season appearance fields"
+python scripts/project_preseason_appearance.py --gameweek 1 --previous-season 2025-26
+```
+
+The importer rejects duplicate codes, missing values, fractional counts, invalid minute ranges, and
+players with positive starts/sub appearances but zero corresponding mean minutes. The projection
+table retains every current FPL player; unmatched history produces null projection fields plus a
+`NO_WORKBOOK_APPEARANCE_HISTORY` flag.

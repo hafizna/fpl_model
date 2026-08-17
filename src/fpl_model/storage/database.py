@@ -8,7 +8,7 @@ from pathlib import Path
 import duckdb
 
 DEFAULT_DATABASE_PATH = Path("data/processed/fpl_model.duckdb")
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -205,6 +205,78 @@ CREATE TABLE IF NOT EXISTS player_availability_resolution (
     PRIMARY KEY (resolution_run_id, fpl_id),
     CHECK (official_chance BETWEEN 0 AND 100),
     CHECK (availability_probability BETWEEN 0.0 AND 1.0)
+);
+
+CREATE TABLE IF NOT EXISTS appearance_history_import_run (
+    import_run_id VARCHAR PRIMARY KEY,
+    season VARCHAR NOT NULL,
+    source_label VARCHAR NOT NULL,
+    source_path VARCHAR NOT NULL,
+    source_sha256 VARCHAR NOT NULL,
+    imported_at TIMESTAMPTZ NOT NULL,
+    player_rows INTEGER NOT NULL,
+    status VARCHAR NOT NULL,
+    CHECK (status = 'completed')
+);
+
+CREATE TABLE IF NOT EXISTS player_appearance_history (
+    import_run_id VARCHAR NOT NULL
+        REFERENCES appearance_history_import_run(import_run_id),
+    player_code BIGINT NOT NULL,
+    player_name VARCHAR NOT NULL,
+    starts INTEGER NOT NULL,
+    substitute_appearances INTEGER NOT NULL,
+    unused_substitute INTEGER NOT NULL,
+    minutes_per_start DOUBLE NOT NULL,
+    minutes_per_substitute DOUBLE NOT NULL,
+    PRIMARY KEY (import_run_id, player_code),
+    CHECK (starts >= 0),
+    CHECK (substitute_appearances >= 0),
+    CHECK (unused_substitute >= 0),
+    CHECK (minutes_per_start BETWEEN 0.0 AND 90.0),
+    CHECK (minutes_per_substitute BETWEEN 0.0 AND 90.0)
+);
+
+CREATE TABLE IF NOT EXISTS appearance_projection_run (
+    projection_run_id VARCHAR PRIMARY KEY,
+    availability_resolution_run_id VARCHAR NOT NULL
+        REFERENCES availability_resolution_run(resolution_run_id),
+    appearance_history_import_run_id VARCHAR NOT NULL
+        REFERENCES appearance_history_import_run(import_run_id),
+    target_gameweek INTEGER NOT NULL,
+    policy_version VARCHAR NOT NULL,
+    status VARCHAR NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
+    UNIQUE (
+        availability_resolution_run_id,
+        appearance_history_import_run_id,
+        policy_version
+    ),
+    CHECK (status IN ('completed', 'completed_with_gaps'))
+);
+
+CREATE TABLE IF NOT EXISTS player_appearance_projection (
+    projection_run_id VARCHAR NOT NULL
+        REFERENCES appearance_projection_run(projection_run_id),
+    fpl_id INTEGER NOT NULL,
+    player_code BIGINT,
+    availability_probability DOUBLE,
+    start_probability DOUBLE,
+    substitute_appearance_probability DOUBLE,
+    appearance_probability DOUBLE,
+    sixty_minute_probability DOUBLE,
+    expected_minutes DOUBLE,
+    appearance_xpts DOUBLE,
+    sixty_minute_xpts DOUBLE,
+    total_xpts DOUBLE,
+    data_quality_flags VARCHAR NOT NULL,
+    PRIMARY KEY (projection_run_id, fpl_id),
+    CHECK (availability_probability BETWEEN 0.0 AND 1.0),
+    CHECK (start_probability BETWEEN 0.0 AND 1.0),
+    CHECK (substitute_appearance_probability BETWEEN 0.0 AND 1.0),
+    CHECK (appearance_probability BETWEEN 0.0 AND 1.0),
+    CHECK (sixty_minute_probability BETWEEN 0.0 AND 1.0),
+    CHECK (expected_minutes BETWEEN 0.0 AND 90.0)
 );
 
 CREATE TABLE IF NOT EXISTS model_run (
