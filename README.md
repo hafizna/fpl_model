@@ -130,6 +130,10 @@ Resolve deadline-safe availability for the target gameweek:
 python scripts/resolve_availability.py --gameweek 1
 ```
 
+Reviewed injury/eligibility corrections can be appended with
+`scripts/add_availability_override.py`. The command requires a timestamped source and rationale;
+run a new FPL refresh afterwards when instructed so the override enters a new immutable resolution.
+
 See `docs/PIPELINE_ARCHITECTURE.md` for the weekly refresh, injury/eligibility snapshot, and Excel
 output contract.
 

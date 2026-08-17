@@ -140,3 +140,18 @@ suspension/unavailable/removed states resolve to an eligibility block. Other mis
 remain `NULL` and block downstream projection rather than being guessed. A reviewed override can
 replace those fields only when its observation timestamp is no later than the selected snapshot.
 Free-text news is stored for review but is not automatically converted into a probability.
+
+Reviewed evidence can be appended without editing database rows manually:
+
+```bash
+python scripts/add_availability_override.py \
+  --player-code 123456 --gameweek 1 \
+  --observed-at 2026-08-21T10:00:00+07:00 \
+  --probability 0.75 --eligible \
+  --source club_press_conference \
+  --rationale "Manager confirmed the player trained; late decision"
+```
+
+The command rejects evidence observed after the deadline. If the evidence is newer than the latest
+FPL snapshot—or that snapshot has already been resolved—it asks for another FPL refresh so the old
+resolution remains immutable.

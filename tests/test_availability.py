@@ -8,8 +8,10 @@ import pytest
 from fpl_model.context.availability import (
     AvailabilityInput,
     ReviewedAvailabilityOverride,
+    create_reviewed_override,
     materialize_latest_fpl_availability,
     resolve_availability,
+    store_reviewed_override,
 )
 from fpl_model.storage import initialize_database
 
@@ -240,3 +242,95 @@ def test_materializer_records_unresolved_gap_without_inventing_probability(tmp_p
         ).fetchone()
     assert probability is None
     assert "MISSING_AVAILABILITY_PROBABILITY" in flags
+
+
+def test_reviewed_override_storage_is_idempotent_and_auditable(tmp_path):
+    database_path = tmp_path / "fpl.duckdb"
+    initialize_database(database_path)
+    deadline = datetime(2026, 8, 22, 17, 30, tzinfo=UTC)
+    with duckdb.connect(str(database_path)) as connection:
+        _insert_snapshot(
+            connection,
+            run_id="causal",
+            captured_at=AS_OF,
+            deadline=deadline,
+        )
+    override = create_reviewed_override(
+        player_code=1002,
+        target_gameweek=1,
+        observed_at=AS_OF - timedelta(minutes=5),
+        source="club_press_conference",
+        rationale="Player trained and will be assessed.",
+        availability_probability=0.75,
+        is_eligible=True,
+    )
+
+    first = store_reviewed_override(override, database_path=database_path)
+    second = store_reviewed_override(override, database_path=database_path)
+
+    assert first.override_id == second.override_id
+    assert first.requires_fpl_refresh is False
+    with duckdb.connect(str(database_path), read_only=True) as connection:
+        stored = connection.execute(
+            """
+            SELECT source, rationale, availability_probability, is_eligible
+            FROM availability_override
+            """
+        ).fetchall()
+    assert stored == [
+        (
+            "club_press_conference",
+            "Player trained and will be assessed.",
+            0.75,
+            True,
+        )
+    ]
+
+
+def test_override_newer_than_snapshot_requires_refresh(tmp_path):
+    database_path = tmp_path / "fpl.duckdb"
+    initialize_database(database_path)
+    deadline = datetime(2026, 8, 22, 17, 30, tzinfo=UTC)
+    with duckdb.connect(str(database_path)) as connection:
+        _insert_snapshot(
+            connection,
+            run_id="causal",
+            captured_at=AS_OF,
+            deadline=deadline,
+        )
+    override = create_reviewed_override(
+        player_code=1002,
+        target_gameweek=1,
+        observed_at=AS_OF + timedelta(minutes=5),
+        source="club_press_conference",
+        rationale="New evidence after the latest FPL pull.",
+        availability_probability=0.5,
+    )
+
+    result = store_reviewed_override(override, database_path=database_path)
+
+    assert result.requires_fpl_refresh is True
+
+
+def test_override_observed_after_deadline_is_rejected(tmp_path):
+    database_path = tmp_path / "fpl.duckdb"
+    initialize_database(database_path)
+    deadline = datetime(2026, 8, 22, 17, 30, tzinfo=UTC)
+    with duckdb.connect(str(database_path)) as connection:
+        _insert_snapshot(
+            connection,
+            run_id="causal",
+            captured_at=AS_OF,
+            deadline=deadline,
+        )
+    override = create_reviewed_override(
+        player_code=1002,
+        target_gameweek=1,
+        observed_at=deadline + timedelta(seconds=1),
+        source="late_report",
+        rationale="Published after deadline.",
+        availability_probability=0.0,
+    )
+
+    with pytest.raises(ValueError, match="after the target deadline"):
+        store_reviewed_override(override, database_path=database_path)

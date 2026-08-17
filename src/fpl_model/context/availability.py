@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from math import isfinite
 from pathlib import Path
 
@@ -114,6 +114,14 @@ class AvailabilityRunResult:
     status: str
 
 
+@dataclass(frozen=True, slots=True)
+class AvailabilityOverrideStoreResult:
+    override_id: str
+    latest_causal_snapshot_at: datetime
+    deadline: datetime
+    requires_fpl_refresh: bool
+
+
 def resolve_availability(
     player: AvailabilityInput,
     *,
@@ -209,6 +217,127 @@ def resolve_availability(
         selected_override_id=override.override_id if override is not None else None,
         reason=reason,
         data_quality_flags=tuple(sorted(flags)),
+    )
+
+
+def create_reviewed_override(
+    *,
+    player_code: int,
+    target_gameweek: int,
+    observed_at: datetime,
+    source: str,
+    rationale: str,
+    availability_probability: float | None = None,
+    is_eligible: bool | None = None,
+    effective_until: datetime | None = None,
+) -> ReviewedAvailabilityOverride:
+    """Create a content-addressed reviewed override for idempotent storage."""
+    _validate_aware(observed_at, "observed_at")
+    if effective_until is not None:
+        _validate_aware(effective_until, "effective_until")
+    identity = {
+        "player_code": player_code,
+        "target_gameweek": target_gameweek,
+        "observed_at": observed_at.astimezone(UTC).isoformat(),
+        "source": source,
+        "rationale": rationale,
+        "availability_probability": availability_probability,
+        "is_eligible": is_eligible,
+        "effective_until": (
+            effective_until.astimezone(UTC).isoformat()
+            if effective_until is not None
+            else None
+        ),
+    }
+    digest = hashlib.sha256(
+        json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    return ReviewedAvailabilityOverride(
+        override_id=f"availability_override_{digest[:16]}",
+        player_code=player_code,
+        target_gameweek=target_gameweek,
+        observed_at=observed_at,
+        source=source,
+        rationale=rationale,
+        availability_probability=availability_probability,
+        is_eligible=is_eligible,
+        effective_until=effective_until,
+    )
+
+
+def store_reviewed_override(
+    override: ReviewedAvailabilityOverride,
+    *,
+    database_path: str | Path = DEFAULT_DATABASE_PATH,
+) -> AvailabilityOverrideStoreResult:
+    """Validate and append one reviewed override without rewriting old evidence."""
+    initialize_database(database_path)
+    with duckdb.connect(str(database_path)) as connection:
+        snapshot = connection.execute(
+            """
+            SELECT ir.captured_at, gw.deadline_time
+            FROM ingestion_run AS ir
+            JOIN gameweek_snapshot AS gw
+              ON gw.ingestion_run_id = ir.ingestion_run_id
+            JOIN player_snapshot AS p
+              ON p.ingestion_run_id = ir.ingestion_run_id
+            WHERE ir.source = 'official_fpl_api'
+              AND ir.status = 'completed'
+              AND gw.gameweek = ?
+              AND p.player_code = ?
+              AND ir.captured_at <= gw.deadline_time
+            ORDER BY ir.captured_at DESC
+            LIMIT 1
+            """,
+            [override.target_gameweek, override.player_code],
+        ).fetchone()
+        if snapshot is None:
+            raise ValueError(
+                "player/gameweek not found in a causal official FPL snapshot"
+            )
+        snapshot_at, deadline = snapshot
+        if override.observed_at > deadline:
+            raise ValueError("override observed after the target deadline")
+
+        resolved_already = connection.execute(
+            """
+            SELECT count(*)
+            FROM availability_resolution_run AS rr
+            JOIN ingestion_run AS ir
+              ON ir.ingestion_run_id = rr.source_ingestion_run_id
+            WHERE rr.target_gameweek = ? AND ir.captured_at >= ?
+            """,
+            [override.target_gameweek, override.observed_at],
+        ).fetchone()[0]
+        connection.execute(
+            """
+            INSERT INTO availability_override (
+                override_id, player_code, target_gameweek, observed_at,
+                effective_until, availability_probability, is_eligible,
+                source, rationale
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT DO NOTHING
+            """,
+            [
+                override.override_id,
+                override.player_code,
+                override.target_gameweek,
+                override.observed_at,
+                override.effective_until,
+                override.availability_probability,
+                override.is_eligible,
+                override.source,
+                override.rationale,
+            ],
+        )
+
+    return AvailabilityOverrideStoreResult(
+        override_id=override.override_id,
+        latest_causal_snapshot_at=snapshot_at,
+        deadline=deadline,
+        requires_fpl_refresh=(
+            override.observed_at > snapshot_at or bool(resolved_already)
+        ),
     )
 
 
