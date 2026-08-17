@@ -123,8 +123,8 @@ See `THIRD_PARTY_NOTICES.md`.
 - [x] Goal / assist components
 - [x] Clean sheet / goals-conceded components
 - [x] Saves / cards / bonus / DefCon
-- [ ] Fixture and home-away adjustments
-- [ ] Golden tests against spreadsheet outputs
+- [x] Fixture and home-away adjustments
+- [x] Golden tests against spreadsheet outputs
 
 ### Sprint 3 — Context engine
 - [ ] Promotion priors

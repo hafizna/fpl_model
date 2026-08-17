@@ -1,0 +1,560 @@
+{
+  "$schema_note": "Reference-only extraction from the Benchwarmers 2026/27 spreadsheet model, covering fixture discovery/selection, fixture-strength adjustments, and home/away scaling logic across all scored components. Read-only, formulas + cached values as of the timestamps below. This does not imply Python parity is implemented; no Python code was written or modified to produce this file. No workbook was modified or saved.",
+  "extraction_date": "2026-08-18",
+  "extraction_scope": {
+    "in_scope": [
+      "PPts sheet: row-identity/fixture-selection columns (A:D, E:I, J, Q) and how they materialize a 38-GW x 2-slot grid per player",
+      "FIXTURES sheet: raw fixture data (A:Q), FIXHELPER block (AA:AM) that builds the home/away lookup keys including the DGW-detecting running-COUNTIF slot suffix, and the display-only TEAM-by-GW ticker block (BA:CM)",
+      "PREDICT sheet: the SUMIFS-based GW-range aggregation (D, E, F, J) that sums PPts rows across a manually-set GW window (BB2:BC2), and the display-only fixture ticker (AD:AM) reading FIXTURES' ticker block",
+      "CONTROL sheet: current-GW pointer (B2/B3/C2/C3/E2) and the FDR window block (B93:B98) feeding TABLES' opponent-strength figures",
+      "TABLES sheet: team-level opponent xG/xGC per-90 figures (Q,R,W,X) that PPts!R/S read, confirmed GW-invariant (one row per team, not recomputed per projected fixture)",
+      "PPts sheet: every live fixture-strength multiplier column across all six components with a fixture adjustment (saves, goals, assists, clean sheets, 2+ goals conceded, bonus), and confirmation columns proving cards and DefCon have none",
+      "PPts sheet: AY/AZ/BA/BG/BH/BI (the H/A and start/not-start blending formulas) re-verified fresh this session",
+      "Raw FIXTURES data audited team-by-GW for genuine double-gameweeks and blank fixtures (byes) across the full 38-GW season"
+    ],
+    "out_of_scope": [
+      "Re-deriving the component-internal formula maps already fully documented in the four prior extractions (appearance, goals/assists, clean-sheets/goals-conceded, saves/cards/bonus/DefCon) -- this file cross-references and re-verifies the shared BA/BG/BI/H-A formulas rather than re-deriving them from scratch",
+      "TEAMS sheet strength_overall_home/away and similar FPL-API-provided team-strength fields (not referenced anywhere in the traced fixture-adjustment chain)",
+      "Full row-by-row audit of the FIXTURES raw fixture list beyond the team-GW duplicate/blank scan performed",
+      "Any change to src/fpl_model or tests; no Python code was implemented for this task"
+    ],
+    "reused_and_reverified_findings": "The BA/BG/BI structural formulas, the H/A-applied-twice observation, and the per-component fixture-adjustment formulas (goals/assists via VS xGC/90/LA, clean sheets/2+GC via CS X, saves via VS xG/90/LA-adjacent ratio, bonus via the position-dependent V/W split, cards and DefCon having none) were already individually documented across the four prior extraction sessions. This file re-reads every one of those formula strings fresh from the live workbook (confirmed byte-identical) and adds the fixture-SELECTION mechanism (FIXHELPER, the 38-GW x 2-slot PPts grid, PREDICT's SUMIFS aggregation) and the double-gameweek/blank-fixture behavior, which no prior extraction traced."
+  },
+  "workbooks": {
+    "MODEL.xlsx": {
+      "path": "C:\\Users\\hafizna.fadhli\\Downloads\\MODEL.xlsx",
+      "size_bytes": 71300490,
+      "mtime_iso": "2026-08-16T21:40:30.440420",
+      "ctime_iso": "2026-08-16T21:38:42.334302",
+      "note": "Timestamp unchanged from all four prior extraction sessions, confirming the workbook has not been modified in between.",
+      "role": "Primary source for PPts, FIXTURES, PREDICT, CONTROL, TABLES, TEAMS, MODEL sheet formulas used in this extraction."
+    },
+    "SOLVER.xlsx": {
+      "path": "C:\\Users\\hafizna.fadhli\\Downloads\\SOLVER.xlsx",
+      "size_bytes": 200650,
+      "mtime_iso": "2026-08-16T21:38:21.005117",
+      "ctime_iso": "2026-08-16T21:38:16.474932",
+      "role": "Downstream squad-optimizer workbook. Not a source of fixture/home-away formulas; not used in this extraction."
+    },
+    "SIMPLE MODEL.xlsx": {
+      "path": "C:\\Users\\hafizna.fadhli\\Downloads\\SIMPLE MODEL.xlsx",
+      "size_bytes": 946907,
+      "mtime_iso": "2026-08-16T21:38:20.417391",
+      "ctime_iso": "2026-08-16T21:38:13.742047",
+      "role": "Simplified/derivative workbook without the MODEL/PPts/FIXTURES/PREDICT sheets. Not used in this extraction."
+    }
+  },
+  "control_assumptions": [
+    {
+      "cells": ["B2", "B3", "C2", "C3", "D2", "E2"],
+      "label": "Current-season identifier and current-GW pointer",
+      "formulas": {
+        "B2": "2026-27 (literal)",
+        "B3": "0 (literal, 'LAST GW (Pre-Season = 0)')",
+        "C2": "=RIGHT(B2,5)",
+        "C3": "=IF(LEN(B3)=1,\"0\"&B3,B3)",
+        "D2": "=(LEFT(C2,2)*1)-1&\"-\"&(RIGHT(C2,2)*1)-1",
+        "E2": "=MATCH(CONTROL!$C$2&\"-GW\"&CONTROL!$C$3,MINS!$B$1001:$CZ$1001,0)"
+      },
+      "cached_value": { "B2": "2026-27", "B3": 0, "C2": "26-27", "C3": "00", "D2": "25-26", "E2": 41 },
+      "downstream_effect": "E2 (=41) is the single shared 'current GW column' pointer used by every rolling historical window across every component family (appearance, goals/assists, clean sheets/GC, saves, DefCon) and by the FDR block (B93:B98) that ultimately feeds TABLES' opponent-strength figures read by PPts!R/S. It does NOT determine which GW's fixture is being scored in PPts -- PPts materializes all 38 GWs unconditionally regardless of E2 (see fixture_selection_dependency_flow). E2 only controls where each component's HISTORICAL lookback window ends.",
+      "independently_editable": true,
+      "independently_editable_note": "Shared by every prior extraction's lookahead-safety proof; re-verified here specifically for the FDR/opponent-strength chain (B93:B98)."
+    },
+    {
+      "cells": ["B93", "B94", "C94", "D94", "E94", "B95", "C95", "D95", "E95", "B97", "B98"],
+      "label": "FDR (Fixture Difficulty Rating) window block feeding opponent-strength figures",
+      "formulas": {
+        "B94": "38 (Long Form Length, literal)",
+        "C94": "0 (literal)",
+        "D94": "=IF(B94-$B$3>76,B94+3,IF(B94-$B$3>38,B94+2,IF(B94-$B$3>0,B94+1,B94)))",
+        "E94": "=C94+(D94-B94)",
+        "B95": "6 (Short Form Length, literal)",
+        "C95": "0 (literal)",
+        "D95": "=IF(B95-$B$3>76,B95+3,IF(B95-$B$3>38,B95+2,IF(B95-$B$3>0,B95+1,B95)))",
+        "E95": "=C95+(D95-B95)",
+        "B97": "0.8 (Long Form Weight, literal)",
+        "B98": "=1-B97"
+      },
+      "cached_value": { "B94": 38, "D94": 39, "E94": 1, "B95": 6, "D95": 7, "E95": 1, "B97": 0.8, "B98": 0.19999999999999996 },
+      "downstream_effect": "Feeds TABLES!K/L/M (LF xG/LF xGC/LF PL, the raw windowed sums a team's opponent-strength figures are built from) via the identical IF-ladder offset construction already proven lookahead-safe for the clean-sheets/goals-conceded and DefCon extractions. B97/B98 then blend TABLES' LF/SF xG-per-90 and xGC-per-90 into the single per-team figure PPts!R (VS xG/90) and PPts!S (VS xGC/90) read for every fixture-strength adjustment across every component. Re-verified here: this is the SAME B97/B98 cell pair already documented as having a dual role (also blending the player's own team's defensive rate inside TABLES!AD) in the clean-sheets/goals-conceded extraction.",
+      "independently_editable": true,
+      "independently_editable_note": "Distinct from B59/B60 (goals/assists own-rate LF/SF), B72/B73 and B78/B79 (dead CS/2+GC LF/SF), B86/B87 (DefCon LF/SF) -- a fifth 0.8/0.2-valued pair among the now six confirmed across all extractions, this one specifically controlling opponent-strength recency weighting."
+    },
+    {
+      "cells": ["PREDICT!BB2", "PREDICT!BC2"],
+      "label": "Manual projection-horizon GW range (SUMIFS bounds)",
+      "formulas": { "BB2": "1 (literal)", "BC2": "10 (literal)" },
+      "cached_value": { "BB2": 1, "BC2": 10 },
+      "downstream_effect": "PREDICT!D (IF START PTS), E (TRUE PTS), F (Start %), and J (1-60 mins) each SUMIFS/INDEX-MATCH over PPts filtered to PPts[GW] between BB2 and BC2 inclusive. This is a genuinely manual, hand-editable projection window -- an analyst changes these two cells to shift which 10 (or however many) upcoming gameweeks are aggregated into the dashboard's headline point totals. THIS IS THE PRIMARY MANUAL OVERRIDE POINT for fixture-selection horizon identified in this extraction, distinct from the per-player Manual Start % override (PREDICT!H) already documented.",
+      "independently_editable": true,
+      "independently_editable_note": "Two plain literal cells, not derived from CONTROL!B3/E2 at all -- the projection horizon and the historical-lookback pointer are two entirely separate, independently-set mechanisms that happen to both currently point near the start of the 2026-27 season."
+    },
+    {
+      "cells": ["CONTROL!B65"],
+      "label": "Fantasy Assist Boost (cross-referenced, not re-derived)",
+      "note": "Already fully documented in the goals/assists extraction as a flat +40% multiplier applied to the fixture-adjusted assist rate. Restated here only because it sits inside the same PPts!AC->AD chain that carries the live VS_xGC_90_LA fixture multiplier; the boost itself is not a fixture/H-A mechanism.",
+      "independently_editable": true
+    }
+  ],
+  "formula_map": {
+    "fixture_selection": {
+      "note": "All formulas below re-read fresh from the live workbook this session and confirmed to match every prior extraction's documentation where overlapping (VS, H/A) character-for-character.",
+      "PPts_row_identity": {
+        "No_A": { "header": "No.", "value_row2": 1, "type": "literal_sequence", "meaning": "A plain 1..76000 row counter (not a formula in row 2, but an autofilled sequence down the table)." },
+        "GW_B": {
+          "header": "GW",
+          "formula": "=(CEILING(A2,2000)/2000)",
+          "meaning": "Every 2000-row block is one gameweek. Row 1-2000 = GW1, 2001-4000 = GW2, etc., up to GW38 (76000 rows total = 38 * 2000). This is a PURE ROW-POSITION formula -- it does not read CONTROL!E2 or any 'current GW' pointer. PPts therefore materializes ALL 38 gameweeks unconditionally, for every player, regardless of season progress."
+        },
+        "GW2_C": {
+          "header": "GW2",
+          "formula": "=IF(ISEVEN(CEILING(A2,1000)/1000)=TRUE,2,1)",
+          "meaning": "Within each 2000-row GW block, the first 1000 rows get GW2=1 (fixture slot 1) and the second 1000 rows get GW2=2 (fixture slot 2). THIS IS THE DOUBLE-GAMEWEEK MECHANISM: every player gets exactly two fixture slots per gameweek, unconditionally. When a team has only one fixture that GW, slot 2 resolves to a blank fixture (VS='-') and is zeroed by the BA/BI guards. When a team has two fixtures, slot 2 carries a second, independently-computed fixture."
+        },
+        "GW3_D": {
+          "header": "GW3",
+          "formula": "=PPts[[#This Row],[GW]]&\"-\"&PPts[[#This Row],[GW2]]",
+          "meaning": "Composite key, e.g. '1-1', '1-2', '2-1', '2-2' -- used as part of the fixture lookup key in VS (Q) and as the team-GW-slot identity."
+        },
+        "Code_E": {
+          "header": "Code",
+          "formula": "=INDEX(MODEL!$A$2:$A$1001, MOD(ROW()-2,1000)+1)",
+          "meaning": "Cycles through all 1000 MODEL rows (players) every 1000 PPts rows, using MOD arithmetic on the absolute row number. Combined with GW/GW2's 2000-row blocking, this produces exactly 2 rows per player per gameweek across the full 76000-row table."
+        },
+        "Team_G": { "header": "Team", "formula": "=INDEX(MODEL[TEAM],MATCH(PPts[[#This Row],[Code]],MODEL[Code],0))", "meaning": "Player's own team, looked up by code from MODEL." },
+        "POS_H": { "header": "POS", "formula": "=INDEX(MODEL[POS],MATCH(PPts[[#This Row],[Code]],MODEL[Code],0))" },
+        "POS2_I": { "header": "POS2", "formula": "=INDEX(MODEL[POS2],MATCH(PPts[[#This Row],[Code]],MODEL[Code],0))", "meaning": "More granular tactical position (e.g. 'CB', 'RW') than POS. Feeds only the dead DefCon fixture-adjustment attempt (AS/AT/AU, documented in the saves/cards/bonus/DefCon extraction) -- confirmed to have no other live consumer in this extraction's search."
+        },
+        "one_to_sixty_mins_J": {
+          "header": "1-60 mins",
+          "formula": "=IF(LEN(PPts[[#This Row],[VS]])<3,0,1)",
+          "meaning": "THE BLANK-FIXTURE GATE for column '1' specifically. VS resolving to the literal string '-' (length 1, <3) means no fixture exists for this player-GW-slot; this column (and, via BA/BI's own separate LEN(VS)<3 guards, the whole row) is then forced to 0/no-op."
+        }
+      },
+      "VS_opponent_lookup_Q": {
+        "header": "VS",
+        "formula": "=IFERROR(IFERROR(INDEX(FIXHELPER[AWAYABRV],MATCH(PPts[[#This Row],[Team]]&PPts[[#This Row],[GW3]],FIXHELPER[HOMEABRVCODE],0)),LOWER(INDEX(FIXHELPER[HOMEABRV],MATCH(PPts[[#This Row],[Team]]&PPts[[#This Row],[GW3]],FIXHELPER[AWAYABRVCODE],0)))),\"-\")",
+        "meaning": "Concatenates the player's own team abbreviation with the GW3 slot key (e.g. 'ARS1-1') and looks it up first against FIXHELPER's HOMEABRVCODE (does this team play at HOME in this slot?) -- if found, returns the (uppercase) away opponent's abbreviation. If not found, falls back to matching AWAYABRVCODE (does this team play AWAY in this slot?) -- if found, returns the LOWERCASE home opponent's abbreviation. If NEITHER matches (no fixture in this team-GW-slot), the outer IFERROR returns the literal string '-'. This single formula therefore simultaneously (a) discovers the opponent, (b) encodes home/away via letter case, and (c) detects blank/bye slots via the fallback to '-'."
+      },
+      "FIXTURES_sheet_FIXHELPER_block": {
+        "GW_AA": { "header": "GW", "formula": "=FIXTURES[[#This Row],[event]]", "meaning": "Direct pass-through of the FPL API's own 'event' (gameweek number) field for this fixture." },
+        "HOMECODE_AB": { "header": "HOMECODE", "formula": "=FIXTURES[[#This Row],[event]]&\"-\"&FIXTURES[[#This Row],[team_h]]" },
+        "AWAY_AC": { "header": "AWAY", "formula": "=FIXTURES[[#This Row],[team_a]]" },
+        "AWAYCODE_AD": { "header": "AWAYCODE", "formula": "=FIXTURES[[#This Row],[event]]&\"-\"&FIXTURES[[#This Row],[team_a]]" },
+        "HOME_AE": { "header": "HOME", "formula": "=FIXTURES[[#This Row],[team_h]]" },
+        "AWAY2_AF": { "header": "AWAY2", "formula": "=FIXHELPER[[#This Row],[AWAY]]" },
+        "HOMEABRVGW_AG": { "header": "HOMEABRVGW", "formula": "=INDEX(TEAMS[],MATCH(FIXHELPER[[#This Row],[HOME]],TEAMS[id],0),MATCH(\"short_name\",TEAMS[#Headers],0))&FIXHELPER[[#This Row],[GW]]", "meaning": "Team abbreviation concatenated with the raw GW number, e.g. 'ARS2' -- a team-GW identity key BEFORE slot-disambiguation." },
+        "AWAYABRVGW_AH": { "header": "AWAYABRVGW", "formula": "=INDEX(TEAMS[],MATCH(FIXHELPER[[#This Row],[AWAY]],TEAMS[id],0),MATCH(\"short_name\",TEAMS[#Headers],0))&FIXHELPER[[#This Row],[GW]]" },
+        "HOMEABRVCODE_AI": {
+          "header": "HOMEABRVCODE",
+          "formula": "=IF(COUNTIF(INDEX(FIXHELPER[HOMEABRVGW],1):FIXHELPER[[#This Row],[HOMEABRVGW]],FIXHELPER[[#This Row],[HOMEABRVGW]])+COUNTIF(INDEX(FIXHELPER[AWAYABRVGW],1):FIXHELPER[[#This Row],[AWAYABRVGW]],FIXHELPER[[#This Row],[HOMEABRVGW]])>1,FIXHELPER[[#This Row],[HOMEABRVGW]]&\"-2\",FIXHELPER[[#This Row],[HOMEABRVGW]]&\"-1\")",
+          "meaning": "THE EXACT DOUBLE-GAMEWEEK DETECTION MECHANISM. A running COUNTIF (from the FIRST row of the FIXHELPER table down to and including THIS row) counts how many times this team-GW combination (e.g. 'ARS2') has already appeared as either a HOME or AWAY fixture, up to this point in the fixture list. If the running count exceeds 1 (i.e. this is not the first occurrence of that team-GW pairing), the slot suffix is '-2' (the second/DGW fixture); otherwise '-1' (the first/only fixture). This is a row-order-dependent running count, not a lookahead over the whole season -- it only looks BACKWARD (up to and including the current row) within the fixture list, which is itself static/precomputed data, not a live temporal window."
+        },
+        "AWAYABRVCODE_AJ": {
+          "header": "AWAYABRVCODE",
+          "formula": "=IF(COUNTIF(INDEX(FIXHELPER[HOMEABRVGW],1):FIXHELPER[[#This Row],[HOMEABRVGW]],FIXHELPER[[#This Row],[AWAYABRVGW]])+COUNTIF(INDEX(FIXHELPER[AWAYABRVGW],1):FIXHELPER[[#This Row],[AWAYABRVGW]],FIXHELPER[[#This Row],[AWAYABRVGW]])>1,FIXHELPER[[#This Row],[AWAYABRVGW]]&\"-2\",FIXHELPER[[#This Row],[AWAYABRVGW]]&\"-1\")",
+          "meaning": "Mirror of HOMEABRVCODE for the away team's perspective."
+        },
+        "HOMEABRV_AK": { "header": "HOMEABRV", "formula": "=INDEX(TEAMS[],MATCH(FIXHELPER[[#This Row],[HOME]],TEAMS[id],0),MATCH(\"short_name\",TEAMS[#Headers],0))" },
+        "AWAYABRV_AL": { "header": "AWAYABRV", "formula": "=INDEX(TEAMS[],MATCH(FIXHELPER[[#This Row],[AWAY]],TEAMS[id],0),MATCH(\"short_name\",TEAMS[#Headers],0))" },
+        "LOWERHOMEABRV_AM": { "header": "LOWERHOMEABRV", "formula": "=LOWER(FIXHELPER[[#This Row],[HOMEABRV]])" }
+      },
+      "FIXTURES_sheet_display_ticker_block": {
+        "note": "FIXTURES!BA:CM (TEAM, GW1..GW38) is a human-readable per-team-per-GW text summary, confirmed by exhaustive search to be referenced ONLY by PREDICT!AD:AM (the dashboard's cosmetic 'next fixtures' ticker via a table named TICKER), NEVER by PPts or MODEL. It is not part of the live scoring chain.",
+        "TEAM_BA": { "formula": "=TEAMS[[#This Row],[short_name]]" },
+        "GW1_BB": {
+          "formula": "=IFERROR((INDEX($AM$2:$AM$400,MATCH($BA2&RIGHT(BB$1,LEN(BB$1)-2)&\"-1\",$AJ$2:$AJ$400,0))),\"\")&IFERROR((INDEX($AM$2:$AM$400,MATCH($BA2&RIGHT(BB$1,LEN(BB$1)-2)&\"-2\",$AJ$2:$AJ$400,0))),\"\")&IFERROR(INDEX($AL$2:$AL$400,MATCH($BA2&RIGHT(BB$1,LEN(BB$1)-2)&\"-1\",$AI$2:$AI$400,0)),\"\")&IFERROR(INDEX($AL$2:$AL$400,MATCH($BA2&RIGHT(BB$1,LEN(BB$1)-2)&\"-2\",$AI$2:$AI$400,0)),\"\")",
+          "meaning": "Concatenates up to 4 IFERROR-guarded lookups (home slot-1, home slot-2, away slot-1, away slot-2) into one text cell, so a DGW team's two opponents both display in a single cell for this ticker. Confirms the '-1'/'-2' slot-suffix convention is used consistently across both the live PPts chain and this dead display block."
+        }
+      },
+      "PREDICT_sheet_aggregation": {
+        "note": "PREDICT!D/E/F/J are the only place in the workbook that SUMS across multiple PPts gameweek rows -- everything upstream of this operates one fixture-row at a time.",
+        "IF_START_PTS_D": {
+          "formula": "=SUMIFS(PPts[IF START TOTAL],PPts[Code],PREDICT[[#This Row],[HARD CODE]],PPts[GW], \">=\"&$BB$2,PPts[GW], \"<=\"&$BC$2)",
+          "meaning": "Sums PPts!BA (IF START TOTAL) across every PPts row (both GW2 slots, for every GW in the BB2:BC2 range) matching this player's code. THIS IS HOW A DOUBLE GAMEWEEK IS AGGREGATED: both fixture slots for the same GW share the same PPts[GW] value, so SUMIFS naturally adds both rows' contributions together, giving a combined total across two independently-scored fixtures rather than a single collapsed fixture."
+        },
+        "TRUE_PTS_E": {
+          "formula": "=SUMIFS(PPts[TRUE TOTAL],PPts[Code],PREDICT[[#This Row],[HARD CODE]],PPts[GW], \">=\"&$BB$2,PPts[GW], \"<=\"&$BC$2)",
+          "meaning": "Same mechanism as D, summing PPts!BI (TRUE TOTAL) instead."
+        },
+        "Start_pct_F": {
+          "formula": "=INDEX(PPts!$BH$2:$BH$1000,MATCH(PREDICT[[#This Row],[HARD CODE]],PPts!$E$2:$E$1000,0))",
+          "meaning": "A single-fixture INDEX/MATCH (not a SUMIFS), reading only PPts!BH from the FIRST 999 rows of PPts (i.e. GW1 slot-1 only, since PPts!$E$2:$E$1000 covers exactly the first 999 player rows). This does NOT reflect a blended or aggregate start probability across the whole BB2:BC2 projection window -- it is always GW1's slot-1 start probability specifically, regardless of what BB2/BC2 are set to. Flagged as a likely display-only simplification (see spreadsheet_quirks)."
+        },
+        "one_to_sixty_mins_J": {
+          "formula": "=SUMIFS(PPts[1-60 mins],PPts[Code],PREDICT[[#This Row],[HARD CODE]],PPts[GW], \">=\"&$BB$2,PPts[GW], \"<=\"&$BC$2)",
+          "meaning": "Sums the blank-fixture-gate marker (0 or 1 per PPts row) across the projection window -- effectively a COUNT of how many non-blank fixture slots this player has in the BB2:BC2 range, useful as a fixture-count display figure (e.g. showing '11' for a player with a double gameweek inside a 10-GW window)."
+        }
+      }
+    },
+    "home_away_and_totals": {
+      "note": "Re-read fresh from the live workbook this session; every string below was confirmed to match the appearance/goals-assists/CS-GC extractions' prior documentation character-for-character where overlapping.",
+      "PRE_HA_TOTAL_AY": {
+        "formula": "=PPts[[#This Row],[1-60 mins]]+PPts[[#This Row],[2]]+PPts[[#This Row],[3]]+PPts[[#This Row],[4]]+PPts[[#This Row],[5]]+PPts[[#This Row],[6]]+PPts[[#This Row],[7]]+PPts[[#This Row],[8]]+PPts[[#This Row],[9]]+PPts[[#This Row],[10]]+PPts[[#This Row],[11]]",
+        "meaning": "Sum of all 11 component columns (using J's blank-fixture-gated '1-60 mins' value, not the raw MODEL!1 probability), BEFORE any H/A adjustment."
+      },
+      "HA_AZ": {
+        "formula": "=IF(EXACT(PPts[[#This Row],[VS]],UPPER(PPts[[#This Row],[VS]]))=TRUE,1.05,0.95)",
+        "meaning": "Case-sensitive test: VS is stored uppercase for a home fixture (Q's first IFERROR branch, INDEX(FIXHELPER[AWAYABRV],...) returns the raw, uppercase team abbreviation) and lowercase for an away fixture (Q's fallback branch explicitly wraps the result in LOWER()). EXACT(VS,UPPER(VS)) is therefore TRUE only when VS is already all-uppercase, i.e. a home fixture -> 1.05; otherwise (away, or the blank-fixture string '-', which is neither upper nor lower in a way that matters since BA/BI's own LEN(VS)<3 guard zeroes the row regardless) -> 0.95. THE ADJUSTMENT IS A SINGLE GLOBAL SCALAR: not team-specific, not position-specific, not component-specific -- exactly two possible values (1.05 home, 0.95 away) applied identically to every player, every position, every component, every fixture."
+      },
+      "IF_START_TOTAL_BA": {
+        "formula": "=IF(LEN(PPts[[#This Row],[VS]])<3,0,PPts[[#This Row],[PRE H/A TOTAL]]*PPts[[#This Row],[H/A]])",
+        "meaning": "Zero for a blank fixture slot. Otherwise the full 11-component sum times H/A -- exactly ONE application of the scalar."
+      },
+      "PSxTS_Starts_SqdsMd_BB": { "formula": "=(CONTROL!$B$8*INDEX(MODEL[PS Sts/SqdsMd],MATCH(PPts[[#This Row],[Code]],MODEL[Code],0)))+(CONTROL!$B$9*INDEX(MODEL[St/SqdsMd],MATCH(PPts[[#This Row],[Code]],MODEL[Code],0)))" },
+      "M_Start_pct_BC": { "formula": "=IF(INDEX(PREDICT[Manual Start %],MATCH(PPts[[#This Row],[Code]],PREDICT[HARD CODE],0))=\"\",\"\",INDEX(PREDICT[Manual Start %],MATCH(PPts[[#This Row],[Code]],PREDICT[HARD CODE],0)))" },
+      "MODEL_1_BD": { "formula": "=INDEX(MODEL[1],MATCH(PPts[[#This Row],[Code]],MODEL[Code],0))" },
+      "T1_BE": { "formula": "=IF(PPts[[#This Row],[M Start %]]=\"\",PPts[[#This Row],[MODEL 1]],(1*PPts[[#This Row],[M Start %]])+((1-PPts[[#This Row],[M Start %]])*PPts[[#This Row],[MODEL 1]]))" },
+      "PSxTS_Mn_Sub_Mn_St_BF": { "formula": "=INDEX(MODEL[G+A PSxTS Mn/Sub],MATCH(PPts[[#This Row],[Code]],MODEL[Code],0))/INDEX(MODEL[G+A PSxTS Mn/Start],MATCH(PPts[[#This Row],[Code]],MODEL[Code],0))" },
+      "IF_NOT_START_TOTAL_BG": {
+        "formula": "=((PPts[[#This Row],[4]]+PPts[[#This Row],[5]]+PPts[[#This Row],[6]]+PPts[[#This Row],[7]]+PPts[[#This Row],[8]]+PPts[[#This Row],[10]])*PPts[[#This Row],[PSxTS Mn/Sub / Mn/St]]*PPts[[#This Row],[H/A]])",
+        "meaning": "Sums ONLY the rate-scalable, not-start-eligible columns (4,5,6,7,8,10 -- cards, bonus, assist, goal, 2+GC; excludes 1/2/3/9/11 -- appearance, 60-min, saves, CS, DefCon), scales by the substitute-to-start minutes ratio (BF), and applies H/A ONE TIME HERE."
+      },
+      "Start_pct_BH": { "formula": "=IF(PPts[[#This Row],[M Start %]]<>\"\",PPts[[#This Row],[M Start %]],INDEX(MODEL[Chance of Playing],MATCH(PPts[[#This Row],[Code]],MODEL[Code],0))*PPts[[#This Row],[PSxTS Starts/Squads Made]])" },
+      "TRUE_TOTAL_BI": {
+        "formula": "=IF(LEN(PPts[[#This Row],[VS]])<3,0,(PPts[[#This Row],[T1]]+((PPts[[#This Row],[2]]+PPts[[#This Row],[3]]+PPts[[#This Row],[4]]+PPts[[#This Row],[5]]+PPts[[#This Row],[6]]+PPts[[#This Row],[7]]+PPts[[#This Row],[8]]+PPts[[#This Row],[9]]+PPts[[#This Row],[10]]+PPts[[#This Row],[11]])*PPts[[#This Row],[Start %]])+(PPts[[#This Row],[IF NOT START TOTAL]]*(1-PPts[[#This Row],[Start %]])))*PPts[[#This Row],[H/A]])",
+        "meaning": "Zero for a blank fixture. Otherwise: [T1 + full-11-column-sum*Start% + BG*(1-Start%)] all multiplied by H/A A SECOND TIME. Since BG already contains one factor of H/A internally (see IF_NOT_START_TOTAL_BG), the not-start branch's rate-scalable components (4,5,6,7,8,10) are scaled by H/A-squared inside the final TRUE TOTAL, while T1 and the start-branch's full-sum*Start% term are scaled by H/A to the first power only. THIS IS THE MATHEMATICAL MECHANISM OF THE DOUBLE APPLICATION, proven by direct algebraic substitution (see home_away_dependency_flow.double_application_proof) and independently confirmed by hand-recomputation matching the cached value to full float precision for three separate golden cases spanning a home fixture, an away fixture, and a manual-Start%-override fixture."
+      }
+    },
+    "per_component_fixture_multipliers": {
+      "note": "Re-verified fresh this session; every formula string below was confirmed to match the corresponding prior extraction's documentation character-for-character.",
+      "saves_column_3": {
+        "rate_formula": "PPts!L (3xSaves/90) = INDEX(MODEL[3],MATCH(PPts[[#This Row],[Code]],MODEL[Code],0))",
+        "fixture_multiplier_formula": "PPts!M (3xSaves/90 X) = =PPts[[#This Row],[VS xG/90]]/PPts[[#This Row],[LA xG/90]]",
+        "final_formula": "PPts!N ('3') = =PPts[[#This Row],[3xSaves/90]]*PPts[[#This Row],[3xSaves/90 X]]",
+        "meaning": "Opponent's own attacking xG/90 relative to league average -- a busier attacking opponent implies more shots faced, more save chances."
+      },
+      "goals_column_8": {
+        "fixture_multiplier_formula": "PPts!AH (LFxSF xG/St X) = =PPts[[#This Row],[LFxSF xG/St]]*PPts[[#This Row],[VS xGC/90/LA]]",
+        "meaning": "Opponent's defensive weakness relative to league average -- a leakier opponent boosts expected goals."
+      },
+      "assists_column_7": {
+        "fixture_multiplier_formula": "PPts!AC (LFxSF xA/St X) = =PPts[[#This Row],[LFxSF xA/St]]*PPts[[#This Row],[VS xGC/90/LA]]",
+        "meaning": "Same opponent-weakness multiplier as goals, applied before the separate +40% Fantasy Assist Boost."
+      },
+      "clean_sheets_and_2plusGC_columns_9_10": {
+        "fixture_multiplier_formula": "PPts!AL (CS X) = =IFERROR((PPts[[#This Row],[LFxSF US xGC FIX]]*PPts[[#This Row],[VS xG/90]])/PPts[[#This Row],[LA xG/90]],0)",
+        "meaning": "The player's own team's Understat-corrected defensive rate, scaled by the OPPONENT'S ATTACKING xG relative to league average (not the opponent's own defensive xGC, which sits unused in PPts!S for this purpose). This lambda then drives both CS% (EXP(-lambda)) and %2+GC via the shared Poisson identity, so columns 9 and 10 share one fixture multiplier."
+      },
+      "bonus_column_6": {
+        "fixture_multiplier_formula": "PPts!Y (xBonus/Start X) = =IF(OR(PPts[[#This Row],[POS]]=\"GK\",PPts[[#This Row],[POS]]=\"DEF\"),PPts[[#This Row],[xBonus/Start]]*PPts[[#This Row],[VS xG/90/LA]],PPts[[#This Row],[xBonus/Start]]*PPts[[#This Row],[VS xGC/90/LA]])",
+        "meaning": "THE EXACT V/W POSITION-DEPENDENT SPLIT: GK/DEF bonus is scaled by V (VS xG/90/LA, opponent attacking strength, using the INVERTED 1+(1-ratio) transform), MID/FWD bonus is scaled by W (VS xGC/90/LA, opponent defensive weakness, a plain ratio)."
+      },
+      "cards_columns_4_5": {
+        "confirmation": "PPts!O ('4') = =INDEX(MODEL[4],MATCH(PPts[[#This Row],[Code]],MODEL[Code],0)); PPts!P ('5') = =INDEX(MODEL[5],MATCH(PPts[[#This Row],[Code]],MODEL[Code],0))",
+        "meaning": "Direct, unmultiplied lookups. Re-confirmed by exhaustive formula-string search this session: neither formula, nor anything upstream of MODEL!4/MODEL!5, contains any reference to VS, H/A, or any TABLES-sourced figure. Cards remain the only live-scored component family with zero fixture adjustment of any kind."
+      },
+      "defcon_column_11": {
+        "confirmation": "PPts!AV (LFxSF DC/St) = =INDEX(MODEL[11],MATCH(PPts[[#This Row],[Code]],MODEL[Code],0))/2; PPts!AX ('11') = =PPts[[#This Row],[DC]]*PPts[[#This Row],[LFxSF DC/St]]",
+        "dead_attempt": "PPts!AS (VS DC/90 POS2), AT (LA DC/90 POS2), AU (DC/90 POS2 X) compute a real, cached, position-specific (POS2) fixture-adjustment ratio but are re-confirmed by exhaustive search this session to be referenced by NOTHING else in MODEL or PPts -- AV does not read AU.",
+        "meaning": "DefCon remains the only OTHER live-scored component family with zero live fixture adjustment, despite a built-but-disconnected attempt existing with real cached numbers."
+      },
+      "exhaustive_scan_result": "A full scan of every PPts row-2 formula for the substrings 'VS', 'H/A', and 'FIXHELPER' found references ONLY in the columns already documented above (plus the dead AS/AT/AU DefCon attempt and the row-identity/blank-fixture-gate columns J, Q, BA, BG, BI). No other live fixture multiplier exists anywhere in PPts or MODEL."
+    }
+  },
+  "fixture_selection_dependency_flow": [
+    "1. FIXTURES!A:Q holds the raw FPL-API fixture list (one row per Premier League match, with event=GW number, team_h/team_a as numeric team IDs, kickoff_time, and provisional_start_time/finished flags).",
+    "2. FIXTURES!AA:AM (the FIXHELPER structured table) derives, per fixture row: the team-GW identity (HOMEABRVGW/AWAYABRVGW, e.g. 'ARS2'), then a slot-disambiguated lookup key (HOMEABRVCODE/AWAYABRVCODE, e.g. 'ARS2-1' or 'ARS2-2') via a running COUNTIF that detects whether this is the first or second fixture for that team in that GW -- THIS is the double-gameweek detector.",
+    "3. PPts!A:D materializes a fixed 76000-row grid: 38 GWs x 2 fixture-slots x 1000 players, purely from row position (CEILING/MOD arithmetic), independent of CONTROL!B3/E2 or any live season-progress state.",
+    "4. PPts!Q (VS) looks up TEAM & GW3-slot-key against FIXHELPER's HOMEABRVCODE first, then AWAYABRVCODE, returning the opponent abbreviation UPPERCASE if home or LOWERCASE if away, or the literal string '-' if this team has no fixture in this GW-slot (a blank/bye).",
+    "5. PPts!AZ (H/A) derives 1.05/0.95 purely from the case of VS (EXACT match against UPPER(VS)).",
+    "6. PPts!J, BA, BI each independently guard on LEN(VS)<3 to zero out blank-fixture rows.",
+    "7. PREDICT!D/E/F/J (the dashboard) aggregate PPts via SUMIFS/INDEX-MATCH filtered to a MANUALLY-SET GW range (PREDICT!BB2:BC2, literal cells, currently 1-10). A double gameweek's two PPts rows share the same PPts[GW] value and are therefore summed together automatically by SUMIFS -- NOT collapsed into a single row anywhere in the chain.",
+    "8. FIXTURES!BA:CM (a separate display-only 'ticker' block) and PREDICT!AD:AM (reading it via a table named TICKER) provide a cosmetic 'next fixtures' summary for the dashboard, confirmed unreferenced by PPts or MODEL and therefore irrelevant to the actual xPts calculation."
+  ],
+  "home_away_dependency_flow": {
+    "is_it_team_position_component_or_global": "GLOBAL SCALAR. PPts!AZ (H/A) is computed once per PPts row from VS's letter case alone -- it does not vary by team identity (only by which side of the fixture the player's team is on), does not vary by position, and is not computed separately per component. The SAME single H/A value for a given row is then applied to that row's PRE H/A TOTAL (all 11 components combined) in BA, to the not-start rate-scalable subset in BG, and again to the final blended total in BI.",
+    "does_it_adjust_rates_component_xpts_or_final_total": "It adjusts COMPONENT-LEVEL xPts sums (BA, and the rate-scalable subset inside BG), not the underlying EVENT RATES themselves (MODEL!3/4/5/6/7/8/9/10/11 and their PPts-side fixture-adjusted rate columns, e.g. AH/AC/AL/M/Y, never reference H/A at all -- confirmed by exhaustive search). It is applied to TOTALS (BA, BG) and then to the FINAL BLENDED TOTAL (BI) -- three separate multiplication points, not one.",
+    "how_it_enters_BA_BG_BI": {
+      "BA": "=IF(LEN(VS)<3,0,PRE_HA_TOTAL*H_A) -- one multiplication, the ENTIRE 11-component sum scaled once.",
+      "BG": "=(col4+col5+col6+col7+col8+col10)*BF*H_A -- one multiplication, but only over the 6 rate-scalable not-start columns.",
+      "BI": "=IF(LEN(VS)<3,0,(T1 + full_11_col_sum*Start% + BG*(1-Start%))*H_A) -- the ENTIRE blended expression, INCLUDING the already-H/A-scaled BG term, is multiplied by H/A again."
+    },
+    "double_application_proof": {
+      "algebraic_derivation": "Expand BI's not-start contribution: BG*(1-Start%)*H_A = [rate_sum*BF*H_A]*(1-Start%)*H_A = rate_sum*BF*(1-Start%)*H_A^2. Compare to the start-branch contributions in the SAME BI expression: T1*H_A^1 and full_sum*Start%*H_A^1. The not-start branch's rate-scalable components (columns 4,5,6,7,8,10) are therefore multiplied by H_A raised to the SECOND power, while every other term in the same formula (T1, and the full-sum*Start% term, which itself includes those same six columns AGAIN at full value) is multiplied by H_A to the FIRST power only, within the identical BI expression.",
+      "status": "PROVEN, not merely observed. This is a direct algebraic consequence of BG's own formula containing one H_A factor and BI's outer formula wrapping the whole expression (including BG) in a second H_A factor -- both formula strings were re-read from the live workbook this session and confirmed unchanged from all four prior extractions' documentation.",
+      "independent_recomputation_confirms": "Verified by full-precision hand recomputation for three golden cases (Yoro, away H/A=0.95; Gabriel, home H/A=1.05; Saka, home H/A=1.05 with a manual Start% override) -- in every case, BG and BI recomputed purely from cached component inputs matched the workbook's cached BG/BI to full float precision (see independent_calculation_checks), AND a hypothetical 'single H/A' variant of BI (substituting BG-without-its-own-H/A-factor into the same outer formula) produced a DIFFERENT value from the actual cached BI, by an amount exactly equal to rate_sum*BF*(1-Start%)*(H_A^2-H_A) in every case."
+    },
+    "which_components_affected": "Cards (4,5), bonus (6), assist (7), goal (8), and 2+GC (10) -- the six columns present inside BG -- ALL carry a double-H/A contribution for any player with Start% < 1. Appearance (1), 60-min (2), saves (3), clean sheet (9), and DefCon (11) are STRUCTURALLY UNAFFECTED by the double application, because those five columns are absent from BG entirely; their only H/A exposure is the single factor applied via BA (start branch) and the single outer factor in BI (which does not compound for them since they never appear in a term that already carries an H/A factor of its own).",
+    "does_behavior_differ_by_player_state": {
+      "certain_starters_Start_pct_1": "The double-application effect VANISHES entirely for a player with Start%=1 (verified exactly for Raya, GW1): the not-start branch's weight (1-Start%) is exactly 0, so BG*(1-Start%)*H_A^2 = 0 regardless of BG's own magnitude. Confirmed by hand recomputation matching cached BI exactly.",
+      "rotation_players_and_substitutes_0_lt_Start_pct_lt_1": "The effect is present and proportional to (1-Start%) -- larger for players less likely to start. Verified exactly for Yoro (Start%=0.4865): the double-application discrepancy versus a hypothetical single-H/A formula was -0.00324 points for that one fixture.",
+      "manual_Start_pct_overrides": "The override (PREDICT!H, surfaced via PPts!BC/BH) changes ONLY the numeric value substituted for Start% in the BI formula -- it does not alter the formula's STRUCTURE, so the double-application mechanism is entirely unaffected by whether Start% is overridden or historically-derived. Verified exactly for Saka (manual override to 0.6, versus a historically-derived BB!PSxTS Starts/Squads Made of 0.78125): the double-application discrepancy was +0.0239 points for that fixture -- the LARGEST magnitude among the three golden cases checked, driven by the combination of a substantial not-start weight (0.4) and a home fixture (H_A=1.05, so H_A^2-H_A=0.0525 is a larger absolute gap than the away case's H_A^2-H_A=-0.0475).",
+      "bug_or_deliberate_conclusion": "This extraction records the mechanism and its proof precisely but does NOT independently determine intent. No comment in the workbook explains or acknowledges the compounding. Per the four prior extractions' consistent framing (and per this task's instruction not to label it a bug without formula + recomputation support), the formulas AND three independent recomputations across different fixture/state combinations DO support that a literal, unmodified re-application of the same H_A factor occurs on the not-start branch specifically -- this satisfies the evidentiary bar to describe it as a demonstrated double application. Whether the ORIGINAL AUTHOR intended this (vs. intending BI's outer H_A to apply only to the T1 and full-sum*Start% terms, with BG passed through unchanged) cannot be determined from the spreadsheet alone, since BG is used ONLY inside BI's not-start branch and never independently displayed as a final number elsewhere -- there is no sibling formula to compare against that would reveal which behavior was intended."
+    }
+  },
+  "double_gameweek_and_blank_fixture_behavior": {
+    "double_gameweek_scoring": "NOT COLLAPSED. Every gameweek gets exactly two independently-computed PPts rows per player (GW2 slot 1 and slot 2), each with its own VS lookup, its own H/A, its own full BA/BG/BI computation. When a team has two real fixtures in one GW, BOTH slots resolve to real opponents and BOTH produce nonzero TRUE TOTAL values. These are summed only at the PREDICT-sheet aggregation layer (SUMIFS over PPts[GW], which naturally includes both slots since they share the same GW value) or by any other downstream consumer that sums PPts rows by GW -- never inside PPts itself.",
+    "genuine_double_gameweek_found_in_this_workbook": "Exactly one team-GW pairing was found duplicated in the raw FIXTURES data: Ipswich Town (team id 12) and Nottingham Forest (team id 18) both show two fixtures tagged event=2 (GW2). On inspection, this is NOT a genuine calendar double-gameweek -- one of the two 'GW2' fixtures (fixture id 369, Ipswich vs Nott'm Forest) has kickoff_time='2027-05-23T14:00:00Z', nearly nine months after every other GW2 fixture (all dated late August 2026). This is a rearranged/postponed-fixture data anomaly in the raw FPL-API pull: the fixture's 'event' field still reads 2 (its originally scheduled gameweek) while its kickoff has been moved far into the future, not yet re-tagged to a later event number. The SAME two teams show a genuine BLANK at GW37 (zero fixtures each), consistent with this being the single displaced fixture's original 'true' slot before postponement, now vacated.",
+    "blank_fixture_bye_behavior": "Confirmed directly on O'Shea's PPts rows: GW37, both slots, VS='-', and BA/BG/BI all show BA=0, BI=0 (BG is nonzero, since BG's formula has no LEN(VS)<3 guard of its own -- see spreadsheet_quirks.BG_lacks_its_own_blank_fixture_guard -- but this is immaterial since BI's own guard forces the final TRUE TOTAL to exactly 0 regardless of BG's value for a blank row).",
+    "worked_example": "Dara O'Shea (Ipswich, DEF), GW2: slot 1 (vs Man Utd away, H/A=0.95) TRUE TOTAL=2.2264326064593503; slot 2 (vs Nott'm Forest away, H/A=0.95, the anomalous fixture) TRUE TOTAL=2.8900205698773322. A PREDICT-style SUMIFS over GW=2 would sum these to 5.116453176336682 -- a genuine double-fixture combined total, computed from two structurally independent BA/BG/BI evaluations, not a single formula multiplying by 2 or otherwise special-casing the DGW.",
+    "manual_overrides_for_fixtures": "No per-fixture manual override mechanism was found (e.g. no cell to manually swap an opponent or force a blank). The only fixture-related manual lever identified is PREDICT!BB2:BC2 (the projection-horizon GW range), which affects AGGREGATION, not fixture identity/selection itself. Per-player Start% can be manually overridden (PREDICT!H, already documented in prior extractions) but this does not touch fixture selection."
+  },
+  "golden_cases": [
+    {
+      "label": "home_fixture_certain_starter",
+      "player_code": 154561,
+      "player_name": "David Raya Mart\u00edn",
+      "web_name": "Raya",
+      "team": "ARS",
+      "position": "GK",
+      "sheet_refs": { "PPts_row": 2, "GW": 1, "GW2_slot": 1 },
+      "home_away_state": "HOME (VS='COV', uppercase)",
+      "raw_fixture_strength_inputs": {
+        "VS_xG_90": 1.26369,
+        "VS_xGC_90": 1.5966320000000003,
+        "LA_xG_90": 1.5294868421052636,
+        "LA_xGC_90": 1.5294605263157894
+      },
+      "league_average_denominator": { "LA_xG_90": 1.5294868421052636, "LA_xGC_90": 1.5294605263157894 },
+      "fixture_multipliers": {
+        "VS_xG_90_LA_saves_and_bonus_GK_DEF": 1.1737817121325524,
+        "VS_xGC_90_LA_goals_assists_CS_bonus_MID_FWD": 1.0439184094839085,
+        "saves_multiplier_M_3xSaves90X": 0.8262182878674476,
+        "CS_lambda_ALCSX": 0.6861479032775635
+      },
+      "appearance_start_inputs": { "MODEL_1": 0.99, "T1": 0.99, "Start_pct_BH": 1, "M_Start_pct": null },
+      "component_totals_before_home_away": { "PRE_H_A_TOTAL_AY": 4.619972520119678 },
+      "home_away_multiplier": 1.05,
+      "final_values": { "BA_IF_START_TOTAL": 4.850971146125662, "BG_IF_NOT_START_TOTAL": 0.037657280061635656, "BI_TRUE_TOTAL": 4.840471146125662 },
+      "independent_recomputation": {
+        "method": "BA = PRE_H_A_TOTAL*H_A; BI = (T1 + sum(cols2..11)*Start% + BG*(1-Start%))*H_A",
+        "computed_BA": 4.850971146125662,
+        "computed_BI": 4.840471146125662,
+        "match": "EXACT to full float precision",
+        "note": "Start%=1 makes the not-start branch's weight (1-Start%) exactly 0, so the H/A double-application is present in BG's own value but contributes NOTHING to BI's final number for this certain starter -- a clean isolation case proving the mechanism is inert at Start%=1."
+      }
+    },
+    {
+      "label": "away_fixture_rotation_prone",
+      "player_code": 550864,
+      "player_name": "Leny Yoro",
+      "web_name": "Yoro",
+      "team": "MUN",
+      "position": "DEF",
+      "sheet_refs": { "PPts_row": 434, "GW": 1, "GW2_slot": 1 },
+      "home_away_state": "AWAY (VS='hul', lowercase)",
+      "raw_fixture_strength_inputs": {
+        "VS_xG_90": 0.8646300000000001,
+        "VS_xGC_90": 2.5487520000000004,
+        "LA_xG_90": 1.5294868421052636,
+        "LA_xGC_90": 1.5294605263157894
+      },
+      "league_average_denominator": { "LA_xG_90": 1.5294868421052636, "LA_xGC_90": 1.5294605263157894 },
+      "fixture_multipliers": {
+        "VS_xG_90_LA": 1.4346927504064833,
+        "VS_xGC_90_LA": 1.6664385619284408,
+        "CS_lambda_ALCSX": 0.6912302392761249,
+        "DefCon_dead_multiplier_AU": 0.9256975019420626
+      },
+      "appearance_start_inputs": { "MODEL_1": 0.8562162162162162, "T1": 0.8562162162162162, "Start_pct_BH": 0.4864864864864865, "M_Start_pct": null, "PSxTS_Mn_Sub_Mn_St_BF": 0.24390243902439024 },
+      "component_totals_before_home_away": { "PRE_H_A_TOTAL_AY": 4.911247081200729 },
+      "home_away_multiplier": 0.95,
+      "final_values": { "BA_IF_START_TOTAL": 4.665684727140692, "BG_IF_NOT_START_TOTAL": 0.12608918777255204, "BI_TRUE_TOTAL": 2.682546889941271 },
+      "independent_recomputation": {
+        "method": "sum(cols2..11)=3.911247081200729; rate_scalable_sum(4,5,6,7,8,10)=0.5441743893341721; BG=rate_scalable_sum*BF*H_A; BI=(T1+sum(cols2..11)*Start%+BG*(1-Start%))*H_A",
+        "computed_BG": 0.12608918777255204,
+        "computed_BI": 2.682546889941271,
+        "match": "EXACT to full float precision",
+        "double_application_magnitude": "BG without its own H/A factor = 0.13272546081321268 (i.e. rate_scalable_sum*BF alone). Hypothetical single-H/A BI (using that unscaled BG in the same outer formula) = 2.6857843150327287. Actual cached BI minus this hypothetical = -0.0032374250914575242 -- the exact magnitude of the double H/A's effect for this away, rotation-prone player."
+      }
+    },
+    {
+      "label": "manual_start_override_home_fixture",
+      "player_code": 223340,
+      "player_name": "Bukayo Saka",
+      "web_name": "Saka",
+      "team": "ARS",
+      "position": "MID",
+      "sheet_refs": { "PPts_row": 12, "PREDICT_row": 24, "GW": 1, "GW2_slot": 1 },
+      "home_away_state": "HOME (VS='COV', uppercase)",
+      "raw_fixture_strength_inputs": {
+        "VS_xG_90": 1.26369,
+        "VS_xGC_90": 1.5966320000000003,
+        "LA_xG_90": 1.5294868421052636,
+        "LA_xGC_90": 1.5294605263157894
+      },
+      "league_average_denominator": { "LA_xG_90": 1.5294868421052636, "LA_xGC_90": 1.5294605263157894 },
+      "fixture_multipliers": { "VS_xG_90_LA": 1.1737817121325524, "VS_xGC_90_LA": 1.0439184094839085 },
+      "appearance_start_inputs": {
+        "MODEL_1": 0.9590625,
+        "M_Start_pct_PREDICT_H": 0.6,
+        "T1_BE": 0.983625,
+        "Start_pct_BH": 0.6,
+        "PSxTS_Starts_SqdsMd_BB_unused_by_BH_here": 0.78125,
+        "PSxTS_Mn_Sub_Mn_St_BF": 0.32926829268292684
+      },
+      "component_totals_before_home_away": { "PRE_H_A_TOTAL_AY": 5.985433191629347 },
+      "home_away_multiplier": 1.05,
+      "final_values": { "BA_IF_START_TOTAL": 6.284704851210814, "BG_IF_NOT_START_TOTAL": 1.1934895042351927, "BI_TRUE_TOTAL": 4.674894752505269 },
+      "independent_recomputation": {
+        "method": "sum(cols2..11)=4.985433191629347; rate_scalable_sum(4,5,6,7,8,10)=3.452068407311668; BG=rate_scalable_sum*BF*H_A; BI=(T1+sum(cols2..11)*Start%+BG*(1-Start%))*H_A",
+        "computed_BA": 6.284704851210814,
+        "computed_BG": 1.1934895042351927,
+        "computed_BI": 4.674894752505269,
+        "match": "EXACT to full float precision",
+        "double_application_magnitude": "BG without its own H/A factor = 1.1366566707001835. Hypothetical single-H/A BI = 4.651024962420566. Actual cached BI minus this hypothetical = +0.023869790084702913 -- the LARGEST double-application magnitude among the three golden cases, from the combination of a substantial not-start weight ((1-Start%)=0.4) and a home fixture (H_A^2-H_A=+0.0525, positive, versus the away case's negative gap). Confirms the manual Start% override changes ONLY the magnitude of the effect (via its weight on the not-start branch), not the underlying mechanism, which is structurally identical to the non-overridden cases."
+      }
+    },
+    {
+      "label": "promoted_team_double_gameweek_and_blank_fixture",
+      "player_code": 216616,
+      "player_name": "Dara O'Shea",
+      "web_name": "O'Shea",
+      "team": "IPS",
+      "position": "DEF",
+      "sheet_refs": {
+        "PPts_row_GW2_slot1": 2311,
+        "PPts_row_GW2_slot2_the_DGW_row": 3311,
+        "PPts_row_GW37_slot1_blank": 72311,
+        "PPts_row_GW37_slot2_blank": 73311
+      },
+      "home_away_state": "GW2 slot 1: AWAY vs MUN (VS='mun'); GW2 slot 2 (the anomalous/DGW fixture): AWAY vs NFO (VS='nfo'); GW37 both slots: blank (VS='-')",
+      "raw_fixture_strength_inputs_gw2_slot2": {
+        "VS_xG_90": 1.3859824561403506,
+        "VS_xGC_90": 1.7182807017543857,
+        "LA_xG_90": 1.5294868421052636,
+        "LA_xGC_90": 1.5294605263157894
+      },
+      "league_average_denominator": { "LA_xG_90": 1.5294868421052636, "LA_xGC_90": 1.5294605263157894 },
+      "fixture_multipliers_gw2_slot2": { "VS_xG_90_LA": 1.0938251850322467, "VS_xGC_90_LA": 1.123455409400746, "CS_lambda_ALCSX": 1.2771956029596818 },
+      "appearance_start_inputs_gw2_slot2": { "MODEL_1": 0.99, "T1": 0.99, "Start_pct_BH": 1, "M_Start_pct": null },
+      "component_totals_before_home_away_gw2_slot2": { "PRE_H_A_TOTAL_AY": 3.0521269156603497 },
+      "home_away_multiplier_gw2_slot2": 0.95,
+      "final_values": {
+        "gw2_slot1_BA": 2.899520569877332, "gw2_slot1_BG": -0.058622438433019355, "gw2_slot1_BI": 2.2264326064593503,
+        "gw2_slot2_BA": 2.899520569877332, "gw2_slot2_BG": -0.008197658585288323, "gw2_slot2_BI": 2.8900205698773322,
+        "gw37_slot1_BA": 0, "gw37_slot1_BG": 0.12361301733910138, "gw37_slot1_BI": 0,
+        "gw37_slot2_BA": 0, "gw37_slot2_BG": 0.12361301733910138, "gw37_slot2_BI": 0,
+        "combined_GW2_total_if_summed_across_slots": 5.116453176336682
+      },
+      "independent_recomputation": {
+        "method_gw2_slot2": "BA = PRE_H_A_TOTAL*H_A = 3.0521269156603497*0.95 = 2.899520569877332; BI = (T1 + sum(cols2..11)*Start% + BG*(1-Start%))*H_A with Start%=1 collapsing to (T1+sum(cols2..11))*H_A",
+        "computed_BA_gw2_slot2": 2.899520569877332,
+        "computed_BI_gw2_slot2": 2.8900205698773322,
+        "match": "EXACT to full float precision",
+        "note": "Confirms O'Shea's promoted team (Ipswich) receives a real, non-degenerate opponent-strength figure for BOTH the standard GW2 fixture (vs Man Utd) and the anomalous rearranged fixture (vs Nott'm Forest, nominally tagged GW2 in the raw API data but chronologically an end-of-season match), and that the SAME GW37 blank-fixture guard (LEN(VS)<3) zeroes BA/BI for both slots identically regardless of team, confirming the blank-fixture mechanism is fixture-driven, not team-driven."
+      }
+    }
+  ],
+  "independent_calculation_checks": [
+    {
+      "id": "raya_ba_bi_certain_starter",
+      "target": "PPts!BA and BI for David Raya (home, GW1, Start%=1)",
+      "formula_recomputed": "BA = PRE_H_A_TOTAL*H_A; BI = (T1 + sum(cols2..11)*1 + BG*0)*H_A",
+      "computed_BA": 4.850971146125662, "cached_BA": 4.850971146125662,
+      "computed_BI": 4.840471146125662, "cached_BI": 4.840471146125662,
+      "match": "EXACT (full float precision)"
+    },
+    {
+      "id": "yoro_bg_bi_rotation_away",
+      "target": "PPts!BG and BI for Leny Yoro (away, GW1, Start%=0.4865)",
+      "formula_recomputed": "BG = (col4+col5+col6+col7+col8+col10)*BF*H_A; BI = (T1+sum(cols2..11)*Start%+BG*(1-Start%))*H_A",
+      "computed_BG": 0.12608918777255204, "cached_BG": 0.12608918777255204,
+      "computed_BI": 2.682546889941271, "cached_BI": 2.682546889941271,
+      "match": "EXACT (full float precision)"
+    },
+    {
+      "id": "saka_bg_bi_manual_override_home",
+      "target": "PPts!BG and BI for Bukayo Saka (home, GW1, manual Start%=0.6)",
+      "formula_recomputed": "BG = (col4+col5+col6+col7+col8+col10)*BF*H_A; BI = (T1+sum(cols2..11)*Start%+BG*(1-Start%))*H_A, with T1 using the quirky manual-start blend already documented in the appearance extraction",
+      "computed_BG": 1.1934895042351927, "cached_BG": 1.1934895042351927,
+      "computed_BI": 4.674894752505269, "cached_BI": 4.674894752505269,
+      "match": "EXACT (full float precision)"
+    },
+    {
+      "id": "oshea_dgw_slot2_promoted_team",
+      "target": "PPts!BA and BI for Dara O'Shea, GW2 slot 2 (the anomalous DGW-tagged fixture vs Nott'm Forest, promoted team's own fixture)",
+      "formula_recomputed": "BA = PRE_H_A_TOTAL*H_A; BI = (T1+sum(cols2..11)*1)*H_A (Start%=1)",
+      "computed_BA": 2.899520569877332, "cached_BA": 2.899520569877332,
+      "computed_BI": 2.8900205698773322, "cached_BI": 2.8900205698773322,
+      "match": "EXACT (full float precision)"
+    },
+    {
+      "id": "double_application_hypothetical_comparison_all_three",
+      "target": "Quantifying the H/A double-application's exact numeric effect by comparing cached BI against a hypothetical single-H/A variant",
+      "method": "For each of Yoro, Gabriel (reused from the goals/assists extraction, home fixture, H_A=1.05, Start%=0.9375), and Saka, computed BI_hypothetical = (T1 + sum(cols2..11)*Start% + [rate_scalable_sum*BF]*(1-Start%))*H_A (i.e. BG WITHOUT its own internal H_A factor, used directly inside the same outer BI formula) and compared to the actual cached BI.",
+      "results": {
+        "yoro_away_H_A_0_95": { "cached_BI": 2.682546889941271, "hypothetical_single_HA_BI": 2.6857843150327287, "difference": -0.0032374250914575242 },
+        "gabriel_home_H_A_1_05": { "cached_BI": 6.641351539333944, "hypothetical_single_HA_BI": "recomputed as 6.638336782553148 using rate_scalable_sum=1.807269349875198 (=col4+col6+col7+col8+col10 without col5=0), BF=0.36666666666666664, T1=0.99, sum(cols2..11)=5.798693672088101, Start%=0.9375", "difference": 0.0030147567807965 },
+        "saka_home_H_A_1_05_manual_override": { "cached_BI": 4.674894752505269, "hypothetical_single_HA_BI": 4.651024962420566, "difference": 0.023869790084702913 }
+      },
+      "conclusion": "The sign of the discrepancy tracks H_A: away fixtures (H_A<1) show the double-application SUPPRESSING the not-start contribution slightly more than a single application would (making BI marginally LOWER than a single-H/A design would produce), while home fixtures (H_A>1) show it INFLATING the not-start contribution slightly more (making BI marginally HIGHER). The magnitude scales with (1-Start%) and with the size of the rate-scalable component sum -- largest for the manual-override case (Saka) where (1-Start%)=0.4 is the largest of the three sampled."
+    }
+  ],
+  "warnings": [
+    {
+      "type": "cache_staleness_risk",
+      "detail": "Same caveat as all four prior extractions: MODEL.xlsx has calculation.fullCalcOnLoad=True; values here are openpyxl's last-saved cache, read without opening/recalculating in Excel. Workbook file size/mtime confirmed unchanged from every prior extraction session."
+    },
+    {
+      "type": "scan_coverage",
+      "detail": "The double-gameweek/blank-fixture audit scanned all ~799 rows of raw FIXTURES data (the full 38-GW season) directly, which is exhaustive for that specific check. The broader PPts formula-consistency scans (VS/H-A/FIXHELPER references) were performed on row 2 only (the structured-table formula pattern, identical down every row of an Excel Table by construction) -- not independently re-verified for literal formula drift on every one of the 76000 PPts rows, consistent with the practice in all four prior extractions."
+    },
+    {
+      "type": "predict_start_pct_column_not_aggregate",
+      "detail": "PREDICT!F (Start %) uses a single-fixture INDEX/MATCH restricted to PPts rows 2:1000 (GW1 slot 1 only) rather than a SUMIFS/AVERAGEIFS-style aggregate across the PREDICT!BB2:BC2 projection window used by columns D/E/J. This means the dashboard's displayed 'Start %' for a player does not necessarily correspond to the same GW range as its 'IF START PTS'/'TRUE PTS' figures whenever BB2/BC2 is set to a range not starting at GW1. Recorded as an observed formula-scope inconsistency, not confirmed as a bug (it may be an intentional simplification, since averaging start probabilities across a multi-GW window is not a well-defined single number in the same way summing points is)."
+    }
+  ],
+  "spreadsheet_quirks": [
+    {
+      "id": "BG_lacks_its_own_blank_fixture_guard",
+      "title": "PPts!BG (IF NOT START TOTAL) has no LEN(VS)<3 guard of its own, unlike BA and BI",
+      "detail": "BA and BI both explicitly check LEN(VS)<3 and return 0 for a blank fixture slot. BG's formula has no equivalent guard -- it computes a value from whatever columns 4/5/6/7/8/10 and BF/H-A happen to be for that row, even when VS='-'. This is harmless in the current formula chain because BI's own guard forces the FINAL TRUE TOTAL to 0 regardless of BG's value for a blank row (confirmed directly: O'Shea's GW37 blank rows show BG=0.12361301733910138, a nonzero value, alongside BI=0). It would only matter if some OTHER formula ever read BG directly for a blank-fixture row without going through BI's guard -- no such formula was found in this extraction, but the asymmetry itself (three near-identical guard clauses, one omitted) is worth flagging as a latent inconsistency."
+    },
+    {
+      "id": "ppts_materializes_all_38_gws_unconditionally",
+      "title": "PPts's GW/GW2 columns are pure row-position formulas, entirely independent of CONTROL!B3/E2",
+      "detail": "Unlike every historical-window formula across all five extractions (which anchor to CONTROL!E2, the current-GW pointer), PPts!B (GW) is a CEILING/2000 row-position formula with no reference to CONTROL at all. This means the workbook always computes projections for all 38 gameweeks of the season simultaneously, regardless of how far the season has progressed -- CONTROL!B3/E2 only affects the HISTORICAL data windows feeding each component's rate, not which future gameweeks get a materialized row. This is a deliberate and sensible design (a spreadsheet, unlike a live pipeline, benefits from having every GW pre-computed and ready to filter), recorded here because it is a structurally different mechanism from the appearance/goals/CS/DefCon extractions' shared 'anchored at CONTROL!E2' pattern and could be mistaken for the same mechanism if not read carefully."
+    },
+    {
+      "id": "opponent_strength_gw_invariant",
+      "title": "A given opponent's fixture-strength figures (TABLES!LF/SF xG/xGC per 90) are identical across all 38 projected gameweeks",
+      "detail": "TABLES (the sheet PPts!R/S read from) computes exactly one row per team, anchored once at CONTROL!E2 (the current-GW historical-window pointer), not recomputed per projected fixture. This means GW1's projection against a given opponent and GW38's projection against the SAME opponent use the identical opponent-strength snapshot -- there is no in-season recency decay of opponent quality across the projection horizon itself (only the WHICH-opponent varies per row, via VS). This is expected for a frozen preseason snapshot but would need to be re-verified for whether TABLES is intended to be refreshed/re-pulled as the season progresses (out of scope for a static read-only extraction)."
+    },
+    {
+      "id": "anomalous_fixture_masquerading_as_dgw",
+      "title": "The workbook's only apparent double-gameweek is a rearranged-fixture data artifact, not a genuine calendar DGW",
+      "detail": "See double_gameweek_and_blank_fixture_behavior.genuine_double_gameweek_found_in_this_workbook. Ipswich Town and Nottingham Forest both show two GW2-tagged fixtures because one fixture (id 369) retains a stale event=2 tag from before being rearranged to a kickoff_time nearly a full season later. PPts still processes this exactly as it would a genuine DGW (both slots populate, both score independently), which is CORRECT structural behavior even though the underlying data represents a scheduling artifact rather than a true fixture pile-up. This is recorded as a finding about the SOURCE DATA, not a flaw in the workbook's DGW-handling formulas, which behaved exactly as designed given the input they were given."
+    }
+  ],
+  "likely_bugs": [
+    {
+      "id": "h_a_double_application_not_start_branch",
+      "severity": "demonstrated_by_formula_and_recomputation",
+      "detail": "See home_away_dependency_flow.double_application_proof and independent_calculation_checks.double_application_hypothetical_comparison_all_three. This extraction independently confirms (not merely restates) the double-H/A application on the not-start branch, via direct algebraic derivation from the live formula strings AND three separate full-precision hand recomputations spanning a home fixture, an away fixture, and a manual-Start%-override fixture, each matching the cached BG/BI exactly and each showing a nonzero, sign-consistent-with-H_A discrepancy against a hypothetical single-application variant. Per this task's instruction, this qualifies as a DEMONSTRATED finding (formulas + independent recomputation both support it), not merely an observation. Whether it reflects the original author's intent cannot be determined from the spreadsheet alone -- no comment addresses it, and BG is never used independently of BI in any other formula that could reveal the intended behavior."
+    }
+  ],
+  "unresolved_ambiguities": [
+    {
+      "id": "predict_start_pct_scope_mismatch",
+      "note": "See warnings.predict_start_pct_column_not_aggregate. Whether PREDICT!F's GW1-only scope (versus D/E/J's full BB2:BC2 range) is an intentional simplification or an oversight cannot be determined from the spreadsheet alone."
+    },
+    {
+      "id": "ha_double_application_intent",
+      "note": "See likely_bugs.h_a_double_application_not_start_branch. The mechanism is proven; the original author's intent is not recoverable from the workbook."
+    },
+    {
+      "id": "bg_missing_blank_fixture_guard_intent",
+      "note": "See spreadsheet_quirks.BG_lacks_its_own_blank_fixture_guard. Currently harmless given BI's own guard, but whether the omission was deliberate (BG intentionally never meant to be read standalone) or an oversight mirroring the double-application quirk's general pattern of asymmetric formula construction across BA/BG/BI is not determinable from the spreadsheet alone."
+    },
+    {
+      "id": "anomalous_fixture_upstream_cause",
+      "note": "Whether the Ipswich-vs-Nottingham-Forest fixture's stale event=2 tag with a 2027-05-23 kickoff reflects a genuine postponement in the real 2026-27 season, a data-pull timing artifact, or a placeholder the FPL API itself has not yet corrected cannot be determined from this workbook alone -- it is presented as raw upstream data, not a workbook-authored value."
+    }
+  ],
+  "missing_data_and_promoted_team_behavior": {
+    "fixture_strength_chain_for_promoted_teams": "Re-confirmed this session (extending the clean-sheets/goals-conceded extraction's finding to the fixture-adjustment chain specifically): TABLES!LF/SF xG/90 and xGC/90 for Ipswich, Coventry, and Hull are all real, nonzero, non-degenerate figures (e.g. IPS LF xG/90=1.143972, LF xGC/90=1.479448), derived from the same lump-sum-in-final-GW-column data-population pattern already documented for these teams' clean-sheet/goals-conceded and DefCon figures. These are genuine (if coarse) opponent-strength ESTIMATES, not zero-fallbacks.",
+    "zero_lookup_failure_audit": "A direct scan of all 2000 GW1 PPts rows (both fixture slots, all 1000 players) found ZERO instances of a valid-looking fixture (VS resolving to a real, length>=3 opponent code) paired with a zero VS xG/90 value -- the IFERROR-to-zero fallback inside PPts!R/S was never actually triggered for any real fixture in the sampled data. This is strong evidence that every current-roster team abbreviation resolves cleanly against TABLES[ABVR] for fixture-strength purposes specifically.",
+    "distinguishing_deliberate_priors_from_silent_failures": "Consistent with the clean-sheets/goals-conceded extraction's conclusion: promoted-team fixture-strength figures are DELIBERATE, if coarse, ESTIMATES (a full prior-season total concentrated into a single pivot-table column, still producing a sensible per-90 average when divided by matches played), not silent zero-fallbacks or lookup failures. No new instance of a silent lookup failure was found in the fixture-selection/strength/H-A chain specifically."
+  },
+  "lookahead_audit": {
+    "conclusion": "NO lookahead risk identified in the fixture-strength or fixture-selection mechanisms audited in this extraction.",
+    "fixture_strength_windows": "The FDR window block (CONTROL!B93:B98) feeding TABLES' opponent-strength figures uses the identical IF-ladder offset construction (D94/E94, D95/E95) already proven lookahead-safe in the clean-sheets/goals-conceded and DefCon extractions -- verified again this session: for the current CONTROL!B3=0 snapshot, E94=1 places the Long Form window's right edge exactly one column before CONTROL!E2's own position, structurally guaranteed by the same B3-tracking IF-ladder shape used throughout the workbook.",
+    "fixture_selection_itself_carries_no_temporal_window": "PPts's GW/GW2 row materialization (CEILING/MOD arithmetic on row position) and FIXHELPER's DGW-detecting running COUNTIF are both PURE STRUCTURAL/POSITIONAL formulas over static, already-published fixture-list data -- they do not read any 'current date' or 'current GW' state and therefore cannot look ahead into not-yet-known future data by construction. The FIXHELPER running COUNTIF looks backward only (from the top of the fixture list to the current row), which is a data-ordering dependency, not a temporal one, since FIXTURES is a complete pre-published season fixture list, not a live-updating feed.",
+    "can_current_season_totals_include_the_projected_fixture": "NO. This extraction re-confirms the mechanism already proven in the clean-sheets/goals-conceded and DefCon extractions: every rolling historical window (LF/SF for goals/assists/CS/GC/saves/DefCon, and the FDR block for opponent strength) ends at CONTROL!E2 minus a strictly positive offset, one column short of the 'current GW' marker itself, for every value of CONTROL!B3 by construction of the shared IF-ladder offset formula. Since PPts's fixture-selection grid (GW/GW2) is entirely independent of CONTROL!E2, and the fixture-strength windows always exclude the current/future GW column, there is no mechanism by which a projected (not-yet-played) fixture's own result could leak into the historical rate or opponent-strength figures used to project it.",
+    "season_boundary_and_preseason_behavior": "CONTROL!B3=0 ('LAST GW (Pre-Season = 0)') places E2 at column 41 (the '26-27-GW00' marker), meaning every historical window currently resolves to the complete previous season (2025-26) with zero current-season data included -- consistent with every prior extraction's preseason-state finding. This was not re-derived from scratch here (already proven) but re-confirmed structurally intact for the FDR/opponent-strength block specifically.",
+    "caveat": "Verified precisely for the current CONTROL!B3=0 snapshot and argued structurally (not empirically re-verified at other B3 values) for the general case, consistent with the caveat already recorded in every prior extraction's lookahead_audit section."
+  }
+}

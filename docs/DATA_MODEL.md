@@ -202,3 +202,33 @@ coverage gaps; no unsupported prior is fabricated. Historical bonus/BPS is also 
 cross-regime prior because the official 2026/27 BPS rules changed. See the
 [official scoring rules](https://fplchallenge.premierleague.com/help/rules) and
 [2026/27 bonus-system changes](https://www.premierleague.com/en/news/4679946/whats-new-in-202627-fantasy-changes-to-bonus-points-system).
+
+### Fixture and home/away foundation
+
+The fixture reference extraction lives in
+`docs/research/benchwarmers_fixture_home_away_reference.json`. The spreadsheet creates two slots
+for every player in every GW, encodes venue through opponent-code letter case, and turns unused
+slots into synthetic blank rows. The Python model instead represents each scheduled match as an
+explicit `FixtureContext` containing fixture ID, GW, slot, team, opponent, venue, and kickoff:
+
+- a normal GW has one fixture record;
+- a double GW retains two independently projected records and sums them only during aggregation;
+- a blank GW has no fixture record, rather than a row whose intermediate values must be guarded;
+- fixtures without an assigned FPL `event` are omitted until the provider assigns a GW;
+- more than two fixtures are retained instead of inheriting the workbook's two-slot limit.
+
+Fixture strength remains component-specific. `FixtureStrength` exposes the opponent attack ratio
+used by saves and defensive Poisson lambda, the opponent defensive-weakness ratio used by goals,
+assists, and attacking bonus, and the workbook's separate inverted signal used for goalkeeper/
+defender bonus. Cards and DefCon receive no invented opponent multiplier because the live workbook
+has none.
+
+The extracted global home/away scalar is applied exactly once to the already exposure-weighted
+fixture total. A separate `project_workbook_fixture_totals` diagnostic reproduces `BA`, `BG`, and
+`BI`, including the proven `H/A²` treatment of the not-start branch, and reports the difference
+from a single-application calculation. This keeps spreadsheet parity testable without carrying the
+double application into the coherent projection path.
+
+For walk-forward backtests, fixture records and GW assignments must come from a deadline-time
+snapshot. The current workbook contains one match whose distant kickoff remains tagged to GW2;
+the Python conversion preserves provider assignments visibly rather than silently rewriting them.
