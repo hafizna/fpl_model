@@ -112,6 +112,15 @@ Audit whether historical Vaastav snapshots existed before each inferred deadline
 python scripts/audit_vaastav_snapshots.py --season 2025-26
 ```
 
+Initialise the gitignored local snapshot database:
+
+```bash
+python scripts/init_local_db.py
+```
+
+See `docs/PIPELINE_ARCHITECTURE.md` for the weekly refresh, injury/eligibility snapshot, and Excel
+output contract.
+
 ## Upstream data
 
 The project uses or may use data from:

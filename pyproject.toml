@@ -9,6 +9,7 @@ description = "Explainable Fantasy Premier League projection and context engine"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+  "duckdb>=1.5,<2",
   "pandas>=2.2,<3",
   "numpy>=1.26,<3",
   "requests>=2.32,<3",

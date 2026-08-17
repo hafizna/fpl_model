@@ -1,0 +1,69 @@
+from __future__ import annotations
+
+from datetime import UTC, datetime
+
+import duckdb
+
+from fpl_model.storage import SCHEMA_VERSION, initialize_database
+
+
+def test_database_initialisation_is_persistent_and_idempotent(tmp_path):
+    database_path = tmp_path / "nested" / "fpl_model.duckdb"
+
+    first = initialize_database(database_path)
+    second = initialize_database(database_path)
+
+    assert first.path == database_path.resolve()
+    assert first.schema_version == SCHEMA_VERSION
+    assert first.tables == second.tables
+    assert {
+        "availability_signal",
+        "fixture_snapshot",
+        "ingestion_run",
+        "model_run",
+        "player_fixture_projection",
+        "player_snapshot",
+        "projection_component",
+        "schema_version",
+    }.issubset(first.tables)
+
+
+def test_player_state_is_versioned_by_ingestion_run(tmp_path):
+    database_path = tmp_path / "fpl_model.duckdb"
+    initialize_database(database_path)
+    captured_at = datetime(2026, 8, 17, 10, 0, tzinfo=UTC)
+
+    with duckdb.connect(str(database_path)) as connection:
+        for run_id in ("morning", "deadline"):
+            connection.execute(
+                """
+                INSERT INTO ingestion_run (
+                    ingestion_run_id, source, captured_at, status
+                ) VALUES (?, 'fpl_api', ?, 'completed')
+                """,
+                [run_id, captured_at],
+            )
+        connection.execute(
+            """
+            INSERT INTO player_snapshot (
+                ingestion_run_id, season, fpl_id, player_code, first_name,
+                second_name, web_name, team_id, fpl_position, price, fpl_status,
+                chance_of_playing_next_round, news
+            ) VALUES
+                ('morning', '2026-27', 1, 1001, 'A', 'Player', 'Player', 1,
+                 'MID', 7.5, 'd', 50, 'Knock'),
+                ('deadline', '2026-27', 1, 1001, 'A', 'Player', 'Player', 1,
+                 'MID', 7.5, 'a', NULL, '')
+            """
+        )
+
+        rows = connection.execute(
+            """
+            SELECT ingestion_run_id, fpl_status, chance_of_playing_next_round
+            FROM player_snapshot
+            WHERE player_code = 1001
+            ORDER BY ingestion_run_id
+            """
+        ).fetchall()
+
+    assert rows == [("deadline", "a", None), ("morning", "d", 50)]
