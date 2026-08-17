@@ -8,7 +8,7 @@ from pathlib import Path
 import duckdb
 
 DEFAULT_DATABASE_PATH = Path("data/processed/fpl_model.duckdb")
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -157,6 +157,53 @@ CREATE TABLE IF NOT EXISTS availability_signal (
     note VARCHAR,
     source_reference VARCHAR,
     CHECK (signal_type IN ('injury', 'suspension', 'eligibility', 'registration', 'selection')),
+    CHECK (availability_probability BETWEEN 0.0 AND 1.0)
+);
+
+CREATE TABLE IF NOT EXISTS availability_override (
+    override_id VARCHAR PRIMARY KEY,
+    player_code BIGINT NOT NULL,
+    target_gameweek INTEGER NOT NULL,
+    observed_at TIMESTAMPTZ NOT NULL,
+    effective_until TIMESTAMPTZ,
+    availability_probability DOUBLE,
+    is_eligible BOOLEAN,
+    source VARCHAR NOT NULL,
+    rationale VARCHAR NOT NULL,
+    CHECK (availability_probability BETWEEN 0.0 AND 1.0),
+    CHECK (availability_probability IS NOT NULL OR is_eligible IS NOT NULL),
+    CHECK (effective_until IS NULL OR effective_until >= observed_at)
+);
+
+CREATE TABLE IF NOT EXISTS availability_resolution_run (
+    resolution_run_id VARCHAR PRIMARY KEY,
+    source_ingestion_run_id VARCHAR NOT NULL REFERENCES ingestion_run(ingestion_run_id),
+    target_gameweek INTEGER NOT NULL,
+    as_of TIMESTAMPTZ NOT NULL,
+    deadline TIMESTAMPTZ NOT NULL,
+    policy_version VARCHAR NOT NULL,
+    status VARCHAR NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
+    UNIQUE (source_ingestion_run_id, target_gameweek, policy_version),
+    CHECK (as_of <= deadline),
+    CHECK (status IN ('completed', 'completed_with_gaps'))
+);
+
+CREATE TABLE IF NOT EXISTS player_availability_resolution (
+    resolution_run_id VARCHAR NOT NULL
+        REFERENCES availability_resolution_run(resolution_run_id),
+    fpl_id INTEGER NOT NULL,
+    player_code BIGINT,
+    fpl_status VARCHAR NOT NULL,
+    official_chance SMALLINT,
+    availability_probability DOUBLE,
+    is_eligible BOOLEAN,
+    selected_source VARCHAR NOT NULL,
+    selected_override_id VARCHAR REFERENCES availability_override(override_id),
+    reason VARCHAR NOT NULL,
+    data_quality_flags VARCHAR NOT NULL,
+    PRIMARY KEY (resolution_run_id, fpl_id),
+    CHECK (official_chance BETWEEN 0 AND 100),
     CHECK (availability_probability BETWEEN 0.0 AND 1.0)
 );
 

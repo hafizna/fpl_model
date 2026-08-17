@@ -80,6 +80,25 @@ Context is recorded at the player-GW or team-GW level and remains descriptive un
 - minutes and matches in last 7/14 days
 - European/cup proximity
 
+### Availability and eligibility resolution
+
+Official FPL player state is retained as a timestamped raw snapshot. A separate resolution run
+selects only a snapshot captured no later than the target deadline and converts it into the causal
+`availability_probability` input used by the appearance model.
+
+The first policy is deliberately conservative:
+
+- an explicit deadline-relevant FPL chance is divided by 100;
+- status `available` with a blank chance resolves to 1.0;
+- suspended, unavailable, non-selectable, or removed players are eligibility-blocked at 0.0;
+- any other missing probability remains `NULL` with a data-quality flag;
+- injury-news prose is retained but never parsed into an invented probability;
+- a reviewed override must identify its source, rationale, observation time, target GW, and expiry.
+
+The resolution is not start probability and does not directly multiply xPts. It becomes one input
+to mutually exclusive start, substitute-appearance, and absence scenarios. Resolution rows and the
+source snapshot remain immutable for later deadline-safe backtesting.
+
 ## Projection fact
 
 The projection table will contain component-level expected points, not only a final number:

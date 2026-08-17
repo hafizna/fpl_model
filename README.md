@@ -124,6 +124,12 @@ Fetch and persist a timestamped official FPL player/fixture snapshot:
 python scripts/refresh_fpl_snapshot.py --season 2026-27
 ```
 
+Resolve deadline-safe availability for the target gameweek:
+
+```bash
+python scripts/resolve_availability.py --gameweek 1
+```
+
 See `docs/PIPELINE_ARCHITECTURE.md` for the weekly refresh, injury/eligibility snapshot, and Excel
 output contract.
 

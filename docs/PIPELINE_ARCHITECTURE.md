@@ -59,6 +59,9 @@ The initial schema separates:
 - `fixture_snapshot`: fixture and GW assignment as known at that time;
 - `availability_signal`: timestamped injury, suspension, registration, eligibility, and selection
   evidence without prematurely collapsing conflicting sources;
+- `availability_override`: explicitly reviewed, sourced, gameweek-specific corrections;
+- `availability_resolution_run` and `player_availability_resolution`: immutable output of the
+  deadline-safe availability policy, including unresolved values and data-quality flags;
 - `model_run`: a projection execution bound to one ingestion snapshot and deadline;
 - `player_fixture_projection`: exposure, baseline, context, uncertainty, and final xPts;
 - `projection_component`: the auditable eleven-component xPts breakdown.
@@ -124,3 +127,16 @@ python scripts/refresh_fpl_snapshot.py --season 2026-27
 Each run archives canonical raw JSON plus a manifest under `data/raw/fpl/`, then inserts player,
 status, season-stat, team, gameweek, and fixture rows in one database transaction. The raw and
 processed directories remain local and gitignored.
+
+The official availability policy is materialised separately:
+
+```bash
+python scripts/resolve_availability.py --gameweek 1
+```
+
+It uses the latest FPL snapshot captured no later than the target deadline. Explicit official
+chance values are retained; an available player with a blank chance resolves to 1.0; official
+suspension/unavailable/removed states resolve to an eligibility block. Other missing probabilities
+remain `NULL` and block downstream projection rather than being guessed. A reviewed override can
+replace those fields only when its observation timestamp is no later than the selected snapshot.
+Free-text news is stored for review but is not automatically converted into a probability.
