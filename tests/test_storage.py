@@ -67,3 +67,44 @@ def test_player_state_is_versioned_by_ingestion_run(tmp_path):
         ).fetchall()
 
     assert rows == [("deadline", "a", None), ("morning", "d", 50)]
+
+
+def test_version_two_database_migrates_nullable_preseason_team_strength(tmp_path):
+    database_path = tmp_path / "fpl_model.duckdb"
+    with duckdb.connect(str(database_path)) as connection:
+        connection.execute(
+            "CREATE TABLE schema_version (version INTEGER PRIMARY KEY, applied_at TIMESTAMPTZ)"
+        )
+        connection.execute("INSERT INTO schema_version VALUES (2, current_timestamp)")
+        connection.execute(
+            """
+            CREATE TABLE team_snapshot (
+                ingestion_run_id VARCHAR,
+                team_id INTEGER,
+                team_code INTEGER,
+                name VARCHAR,
+                short_name VARCHAR,
+                unavailable BOOLEAN,
+                strength INTEGER NOT NULL,
+                strength_overall_home INTEGER NOT NULL,
+                strength_overall_away INTEGER NOT NULL,
+                strength_attack_home INTEGER NOT NULL,
+                strength_attack_away INTEGER NOT NULL,
+                strength_defence_home INTEGER NOT NULL,
+                strength_defence_away INTEGER NOT NULL
+            )
+            """
+        )
+
+    info = initialize_database(database_path)
+
+    assert info.schema_version == SCHEMA_VERSION
+    with duckdb.connect(str(database_path), read_only=True) as connection:
+        nullable = connection.execute(
+            """
+            SELECT is_nullable
+            FROM information_schema.columns
+            WHERE table_name = 'team_snapshot' AND column_name = 'strength'
+            """
+        ).fetchone()[0]
+    assert nullable == "YES"

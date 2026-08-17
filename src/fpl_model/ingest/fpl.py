@@ -8,6 +8,7 @@ backtests easier to audit and reduces accidental feature leakage.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 import pandas as pd
@@ -33,6 +34,14 @@ class FPLClient:
 
     def fixtures(self) -> pd.DataFrame:
         return pd.DataFrame(self._get_json("fixtures/"))
+
+    def snapshot_payload(self) -> tuple[dict[str, Any], list[dict[str, Any]], datetime]:
+        """Fetch one current player/team/event payload and fixture payload."""
+        bootstrap = self.bootstrap()
+        fixtures = self._get_json("fixtures/")
+        if not isinstance(bootstrap, dict) or not isinstance(fixtures, list):
+            raise ValueError("FPL API snapshot payload changed shape")
+        return bootstrap, fixtures, datetime.now(UTC)
 
     def raw_players(self) -> pd.DataFrame:
         return pd.DataFrame(self.bootstrap()["elements"])

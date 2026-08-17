@@ -8,7 +8,7 @@ from pathlib import Path
 import duckdb
 
 DEFAULT_DATABASE_PATH = Path("data/processed/fpl_model.duckdb")
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 3
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -47,6 +47,89 @@ CREATE TABLE IF NOT EXISTS player_snapshot (
     PRIMARY KEY (ingestion_run_id, fpl_id),
     CHECK (chance_of_playing_this_round BETWEEN 0 AND 100),
     CHECK (chance_of_playing_next_round BETWEEN 0 AND 100)
+);
+
+CREATE TABLE IF NOT EXISTS player_status_snapshot (
+    ingestion_run_id VARCHAR NOT NULL REFERENCES ingestion_run(ingestion_run_id),
+    fpl_id INTEGER NOT NULL,
+    can_select BOOLEAN NOT NULL,
+    can_transact BOOLEAN NOT NULL,
+    removed BOOLEAN NOT NULL,
+    selected_by_percent DOUBLE NOT NULL,
+    transfers_in BIGINT NOT NULL,
+    transfers_in_event BIGINT NOT NULL,
+    transfers_out BIGINT NOT NULL,
+    transfers_out_event BIGINT NOT NULL,
+    event_points INTEGER NOT NULL,
+    total_points INTEGER NOT NULL,
+    form DOUBLE NOT NULL,
+    expected_points_this DOUBLE,
+    expected_points_next DOUBLE,
+    team_join_date DATE,
+    PRIMARY KEY (ingestion_run_id, fpl_id),
+    FOREIGN KEY (ingestion_run_id, fpl_id)
+        REFERENCES player_snapshot(ingestion_run_id, fpl_id)
+);
+
+CREATE TABLE IF NOT EXISTS player_season_stat_snapshot (
+    ingestion_run_id VARCHAR NOT NULL REFERENCES ingestion_run(ingestion_run_id),
+    fpl_id INTEGER NOT NULL,
+    minutes INTEGER NOT NULL,
+    starts INTEGER NOT NULL,
+    goals_scored INTEGER NOT NULL,
+    assists INTEGER NOT NULL,
+    clean_sheets INTEGER NOT NULL,
+    goals_conceded INTEGER NOT NULL,
+    saves INTEGER NOT NULL,
+    yellow_cards INTEGER NOT NULL,
+    red_cards INTEGER NOT NULL,
+    bonus INTEGER NOT NULL,
+    bps INTEGER NOT NULL,
+    own_goals INTEGER NOT NULL,
+    penalties_saved INTEGER NOT NULL,
+    penalties_missed INTEGER NOT NULL,
+    defensive_contribution INTEGER NOT NULL,
+    clearances_blocks_interceptions INTEGER NOT NULL,
+    recoveries INTEGER NOT NULL,
+    tackles INTEGER NOT NULL,
+    expected_goals DOUBLE NOT NULL,
+    expected_assists DOUBLE NOT NULL,
+    expected_goal_involvements DOUBLE NOT NULL,
+    expected_goals_conceded DOUBLE NOT NULL,
+    PRIMARY KEY (ingestion_run_id, fpl_id),
+    FOREIGN KEY (ingestion_run_id, fpl_id)
+        REFERENCES player_snapshot(ingestion_run_id, fpl_id)
+);
+
+CREATE TABLE IF NOT EXISTS team_snapshot (
+    ingestion_run_id VARCHAR NOT NULL REFERENCES ingestion_run(ingestion_run_id),
+    team_id INTEGER NOT NULL,
+    team_code INTEGER NOT NULL,
+    name VARCHAR NOT NULL,
+    short_name VARCHAR NOT NULL,
+    unavailable BOOLEAN NOT NULL,
+    strength INTEGER,
+    strength_overall_home INTEGER,
+    strength_overall_away INTEGER,
+    strength_attack_home INTEGER,
+    strength_attack_away INTEGER,
+    strength_defence_home INTEGER,
+    strength_defence_away INTEGER,
+    PRIMARY KEY (ingestion_run_id, team_id)
+);
+
+CREATE TABLE IF NOT EXISTS gameweek_snapshot (
+    ingestion_run_id VARCHAR NOT NULL REFERENCES ingestion_run(ingestion_run_id),
+    gameweek INTEGER NOT NULL,
+    name VARCHAR NOT NULL,
+    deadline_time TIMESTAMPTZ NOT NULL,
+    release_time TIMESTAMPTZ,
+    finished BOOLEAN NOT NULL,
+    data_checked BOOLEAN NOT NULL,
+    is_previous BOOLEAN NOT NULL,
+    is_current BOOLEAN NOT NULL,
+    is_next BOOLEAN NOT NULL,
+    PRIMARY KEY (ingestion_run_id, gameweek)
 );
 
 CREATE TABLE IF NOT EXISTS fixture_snapshot (
@@ -129,6 +212,16 @@ CREATE TABLE IF NOT EXISTS projection_component (
 );
 """
 
+V2_TO_V3_SQL = """
+ALTER TABLE team_snapshot ALTER COLUMN strength DROP NOT NULL;
+ALTER TABLE team_snapshot ALTER COLUMN strength_overall_home DROP NOT NULL;
+ALTER TABLE team_snapshot ALTER COLUMN strength_overall_away DROP NOT NULL;
+ALTER TABLE team_snapshot ALTER COLUMN strength_attack_home DROP NOT NULL;
+ALTER TABLE team_snapshot ALTER COLUMN strength_attack_away DROP NOT NULL;
+ALTER TABLE team_snapshot ALTER COLUMN strength_defence_home DROP NOT NULL;
+ALTER TABLE team_snapshot ALTER COLUMN strength_defence_away DROP NOT NULL;
+"""
+
 
 @dataclass(frozen=True, slots=True)
 class DatabaseInfo:
@@ -144,6 +237,11 @@ def initialize_database(path: str | Path = DEFAULT_DATABASE_PATH) -> DatabaseInf
 
     with duckdb.connect(str(database_path)) as connection:
         connection.execute(SCHEMA_SQL)
+        current_version = connection.execute(
+            "SELECT max(version) FROM schema_version"
+        ).fetchone()[0]
+        if current_version == 2:
+            connection.execute(V2_TO_V3_SQL)
         connection.execute(
             "INSERT INTO schema_version (version) VALUES (?) ON CONFLICT DO NOTHING",
             [SCHEMA_VERSION],

@@ -114,3 +114,13 @@ baseline_xpts, context_adjustment, final_xpts, uncertainty, data_quality_flags
 
 Context layers and ML remain disabled until the Benchwarmers baseline has a genuine deadline-safe
 benchmark.
+
+The official FPL portion of step 1 is implemented by:
+
+```bash
+python scripts/refresh_fpl_snapshot.py --season 2026-27
+```
+
+Each run archives canonical raw JSON plus a manifest under `data/raw/fpl/`, then inserts player,
+status, season-stat, team, gameweek, and fixture rows in one database transaction. The raw and
+processed directories remain local and gitignored.
