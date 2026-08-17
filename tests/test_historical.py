@@ -6,6 +6,7 @@ import pandas as pd
 import pytest
 
 from fpl_model.validation.historical import (
+    build_cross_season_player_bridge,
     infer_gameweek_deadlines,
     materialize_expanding_player_mean_baseline,
 )
@@ -44,6 +45,30 @@ def _history_frame() -> pd.DataFrame:
             },
         ]
     )
+
+
+def test_cross_season_bridge_uses_stable_code_and_keeps_new_players():
+    current = pd.DataFrame(
+        {"id": [1, 2], "code": [154561, 999999], "web_name": ["Raya", "New"]}
+    )
+    previous = pd.DataFrame(
+        {"id": [10, 20], "code": [154561, 123456], "web_name": ["Raya", "Gone"]}
+    )
+
+    bridge = build_cross_season_player_bridge(current, previous)
+
+    assert bridge.loc[0, "previous_player_id"] == 10
+    assert bool(bridge.loc[0, "has_previous_season"]) is True
+    assert pd.isna(bridge.loc[1, "previous_player_id"])
+    assert bool(bridge.loc[1, "has_previous_season"]) is False
+
+
+def test_cross_season_bridge_rejects_ambiguous_codes():
+    current = pd.DataFrame({"id": [1, 2], "code": [154561, 154561]})
+    previous = pd.DataFrame({"id": [10], "code": [154561]})
+
+    with pytest.raises(ValueError, match="duplicate player codes"):
+        build_cross_season_player_bridge(current, previous)
 
 
 def test_infers_deadline_from_earliest_kickoff():

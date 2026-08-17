@@ -281,3 +281,27 @@ this dataset does not establish when each value was captured relative to its dea
 The exact run metadata, source-frame hash, duplicate count, metrics, and reproduction command are
 stored in `docs/research/walk_forward_smoke_2025_26.json`. A genuine model benchmark remains gated
 on reconstructing or obtaining deadline-time appearance, rate, team-strength, and fixture inputs.
+
+### Historical snapshot provenance
+
+Repository history can recover some deadline-time state without selecting a future file version.
+For each deadline, the Vaastav adapter lists commits that touched the season's `players_raw.csv`
+and selects only the newest revision whose commit timestamp is at or before the cutoff. CSV content
+is then fetched from that pinned SHA rather than from the mutable `master` branch.
+
+The 2025/26 coverage audit found 12 revisions and a causal snapshot for all 38 inferred deadlines,
+but only 13 GWs had a snapshot no older than 14 days. Median age was 27.5 days and maximum age was
+91.6 days. A stale snapshot is still causal, but it is not adequate evidence for current injury or
+availability state.
+
+Other coverage gaps prevent an honest claim of exact Benchwarmers backtest parity:
+
+- stable player codes link only 534 of 841 target-season players to 2024/25;
+- prior-season DefCon, CBI, recoveries, and tackles are absent;
+- historical Understat snapshots used by the workbook are not present;
+- fixture assignments and official deadlines are inferred from final files, not archived snapshots.
+
+The machine-readable audit is stored in
+`docs/research/vaastav_snapshot_coverage_2025_26.json`. Until these gaps are resolved, the project
+will keep the walk-forward roadmap item open and will not publish a reconstructed score as if it
+were the real Benchwarmers baseline.

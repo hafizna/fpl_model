@@ -106,6 +106,12 @@ Deadline-safe pipeline smoke test (not the Benchwarmers benchmark):
 python scripts/backtest_smoke.py --season 2025-26
 ```
 
+Audit whether historical Vaastav snapshots existed before each inferred deadline:
+
+```bash
+python scripts/audit_vaastav_snapshots.py --season 2025-26
+```
+
 ## Upstream data
 
 The project uses or may use data from:

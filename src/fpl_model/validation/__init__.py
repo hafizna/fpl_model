@@ -8,6 +8,7 @@ from fpl_model.validation.backtest import (
     walk_forward_folds,
 )
 from fpl_model.validation.historical import (
+    build_cross_season_player_bridge,
     infer_gameweek_deadlines,
     materialize_expanding_player_mean_baseline,
 )
@@ -16,6 +17,7 @@ __all__ = [
     "BacktestMetrics",
     "BacktestObservation",
     "WalkForwardFold",
+    "build_cross_season_player_bridge",
     "infer_gameweek_deadlines",
     "materialize_expanding_player_mean_baseline",
     "score_predictions",

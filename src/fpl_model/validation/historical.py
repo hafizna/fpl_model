@@ -20,6 +20,44 @@ REQUIRED_GAMEWEEK_COLUMNS = {
 }
 
 
+def build_cross_season_player_bridge(
+    current_players: pd.DataFrame,
+    previous_players: pd.DataFrame,
+) -> pd.DataFrame:
+    """Join season-local player IDs through the provider's stable player code."""
+    required = {"id", "code"}
+    for label, frame in (
+        ("current_players", current_players),
+        ("previous_players", previous_players),
+    ):
+        missing = required - set(frame.columns)
+        if missing:
+            raise ValueError(
+                f"{label} missing required columns: {', '.join(sorted(missing))}"
+            )
+        if frame[["id", "code"]].isna().any().any():
+            raise ValueError(f"{label} id/code values must not be missing")
+        if frame["id"].duplicated().any():
+            raise ValueError(f"{label} contains duplicate ids")
+        if frame["code"].duplicated().any():
+            raise ValueError(f"{label} contains duplicate player codes")
+
+    current = current_players[["id", "code"]].rename(
+        columns={"id": "current_player_id", "code": "player_code"}
+    )
+    previous = previous_players[["id", "code"]].rename(
+        columns={"id": "previous_player_id", "code": "player_code"}
+    )
+    bridge = current.merge(
+        previous,
+        on="player_code",
+        how="left",
+        validate="one_to_one",
+    )
+    bridge["has_previous_season"] = bridge["previous_player_id"].notna()
+    return bridge.sort_values("current_player_id").reset_index(drop=True)
+
+
 def _normalise_identifier(value: object, name: str) -> int | str:
     if pd.isna(value):
         raise ValueError(f"{name} must not be missing")

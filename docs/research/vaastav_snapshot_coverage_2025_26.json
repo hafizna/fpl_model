@@ -1,0 +1,52 @@
+{
+  "$schema_note": "Deadline-time source coverage audit; no model-accuracy claim.",
+  "run_date": "2026-08-17",
+  "season": "2025-26",
+  "snapshot_file": "data/2025-26/players_raw.csv",
+  "selection_rule": "latest GitHub commit touching snapshot_file at or before each inferred deadline",
+  "deadline_method": "earliest GW kickoff minus 90 minutes (inferred, not archived)",
+  "fresh_threshold_days": 14.0,
+  "revisions_found": 12,
+  "gameweeks": 38,
+  "gameweeks_with_causal_snapshot": 38,
+  "unique_revisions_used": 11,
+  "fresh_gameweeks": [2, 3, 4, 5, 6, 7, 9, 10, 11, 25, 26, 30, 31],
+  "fresh_gameweek_count": 13,
+  "median_snapshot_age_days": 27.485353009259256,
+  "maximum_snapshot_age_days": 91.5543287037037,
+  "cross_season_identity": {
+    "target_players": 841,
+    "stable_codes_found_in_2024_25": 534,
+    "player_coverage": 0.6349583828775267,
+    "target_rows_with_previous_season_code": 0.6721779749302685
+  },
+  "component_coverage": {
+    "available_both_seasons": [
+      "minutes",
+      "starts",
+      "expected_goals",
+      "expected_assists",
+      "expected_goals_conceded",
+      "saves",
+      "yellow_cards",
+      "red_cards",
+      "bonus",
+      "bps"
+    ],
+    "missing_from_2024_25": [
+      "defensive_contribution",
+      "clearances_blocks_interceptions",
+      "recoveries",
+      "tackles"
+    ]
+  },
+  "conclusion": "The repository history can provide causal availability snapshots, but not a full-season exact Benchwarmers benchmark. Only 13 deadlines have a snapshot no older than 14 days, historical Understat snapshots are absent, stable previous-season identity covers 63.5% of target players, and prior-season DefCon inputs do not exist.",
+  "limitations": [
+    "Commit time proves the snapshot existed by the cutoff, not that it was captured exactly at the FPL deadline.",
+    "A stale snapshot is causal but may omit recent availability and injury changes.",
+    "Deadlines are inferred rather than archived official values.",
+    "Final fixture assignments can differ from what was known at the historical deadline.",
+    "Vaastav expected-stat fields are not a drop-in replacement for the workbook's Understat inputs."
+  ],
+  "reproduce": ".venv\\Scripts\\python.exe scripts/audit_vaastav_snapshots.py --season 2025-26"
+}
