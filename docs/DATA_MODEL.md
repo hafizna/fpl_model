@@ -232,3 +232,31 @@ double application into the coherent projection path.
 For walk-forward backtests, fixture records and GW assignments must come from a deadline-time
 snapshot. The current workbook contains one match whose distant kickoff remains tagged to GW2;
 the Python conversion preserves provider assignments visibly rather than silently rewriting them.
+
+### End-to-end baseline projection
+
+`BaselineComponentProjections` composes the independently tested appearance, attacking, defensive,
+saves, discipline, bonus, and DefCon outputs into the eleven canonical `ScoringComponents`. These
+values are already unconditional: start, substitute-appearance, 60-minute, and absence exposure has
+been resolved inside the appropriate component. The composer performs no new rate calculation and
+does not reapply appearance probability. It applies the fixture's home/away scalar once and returns
+both the component breakdown and final xPts.
+
+### Walk-forward backtest fact
+
+One `BacktestObservation` represents one historical player-fixture prediction and records:
+
+- season, GW, player, and fixture identity;
+- deadline and fixture kickoff;
+- the newest timestamp used by any feature (`feature_cutoff`);
+- when the realised outcome became available for later training/calibration;
+- predicted xPts and actual FPL points.
+
+The validation layer rejects features newer than the deadline, naive timestamps, post-kickoff
+deadlines, and duplicate player-fixture predictions. For each evaluation deadline, its training
+fold includes only earlier predictions whose outcomes were already available. This matters for
+postponed fixtures: an old GW label alone never makes a future result eligible for training.
+
+These are backtest primitives, not a completed benchmark run. Historical input snapshots still
+need to be materialised so every player, fixture assignment, availability flag, and team-strength
+estimate reflects what was knowable at that deadline.

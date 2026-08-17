@@ -17,6 +17,11 @@ from fpl_model.model.attacking import (
     project_benchwarmers_attacking_rates,
     weight_attacking_rates,
 )
+from fpl_model.model.baseline import (
+    BaselineComponentProjections,
+    BaselineProjection,
+    compose_baseline_projection,
+)
 from fpl_model.model.defence import (
     DefensiveProjection,
     DefensiveRateProjection,
@@ -60,6 +65,8 @@ __all__ = [
     "AttackingProjection",
     "AttackingRateProjection",
     "AttackingWindow",
+    "BaselineComponentProjections",
+    "BaselineProjection",
     "BonusRateProjection",
     "DefConRateProjection",
     "DefensiveProjection",
@@ -80,6 +87,7 @@ __all__ = [
     "benchwarmers_appearance_probability",
     "benchwarmers_sixty_minute_given_start_probability",
     "benchwarmers_start_probability",
+    "compose_baseline_projection",
     "corrected_team_xgc_per_match",
     "expected_goals_conceded_pairs",
     "expected_poisson_bundles",

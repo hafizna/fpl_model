@@ -23,9 +23,9 @@ Planned contextual layers include:
 4. **Every extension must beat the baseline in backtesting.**
 5. **Raw scraped/downloaded data is not committed.** Pipelines should make it reproducible.
 
-## Current scope: Sprint 1 — data foundation
+## Current scope: baseline integration and validation
 
-This branch establishes:
+This repository currently includes:
 
 - official FPL API ingestion
 - Vaastav historical/current-season ingestion
@@ -34,8 +34,12 @@ This branch establishes:
 - spatial/heatmap fingerprint primitives
 - season/model configuration
 - network-free unit tests for core transformations
+- component-level Benchwarmers baseline projections
+- explicit fixture/DGW composition and one-time home/away adjustment
+- deadline-safe walk-forward fold and metric primitives
 
-The Benchwarmers xPts engine will be implemented only after this foundation is stable.
+The next milestone is a reproducible historical baseline run before any context layer or ML is
+enabled.
 
 ## Repository layout
 
