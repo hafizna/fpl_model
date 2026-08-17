@@ -6,10 +6,15 @@ import duckdb
 import pandas as pd
 import pytest
 
+from fpl_model.context.minutes import (
+    create_appearance_scenario_override,
+    store_appearance_scenario_override,
+)
 from fpl_model.ingest.appearance_history import (
     import_appearance_history_csv,
     validate_appearance_history,
 )
+from fpl_model.model.appearance import ConditionalAppearanceScenario
 from fpl_model.model.appearance_pipeline import materialize_preseason_appearance
 from fpl_model.storage import initialize_database
 
@@ -183,3 +188,57 @@ def test_preseason_materializer_refuses_inseason_zero_history_assumption(tmp_pat
             previous_season="2025-26",
             database_path=tmp_path / "fpl.duckdb",
         )
+
+
+def test_reviewed_scenario_projects_player_missing_workbook_history(tmp_path):
+    csv_path = tmp_path / "appearance.csv"
+    _history_frame().to_csv(csv_path, index=False)
+    database_path = tmp_path / "fpl.duckdb"
+    _insert_availability_run(database_path)
+    import_appearance_history_csv(
+        csv_path,
+        season="2025-26",
+        source_label="MODEL.xlsx resolved appearance fields",
+        database_path=database_path,
+        imported_at=datetime(2026, 8, 17, 10, 0, tzinfo=UTC),
+    )
+    override = create_appearance_scenario_override(
+        player_code=999999,
+        target_gameweek=1,
+        observed_at=datetime(2026, 8, 17, 8, 30, tzinfo=UTC),
+        scenario=ConditionalAppearanceScenario(
+            start_probability_if_available=0.6,
+            substitute_probability_if_available=0.2,
+            sixty_probability_given_start=0.8,
+            minutes_per_start=75.0,
+            minutes_per_substitute=20.0,
+        ),
+        source="reviewed_lineup_evidence",
+        rationale="New signing absent from the workbook snapshot.",
+    )
+    stored = store_appearance_scenario_override(
+        override,
+        database_path=database_path,
+    )
+
+    result = materialize_preseason_appearance(
+        target_gameweek=1,
+        previous_season="2025-26",
+        database_path=database_path,
+    )
+
+    assert stored.requires_pipeline_refresh is False
+    assert result.projected_players == 3
+    assert result.missing_players == 0
+    assert result.status == "completed"
+    with duckdb.connect(str(database_path), read_only=True) as connection:
+        row = connection.execute(
+            """
+            SELECT start_probability, expected_minutes, data_quality_flags
+            FROM player_appearance_projection WHERE player_code = 999999
+            """
+        ).fetchone()
+    assert row[0] == pytest.approx(0.6)
+    assert row[1] == pytest.approx(49.0)
+    assert "REVIEWED_APPEARANCE_SCENARIO_OVERRIDE" in row[2]
+    assert override.override_id in row[2]

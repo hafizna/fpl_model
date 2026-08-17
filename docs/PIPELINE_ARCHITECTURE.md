@@ -172,3 +172,38 @@ The importer rejects duplicate codes, missing values, fractional counts, invalid
 players with positive starts/sub appearances but zero corresponding mean minutes. The projection
 table retains every current FPL player; unmatched history produces null projection fields plus a
 `NO_WORKBOOK_APPEARANCE_HISTORY` flag.
+
+For a new signing or a reviewed role change, append a conditional appearance scenario rather than
+turning missing history into zero:
+
+```bash
+python scripts/add_appearance_scenario_override.py \
+  --player-code 123456 --gameweek 1 \
+  --observed-at 2026-08-21T10:00:00+07:00 \
+  --start-if-available 0.65 --sub-if-available 0.25 \
+  --sixty-given-start 0.85 \
+  --minutes-per-start 76 --minutes-per-substitute 20 \
+  --source reviewed_team_news \
+  --rationale "New signing expected to compete for a starting role"
+```
+
+These inputs describe playing time conditional on availability. They require timestamped evidence
+and never modify an existing projection run. When the command requests a refresh, capture a new FPL
+snapshot, resolve availability again, and materialise a new appearance projection.
+
+## Decision layer: squad planner and transfer recommender
+
+The eventual user-facing feature sits downstream of calibrated player-fixture projections. Its
+inputs are the manager's current 15-player squad, purchase and sale values, bank, free transfers,
+chips, per-gameweek component xPts, availability, expected minutes, uncertainty, data-quality
+flags, FPL constraints, hit cost, planning horizon, and risk preference.
+
+The decision layer will produce:
+
+- a starting XI, bench order, captain, and vice-captain;
+- transfer suggestions, including a no-transfer option;
+- multi-gameweek net gain after hit costs and budget constraints;
+- safer alternatives when the best mean-xPts move has high uncertainty;
+- an explanation of the components and assumptions driving each recommendation.
+
+Missing projections remain explicit gaps and cannot be interpreted as cheap zero-value players.

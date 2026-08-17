@@ -89,6 +89,82 @@ class AppearanceProjection:
     total_xpts: float
 
 
+@dataclass(frozen=True, slots=True)
+class ConditionalAppearanceScenario:
+    """Reviewed playing-time assumptions conditional on being available."""
+
+    start_probability_if_available: float
+    substitute_probability_if_available: float
+    sixty_probability_given_start: float
+    minutes_per_start: float
+    minutes_per_substitute: float
+
+    def __post_init__(self) -> None:
+        for name in (
+            "start_probability_if_available",
+            "substitute_probability_if_available",
+            "sixty_probability_given_start",
+        ):
+            _validate_probability(getattr(self, name), name)
+        if (
+            self.start_probability_if_available
+            + self.substitute_probability_if_available
+            > 1.0
+        ):
+            raise ValueError("conditional start and substitute probabilities cannot exceed 1")
+        for name in ("minutes_per_start", "minutes_per_substitute"):
+            value = getattr(self, name)
+            if not isfinite(value) or not 0.0 <= value <= REGULATION_MINUTES:
+                raise ValueError(f"{name} must be finite and between 0 and 90")
+        if self.start_probability_if_available > 0.0 and self.minutes_per_start == 0.0:
+            raise ValueError("a positive start probability requires positive start minutes")
+        if (
+            self.substitute_probability_if_available > 0.0
+            and self.minutes_per_substitute == 0.0
+        ):
+            raise ValueError(
+                "a positive substitute probability requires positive substitute minutes"
+            )
+        if (
+            self.start_probability_if_available == 0.0
+            and self.sixty_probability_given_start > 0.0
+        ):
+            raise ValueError("60-minute probability requires a positive start probability")
+
+
+def project_conditional_appearance(
+    scenario: ConditionalAppearanceScenario,
+    *,
+    availability_probability: float,
+) -> AppearanceProjection:
+    """Convert reviewed conditional assumptions into unconditional outcomes."""
+    _validate_probability(availability_probability, "availability_probability")
+    start_probability = (
+        availability_probability * scenario.start_probability_if_available
+    )
+    substitute_probability = (
+        availability_probability * scenario.substitute_probability_if_available
+    )
+    appearance_probability = start_probability + substitute_probability
+    sixty_probability = (
+        start_probability * scenario.sixty_probability_given_start
+    )
+    expected_minutes = (
+        start_probability * scenario.minutes_per_start
+        + substitute_probability * scenario.minutes_per_substitute
+    )
+    return AppearanceProjection(
+        start_probability=float(start_probability),
+        substitute_appearance_probability=float(substitute_probability),
+        appearance_probability=float(appearance_probability),
+        sixty_minute_probability=float(sixty_probability),
+        expected_minutes=float(expected_minutes),
+        appearance_xpts=float(appearance_probability),
+        sixty_minute_xpts=float(sixty_probability),
+        total_xpts=float(appearance_probability + sixty_probability),
+    )
+
+
 def benchwarmers_appearance_probability(history: SeasonAppearanceHistory) -> float:
     """Reproduce MODEL ``PS %1``/``%1`` before seasonal blending.
 

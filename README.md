@@ -145,6 +145,11 @@ python scripts/import_appearance_history.py \
 python scripts/project_preseason_appearance.py --gameweek 1 --previous-season 2025-26
 ```
 
+New signings or reviewed role changes that are absent from the workbook can receive a sourced,
+gameweek-specific conditional playing-time scenario through
+`scripts/add_appearance_scenario_override.py`. Missing history is otherwise retained as a flagged
+gap rather than fabricated as zero.
+
 See `docs/PIPELINE_ARCHITECTURE.md` for the weekly refresh, injury/eligibility snapshot, and Excel
 output contract.
 

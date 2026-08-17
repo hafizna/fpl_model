@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from fpl_model.model.appearance import (
+    ConditionalAppearanceScenario,
     MinutesScenario,
     SeasonAppearanceHistory,
     benchwarmers_appearance_probability,
@@ -14,6 +15,7 @@ from fpl_model.model.appearance import (
     benchwarmers_start_probability,
     project_appearance,
     project_benchwarmers_appearance,
+    project_conditional_appearance,
 )
 
 REFERENCE_PATH = (
@@ -121,6 +123,37 @@ def test_substitute_probability_is_reported_separately():
     )
 
     assert result.substitute_appearance_probability == pytest.approx(0.30)
+
+
+def test_reviewed_conditional_scenario_preserves_availability_as_causal_input():
+    result = project_conditional_appearance(
+        ConditionalAppearanceScenario(
+            start_probability_if_available=0.6,
+            substitute_probability_if_available=0.25,
+            sixty_probability_given_start=0.8,
+            minutes_per_start=75.0,
+            minutes_per_substitute=20.0,
+        ),
+        availability_probability=0.5,
+    )
+
+    assert result.start_probability == pytest.approx(0.3)
+    assert result.substitute_appearance_probability == pytest.approx(0.125)
+    assert result.appearance_probability == pytest.approx(0.425)
+    assert result.sixty_minute_probability == pytest.approx(0.24)
+    assert result.expected_minutes == pytest.approx(25.0)
+    assert result.total_xpts == pytest.approx(0.665)
+
+
+def test_conditional_scenario_rejects_incoherent_probabilities():
+    with pytest.raises(ValueError, match="cannot exceed 1"):
+        ConditionalAppearanceScenario(
+            start_probability_if_available=0.8,
+            substitute_probability_if_available=0.3,
+            sixty_probability_given_start=0.8,
+            minutes_per_start=75.0,
+            minutes_per_substitute=20.0,
+        )
 
 
 @pytest.mark.parametrize(

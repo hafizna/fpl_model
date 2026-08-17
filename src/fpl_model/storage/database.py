@@ -8,7 +8,7 @@ from pathlib import Path
 import duckdb
 
 DEFAULT_DATABASE_PATH = Path("data/processed/fpl_model.duckdb")
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -235,6 +235,30 @@ CREATE TABLE IF NOT EXISTS player_appearance_history (
     CHECK (unused_substitute >= 0),
     CHECK (minutes_per_start BETWEEN 0.0 AND 90.0),
     CHECK (minutes_per_substitute BETWEEN 0.0 AND 90.0)
+);
+
+CREATE TABLE IF NOT EXISTS appearance_scenario_override (
+    override_id VARCHAR PRIMARY KEY,
+    player_code BIGINT NOT NULL,
+    target_gameweek INTEGER NOT NULL,
+    observed_at TIMESTAMPTZ NOT NULL,
+    effective_until TIMESTAMPTZ,
+    start_probability_if_available DOUBLE NOT NULL,
+    substitute_probability_if_available DOUBLE NOT NULL,
+    sixty_probability_given_start DOUBLE NOT NULL,
+    minutes_per_start DOUBLE NOT NULL,
+    minutes_per_substitute DOUBLE NOT NULL,
+    source VARCHAR NOT NULL,
+    rationale VARCHAR NOT NULL,
+    CHECK (start_probability_if_available BETWEEN 0.0 AND 1.0),
+    CHECK (substitute_probability_if_available BETWEEN 0.0 AND 1.0),
+    CHECK (
+        start_probability_if_available + substitute_probability_if_available <= 1.0
+    ),
+    CHECK (sixty_probability_given_start BETWEEN 0.0 AND 1.0),
+    CHECK (minutes_per_start BETWEEN 0.0 AND 90.0),
+    CHECK (minutes_per_substitute BETWEEN 0.0 AND 90.0),
+    CHECK (effective_until IS NULL OR effective_until >= observed_at)
 );
 
 CREATE TABLE IF NOT EXISTS appearance_projection_run (

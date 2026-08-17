@@ -121,6 +121,13 @@ Missing history remains missing; it is not converted to zero history. The initia
 restricted to GW1, where the extracted workbook uses 100% previous-season weight. Extending this to
 GW2+ requires a separate deadline-safe current-season squad-status source and explicit blend rules.
 
+Players added after the workbook snapshot may instead receive a reviewed conditional appearance
+scenario. It records `P(start | available)`, `P(substitute cameo | available)`,
+`P(60+ | start)`, and mean minutes for starts and cameos, together with a source, rationale,
+observation timestamp, target gameweek, and optional expiry. Availability remains an upstream
+input: for example, 50% availability scales the scenario probabilities rather than multiplying
+component xPts directly.
+
 ## Projection fact
 
 The projection table will contain component-level expected points, not only a final number:

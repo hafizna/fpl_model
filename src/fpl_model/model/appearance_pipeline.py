@@ -10,8 +10,10 @@ from pathlib import Path
 import duckdb
 
 from fpl_model.model.appearance import (
+    ConditionalAppearanceScenario,
     SeasonAppearanceHistory,
     project_benchwarmers_appearance,
+    project_conditional_appearance,
 )
 from fpl_model.storage import DEFAULT_DATABASE_PATH, initialize_database
 
@@ -140,20 +142,57 @@ def materialize_preseason_appearance(
                 [history_run_id],
             ).fetchall()
         }
+        overrides = {
+            row[0]: (row[1], ConditionalAppearanceScenario(*row[2:]))
+            for row in connection.execute(
+                """
+                SELECT player_code, override_id,
+                       start_probability_if_available,
+                       substitute_probability_if_available,
+                       sixty_probability_given_start,
+                       minutes_per_start, minutes_per_substitute
+                FROM appearance_scenario_override
+                WHERE target_gameweek = ?
+                  AND observed_at <= (
+                      SELECT as_of FROM availability_resolution_run
+                      WHERE resolution_run_id = ?
+                  )
+                  AND (
+                      effective_until IS NULL OR effective_until >= (
+                          SELECT as_of FROM availability_resolution_run
+                          WHERE resolution_run_id = ?
+                      )
+                  )
+                QUALIFY row_number() OVER (
+                    PARTITION BY player_code ORDER BY observed_at DESC, override_id DESC
+                ) = 1
+                """,
+                [target_gameweek, availability_run_id, availability_run_id],
+            ).fetchall()
+        }
 
         projection_rows = []
         missing = 0
         for fpl_id, player_code, availability, raw_flags in availability_rows:
             flags = set(json.loads(raw_flags))
             player_history = history.get(player_code)
+            reviewed_override = overrides.get(player_code)
             projection = None
             if availability is None:
                 flags.add("UNRESOLVED_AVAILABILITY")
             if player_code is None:
                 flags.add("MISSING_PLAYER_CODE")
-            elif player_history is None:
+            elif player_history is None and reviewed_override is None:
                 flags.add("NO_WORKBOOK_APPEARANCE_HISTORY")
-            if availability is not None and player_history is not None:
+            if availability is not None and reviewed_override is not None:
+                override_id, scenario = reviewed_override
+                projection = project_conditional_appearance(
+                    scenario,
+                    availability_probability=availability,
+                )
+                flags.add("REVIEWED_APPEARANCE_SCENARIO_OVERRIDE")
+                flags.add(f"APPEARANCE_SCENARIO_OVERRIDE_ID={override_id}")
+            elif availability is not None and player_history is not None:
                 projection = project_benchwarmers_appearance(
                     player_history,
                     SeasonAppearanceHistory(0, 0, 0),
