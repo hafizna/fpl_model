@@ -100,6 +100,12 @@ client = VaastavClient()
 players = client.cleaned_players("2026-27")
 ```
 
+Deadline-safe pipeline smoke test (not the Benchwarmers benchmark):
+
+```bash
+python scripts/backtest_smoke.py --season 2025-26
+```
+
 ## Upstream data
 
 The project uses or may use data from:

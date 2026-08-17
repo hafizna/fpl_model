@@ -1,0 +1,34 @@
+{
+  "$schema_note": "Reproducible pipeline smoke result, not a Benchwarmers-model benchmark.",
+  "run_date": "2026-08-17",
+  "label": "expanding_player_mean_pipeline_smoke_test",
+  "is_benchwarmers_baseline": false,
+  "season": "2025-26",
+  "source": "https://raw.githubusercontent.com/vaastav/Fantasy-Premier-League/master/data/2025-26/gws/merged_gw.csv",
+  "materialized_frame_sha256": "f22f8601603e2c53ccd54db320dfda99b07c43eb573fe2e274a253a999971934",
+  "source_rows": 29757,
+  "exact_duplicate_rows_removed": 10,
+  "all_rows": 29747,
+  "evaluation_from_gw": 2,
+  "evaluation_rows": 29057,
+  "evaluation_population": "all player-fixture rows; zero-minute outcomes retained to avoid lookahead filtering",
+  "walk_forward_folds": 38,
+  "deadline_method": "earliest GW kickoff minus 90 minutes (inferred, not archived)",
+  "outcome_available_method": "kickoff plus 3 hours",
+  "prediction": "mean actual points from outcomes available before the deadline; cold start 0",
+  "metrics": {
+    "observations": 29057,
+    "mean_predicted_xpts": 1.1871912388861137,
+    "mean_actual_points": 1.1501531472622777,
+    "mean_error": 0.03703809162383606,
+    "mean_absolute_error": 1.0565446550148676,
+    "root_mean_squared_error": 2.0552156424881334
+  },
+  "limitations": [
+    "This validates the pipeline, not the reproduced Benchwarmers model.",
+    "Deadlines are inferred because merged_gw.csv has no archived deadline field.",
+    "A real baseline benchmark needs deadline-time model inputs and fixture snapshots.",
+    "Metrics cover the full selectable player population, so zero-point rows are common."
+  ],
+  "reproduce": ".venv\\Scripts\\python.exe scripts/backtest_smoke.py --season 2025-26"
+}

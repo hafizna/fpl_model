@@ -260,3 +260,24 @@ postponed fixtures: an old GW label alone never makes a future result eligible f
 These are backtest primitives, not a completed benchmark run. Historical input snapshots still
 need to be materialised so every player, fixture assignment, availability flag, and team-strength
 estimate reflects what was knowable at that deadline.
+
+### Historical materialisation smoke test
+
+Vaastav's 2025/26 `merged_gw.csv` supplies complete realised player-fixture outcomes but not
+archived FPL deadlines or the Benchwarmers inputs as they stood at each deadline. The historical
+materialiser therefore supports a deliberately limited pipeline test:
+
+1. infer each GW deadline as its earliest kickoff minus an explicit 90-minute buffer;
+2. treat an outcome as available three hours after its fixture kickoff;
+3. predict each player's next row using only their mean points from outcomes already available;
+4. retain zero-minute rows, because filtering on realised minutes would use future information;
+5. remove only byte-for-byte-equivalent table rows and reject conflicting duplicate identities.
+
+The first run covered 38 folds and 29,057 evaluation rows from GW2 onward. Its expanding-mean
+smoke baseline produced MAE `1.0565` and RMSE `2.0552`. These values validate the mechanics only;
+they are not evidence about Benchwarmers accuracy. The upstream `xP` column is also not used because
+this dataset does not establish when each value was captured relative to its deadline.
+
+The exact run metadata, source-frame hash, duplicate count, metrics, and reproduction command are
+stored in `docs/research/walk_forward_smoke_2025_26.json`. A genuine model benchmark remains gated
+on reconstructing or obtaining deadline-time appearance, rate, team-strength, and fixture inputs.
