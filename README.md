@@ -38,9 +38,11 @@ This repository currently includes:
 - an end-to-end GW1 baseline materialiser with immutable input lineage and explicit gaps
 - explicit fixture/DGW composition and one-time home/away adjustment
 - deadline-safe walk-forward fold and metric primitives
+- a genuine walk-forward backtest of the replicated 11-component model against in-season Vaastav
+  history (Vaastav-only team strength, no workbook)
 
-The next milestone is a reproducible historical baseline run before any context layer or ML is
-enabled.
+The next milestone is using the walk-forward backtest results to determine shrinkage and
+uncertainty before any context layer or ML is enabled.
 
 ## Repository layout
 
@@ -105,6 +107,17 @@ Deadline-safe pipeline smoke test (not the Benchwarmers benchmark):
 
 ```bash
 python scripts/backtest_smoke.py --season 2025-26
+```
+
+Genuine walk-forward backtest of the replicated 11-component model, scored in-season from
+Vaastav-only data. Deadline safety requires both `gameweek < N` and
+`kickoff_time + outcome_delay <= target_deadline`, so a postponed fixture cannot leak into a later
+prediction. The output also reports `matched_naive_metrics`, an expanding player-points-mean
+comparator scored on exactly the same rows as the model, for a fair naive baseline (see
+`docs/PIPELINE_ARCHITECTURE.md`):
+
+```bash
+python scripts/backtest_benchwarmers.py --season 2025-26
 ```
 
 Audit whether historical Vaastav snapshots existed before each inferred deadline:
@@ -213,7 +226,8 @@ See `THIRD_PARTY_NOTICES.md`.
 - [ ] Tactical role priors
 
 ### Sprint 4 — Validation and decisions
-- [ ] Walk-forward backtesting
+- [x] Walk-forward fold/metric primitives (smoke-tested)
+- [x] Genuine 11-component walk-forward backtest (2025-26, in-season)
 - [ ] Start-probability calibration
 - [ ] xPts uncertainty
 - [ ] Ablation tests for each contextual layer

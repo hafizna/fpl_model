@@ -360,6 +360,33 @@ These are backtest primitives, not a completed benchmark run. Historical input s
 need to be materialised so every player, fixture assignment, availability flag, and team-strength
 estimate reflects what was knowable at that deadline.
 
+### Vaastav-derived team-strength and rate windows (backtest-only)
+
+`TeamFixtureResult`, `TeamStrengthAsOf`, `PlayerRatesAsOf`, and `AppearanceHistoryAsOf` are the
+walk-forward backtest's deadline-safe, Vaastav-only inputs, each parameterised by an explicit
+`as_of_gameweek` that filters strictly to earlier gameweeks. Unlike every other entity in this
+document, none of these are DuckDB tables: `player_rate_history_run`/`team_strength_run` are
+one-shot-per-run schemas, and materialising one row per evaluation gameweek across a season would
+be schema abuse. They are computed in-memory per gameweek by
+`src/fpl_model/validation/benchwarmers_backtest.py` and never persisted or written into the
+workbook-derived `team_strength_projection`/`player_rate_history` tables.
+
+Each of these `*_as_of` functions accepts an optional `target_deadline`/`outcome_delay` pair in
+addition to `as_of_gameweek`. `gameweek < as_of_gameweek` alone is not deadline-safe: a fixture can
+carry an earlier gameweek label while being postponed to kick off, and have its outcome known, only
+after a later gameweek's deadline. When a deadline is supplied, every underlying row must also
+satisfy `kickoff_time + outcome_delay <= target_deadline`, mirroring the same rule
+`walk_forward_folds` already applies to `BacktestObservation.outcome_available_at`. The end-to-end
+backtest driver always supplies both.
+
+The backtest's CLI-level naive comparator (`matched_naive_observations` in
+`scripts/backtest_benchwarmers.py`) reuses this same causal rule and, critically, is scored on
+exactly the same `(player_code, fixture_id, gameweek)` keys the replicated model scored -- not the
+full player pool -- so `matched_naive_metrics` in the research JSON is a fair, apples-to-apples
+comparison. This is distinct from the unrelated smoke-test baseline in
+`materialize_expanding_player_mean_baseline`, which intentionally evaluates over the full
+population to validate pipeline mechanics rather than to benchmark the replicated model.
+
 ### Historical materialisation smoke test
 
 Vaastav's 2025/26 `merged_gw.csv` supplies complete realised player-fixture outcomes but not

@@ -205,7 +205,10 @@ were observations from the new season. The reproducible 2025/26 audit is in
 `docs/research/vaastav_preseason_rate_import_2025_26.json`.
 
 Team-strength input is a separate reviewed workbook boundary because aggregating Vaastav's
-player-level xG does not reproduce the workbook team rates. After completing
+player-level xG does not reproduce the workbook team rates. The walk-forward backtest below
+deliberately uses that same known-divergent aggregation anyway, because the workbook has no
+historical time series to backtest against; it is never offered as a workbook replacement. After
+completing
 `docs/research/CLAUDE_TEAM_STRENGTH_EXPORT_PROMPT.md`, import and materialise it with:
 
 ```bash
@@ -240,6 +243,48 @@ python scripts/export_preseason_rate_gap_triage.py --gameweek 1
 The complete CSV is ordered by selectability, expected minutes, and then FPL ownership. This order
 only prioritises data collection; it never changes xPts. Missing rate rows and linked zero-minute
 provider placeholders remain distinct, auditable categories.
+
+## Walk-forward backtest of the replicated model
+
+Unlike the GW1 preseason baseline, the walk-forward backtest scores every gameweek of a season
+in-place, using only that season's own earlier gameweeks and no workbook input at all. Team
+strength, player rate windows, and appearance projections are rebuilt from raw Vaastav data as of
+each gameweek's deadline under a distinctly versioned, Vaastav-only policy
+(`vaastav_expanding_team_strength_v1` for team strength;
+`benchwarmers_replica_walk_forward_backtest_v1` for the run as a whole), then scored through the
+same component functions as the GW1 baseline. Nothing is persisted to the workbook-derived
+`team_strength_projection`/`player_rate_history` tables; the backtest is entirely additive and
+in-memory. Run it with:
+
+```bash
+python scripts/backtest_benchwarmers.py --season 2025-26
+```
+
+The result is written to `docs/research/walk_forward_benchwarmers_2025_26.json`, including a
+per-flag gap breakdown and explicit `limitations` covering the team-strength methodology
+divergence, the `unused_substitute` approximation, and the re-derived (not workbook) league-average
+bonus constants. Double/blank-gameweek player-fixtures and the first two gameweeks (insufficient
+history) are excluded from evaluation, not specially handled.
+
+Deadline safety is enforced by two independent conditions, not `gameweek < N` alone: every
+as-of-gameweek input (player rates, appearance history, team strength, league-average bonus rates)
+also requires `kickoff_time + outcome_delay <= target_deadline`. A fixture can carry an earlier
+gameweek label while being postponed to kick off, and have its outcome known, only after a later
+gameweek's deadline; without the timestamp condition such a fixture would silently leak into a
+later prediction despite satisfying `gameweek < N`. The 2025/26 archive currently contains no such
+postponement, so this fix does not change the run's metrics, but it is exercised by a dedicated
+regression test that mutates a deliberately postponed fixture and asserts the earlier prediction is
+unchanged.
+
+The run also reports `matched_naive_metrics`: an expanding mean of each player's own realised
+points, using the same causal availability rule, evaluated on exactly the same
+`(player_code, fixture_id, gameweek)` rows the 11-component model scored. This is the only fair
+naive comparison. The unrelated `docs/research/walk_forward_smoke_2025_26.json` pipeline-mechanics
+smoke test evaluates a naive predictor over the *full* player population from GW2 onward, including
+many zero-point unavailable/unused-substitute rows the replicated model excludes as gaps, which
+mechanically understates its MAE; that number must not be quoted as a benchmark for this backtest.
+`scored_coverage` (`scored_player_fixture_rows / candidate_player_fixture_rows`) and the
+absolute/relative MAE and RMSE improvement over `matched_naive_metrics` are also persisted.
 
 ## Decision layer: squad planner and transfer recommender
 
