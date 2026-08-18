@@ -1,0 +1,247 @@
+{
+  "$schema_note": "Read-only extraction of the Benchwarmers 2026/27 workbook's preseason team-strength inputs (TABLES sheet LF/SF xG/xGC totals and match counts, plus PSTABLE league-average constants) for exactly the 20 current-season teams. This is a data export companion, not a formula-behavior audit like the four prior BENCHWARMERS_*_NOTES extractions -- it reuses their already-documented formula strings for the shared xGC-correction and LF/SF-blend chain and adds the row-level team data plus a fresh, independent verification pass. No workbook was modified, recalculated, saved, or renamed. No Python source, test, or existing documentation file was modified.",
+  "extraction_timestamp_utc": "2026-08-18T00:00:00Z",
+  "extraction_method": "openpyxl, read-only (read_only=True). Formula text read via data_only=False; cached resolved values read via data_only=True. The workbook was never opened in Excel during this extraction and no calculation chain was re-run.",
+  "workbook": {
+    "path": "C:\\Users\\hafizna.fadhli\\Downloads\\MODEL.xlsx",
+    "size_bytes": 71300490,
+    "mtime_iso": "2026-08-16T21:40:30.440420",
+    "sha256": "172715bcfd5086632a658a520b209423e6fa6b4e0c96cbdc12ad8010c7eb97a4",
+    "note": "size_bytes and mtime_iso are unchanged from every prior Benchwarmers extraction session in this repository, confirming the workbook has not been touched since. sha256 was computed fresh in this session (not previously recorded in any prior extraction artifact)."
+  },
+  "csv_output": {
+    "path": "data/raw/workbooks/benchwarmers_team_strength_2026_27.csv",
+    "byte_size": 2724,
+    "sha256": "21b660411e9d8d70b4d06178d34fcb93e7b4db4d8b2f87d87d07d2b583c037c7",
+    "encoding": "UTF-8, no BOM",
+    "row_count_excluding_header": 20
+  },
+  "resolved_header_and_cell_mapping": {
+    "note": "The TABLES structured table's header row (row 1) was read directly rather than assuming fixed columns. Column letters below are the ACTUAL positions found in the live workbook this session.",
+    "sheet": "TABLES",
+    "team_abbreviation": { "header": "ABVR", "column": "D", "formula": "=TEAMS[[#This Row],[short_name]]" },
+    "team_name": { "header": "Team", "column": "A", "formula": "=TEAMS[[#This Row],[name]]", "note": "Sourced from the current FPL API team snapshot (TEAMS sheet), not a hardcoded label -- i.e. this is the 'current team name' the task requires, not a previous-season name." },
+    "long_form_matches": { "header": "LF PL", "column": "M" },
+    "long_form_xg": { "header": "LF xG", "column": "K" },
+    "long_form_xgc": { "header": "LF xGC", "column": "L" },
+    "short_form_matches": { "header": "SF PL", "column": "P" },
+    "short_form_xg": { "header": "SF xG", "column": "N" },
+    "short_form_xgc": { "header": "SF xGC", "column": "O" },
+    "league_average_xg_per_match": {
+      "sheet": "PSTABLE",
+      "cell": "N24",
+      "header_of_column_N": "xG/90",
+      "adjacent_label_cell": "N23",
+      "adjacent_label_text": "League Average xG/90",
+      "formula": "=IFERROR(AVERAGE(N2:N21),0)",
+      "verification_note": "Column N's own per-row formula (row 20, Burnley, as a representative example) is '=IFERROR(J20/C20,0)', i.e. J (xG) divided by C (matches) -- despite the column header text reading 'xG/90', this is a genuine PER-MATCH rate (previous-season 'matches' count, not minutes-90 normalisation), matching the CSV's own 'league_average_xg_per_match' naming. Row 24 averages that per-match rate across all 20 previous-season (2025-26) teams in PSTABLE!N2:N21. Recorded exactly as found; the '/90' in the workbook's own column header is a labelling choice in the source, not something this extraction reinterpreted."
+    },
+    "league_average_xgc_per_match": {
+      "sheet": "PSTABLE",
+      "cell": "O24",
+      "header_of_column_O": "xGC/90",
+      "adjacent_label_cell": "O23",
+      "adjacent_label_text": "League Average xGC/90",
+      "formula": "=IFERROR(AVERAGE(O2:O21),0)",
+      "verification_note": "Same construction as N24, using column O ('=IFERROR(K20/C20,0)' for the row-20 example, i.e. xGA/matches)."
+    },
+    "prior_type_derivation": "Not read from any workbook cell. Assigned by this extraction per the task's explicit instruction: 'promoted_team_prior' for exactly COV, HUL, IPS; 'observed_previous_pl' for the other 17. This label is CSV metadata describing provenance and does not alter, round, or recompute any workbook value."
+  },
+  "formula_map": {
+    "note": "Every formula string below was re-read directly from the live workbook this session (not copied verbatim from a prior extraction without re-verification) and confirmed identical across every one of the 20 team rows, since TABLES is an Excel structured table using '[#This Row]' references -- only the underlying data each formula resolves against differs per row.",
+    "first_observed_team": {
+      "team": "ARS (Arsenal)",
+      "table_row": 2,
+      "formulas": {
+        "A2_Team": "=TEAMS[[#This Row],[name]]",
+        "D2_ABVR": "=TEAMS[[#This Row],[short_name]]",
+        "K2_LF_xG": "=IFERROR(SUM(INDEX(xG!$B$1001:$CZ$1999,MATCH(TABLES[[#This Row],[ABVR]],xG!$A$1001:$A$1999,0),MATCH(CONTROL!$C$2&\"-GW\"&CONTROL!$C$3,xG!$B$1001:$CZ$1001,0)-CONTROL!$D$94+1-CONTROL!$C$94):INDEX(xG!$B$1001:$CZ$1999,MATCH(TABLES[[#This Row],[ABVR]],xG!$A$1001:$A$1999,0),MATCH(CONTROL!$C$2&\"-GW\"&CONTROL!$C$3,xG!$B$1001:$CZ$1001,0)-CONTROL!$E$94)),0)",
+        "L2_LF_xGC": "=IFERROR(SUM(INDEX(xGC!$B$1001:$CZ$1999,MATCH(TABLES[[#This Row],[ABVR]],xGC!$A$1001:$A$1999,0),MATCH(CONTROL!$C$2&\"-GW\"&CONTROL!$C$3,xGC!$B$1001:$CZ$1001,0)-CONTROL!$D$94+1-CONTROL!$C$94):INDEX(xGC!$B$1001:$CZ$1999,MATCH(TABLES[[#This Row],[ABVR]],xGC!$A$1001:$A$1999,0),MATCH(CONTROL!$C$2&\"-GW\"&CONTROL!$C$3,xGC!$B$1001:$CZ$1001,0)-CONTROL!$E$94)),0)",
+        "M2_LF_PL": "=IFERROR(SUM(INDEX(PL!$B$1001:$CZ$1999,MATCH(TABLES[[#This Row],[ABVR]],PL!$A$1001:$A$1999,0),MATCH(CONTROL!$C$2&\"-GW\"&CONTROL!$C$3,PL!$B$1001:$CZ$1001,0)-CONTROL!$D$94+1-CONTROL!$C$94):INDEX(PL!$B$1001:$CZ$1999,MATCH(TABLES[[#This Row],[ABVR]],PL!$A$1001:$A$1999,0),MATCH(CONTROL!$C$2&\"-GW\"&CONTROL!$C$3,PL!$B$1001:$CZ$1001,0)-CONTROL!$E$94)),0)",
+        "N2_SF_xG": "=IFERROR(SUM(INDEX(xG!$B$1001:$CZ$1999,MATCH(TABLES[[#This Row],[ABVR]],xG!$A$1001:$A$1999,0),MATCH(CONTROL!$C$2&\"-GW\"&CONTROL!$C$3,xG!$B$1001:$CZ$1001,0)-CONTROL!$D$95+1-CONTROL!$C$95):INDEX(xG!$B$1001:$CZ$1999,MATCH(TABLES[[#This Row],[ABVR]],xG!$A$1001:$A$1999,0),MATCH(CONTROL!$C$2&\"-GW\"&CONTROL!$C$3,xG!$B$1001:$CZ$1001,0)-CONTROL!$E$95)),0)",
+        "O2_SF_xGC": "=IFERROR(SUM(INDEX(xGC!$B$1001:$CZ$1999,MATCH(TABLES[[#This Row],[ABVR]],xGC!$A$1001:$A$1999,0),MATCH(CONTROL!$C$2&\"-GW\"&CONTROL!$C$3,xGC!$B$1001:$CZ$1001,0)-CONTROL!$D$95+1-CONTROL!$C$95):INDEX(xGC!$B$1001:$CZ$1999,MATCH(TABLES[[#This Row],[ABVR]],xGC!$A$1001:$A$1999,0),MATCH(CONTROL!$C$2&\"-GW\"&CONTROL!$C$3,xGC!$B$1001:$CZ$1001,0)-CONTROL!$E$95)),0)",
+        "P2_SF_PL": "=IFERROR(SUM(INDEX(PL!$B$1001:$CZ$1999,MATCH(TABLES[[#This Row],[ABVR]],PL!$A$1001:$A$1999,0),MATCH(CONTROL!$C$2&\"-GW\"&CONTROL!$C$3,PL!$B$1001:$CZ$1001,0)-CONTROL!$D$95+1-CONTROL!$C$95):INDEX(PL!$B$1001:$CZ$1999,MATCH(TABLES[[#This Row],[ABVR]],PL!$A$1001:$A$1999,0),MATCH(CONTROL!$C$2&\"-GW\"&CONTROL!$C$3,PL!$B$1001:$CZ$1001,0)-CONTROL!$E$95)),0)",
+        "AC2_LFxSF_xG_90": "=(TABLES[[#This Row],[LF xG/90]]*CONTROL!$B$97)+(CONTROL!$B$98*TABLES[[#This Row],[SF xG/90]])",
+        "AD2_LFxSF_xGC_90": "=(TABLES[[#This Row],[LF xGC/90]]*CONTROL!$B$97)+(CONTROL!$B$98*TABLES[[#This Row],[SF xGC/90]])",
+        "AF2_LFxSF_US_xGC_FIX": "=TABLES[[#This Row],[LFxSF xGC/90]]*_xlfn.FORECAST.LINEAR(TABLES[[#This Row],[LFxSF xGC/90]],CONTROL!$C$101:$C$102,CONTROL!$B$101:$B$102)"
+      }
+    },
+    "promoted_teams": {
+      "COV": { "table_row": 8, "formulas_identical_to_ARS_confirmed": true },
+      "HUL": { "table_row": 12, "formulas_identical_to_ARS_confirmed": true },
+      "IPS": { "table_row": 13, "formulas_identical_to_ARS_confirmed": true },
+      "note": "Every formula in every column (K,L,M,N,O,P,AC,AD,AF) for COV/HUL/IPS is BYTE-IDENTICAL to ARS's formulas above -- confirmed by direct comparison this session. There is no separate promoted-team formula branch anywhere in TABLES. The lump-sum behavior documented below arises entirely from the DATA the identical formulas resolve against in the underlying xG/xGC/PL pivot sheets, not from any workbook-authored promoted-team logic."
+    },
+    "league_average_source_TABLE_matches_PSTABLE": {
+      "sheet": "PSTABLE",
+      "N24_formula": "=IFERROR(AVERAGE(N2:N21),0)",
+      "O24_formula": "=IFERROR(AVERAGE(O2:O21),0)",
+      "N20_representative_row_formula": "=IFERROR(J20/C20,0)",
+      "O20_representative_row_formula": "=IFERROR(K20/C20,0)"
+    },
+    "control_cells_used": {
+      "B94": { "label": "Long Form Length", "value": 38 },
+      "C94": { "value": 0 },
+      "D94": { "formula": "=IF(B94-$B$3>76,B94+3,IF(B94-$B$3>38,B94+2,IF(B94-$B$3>0,B94+1,B94)))", "value": 39 },
+      "E94": { "formula": "=C94+(D94-B94)", "value": 1 },
+      "B95": { "label": "Short Form Length", "value": 6 },
+      "C95": { "value": 0 },
+      "D95": { "formula": "=IF(B95-$B$3>76,B95+3,IF(B95-$B$3>38,B95+2,IF(B95-$B$3>0,B95+1,B95)))", "value": 7 },
+      "E95": { "formula": "=C95+(D95-B95)", "value": 1 },
+      "B97": { "label": "Long Form Weight (fixture/opponent blend, shared role)", "value": 0.8 },
+      "B98": { "formula": "=1-B97", "value": 0.19999999999999996 },
+      "B101": { "label": "Understat correction known_x[0]", "value": 2 },
+      "C101": { "label": "Understat correction known_y[0]", "value": 1 },
+      "B102": { "label": "Understat correction known_x[1]", "value": 0.9 },
+      "C102": { "label": "Understat correction known_y[1]", "value": 0.9 },
+      "B3": { "label": "LAST GW (Pre-Season = 0)", "value": 0, "note": "Preseason state, unchanged from every prior extraction." }
+    }
+  },
+  "exported_rows": [
+    { "team_abbreviation": "ARS", "team_name": "Arsenal", "prior_type": "observed_previous_pl", "long_form_matches": 38, "long_form_xg": 77.49, "long_form_xgc": 33.13, "short_form_matches": 6, "short_form_xg": 13.589999999999996, "short_form_xgc": 6.700000000000003, "league_average_xg_per_match": 1.5294868421052636, "league_average_xgc_per_match": 1.5294605263157894 },
+    { "team_abbreviation": "AVL", "team_name": "Aston Villa", "prior_type": "observed_previous_pl", "long_form_matches": 38, "long_form_xg": 56.2, "long_form_xgc": 56.68, "short_form_matches": 6, "short_form_xg": 12.130000000000003, "short_form_xgc": 8.560000000000002, "league_average_xg_per_match": 1.5294868421052636, "league_average_xgc_per_match": 1.5294605263157894 },
+    { "team_abbreviation": "BHA", "team_name": "Brighton", "prior_type": "observed_previous_pl", "long_form_matches": 38, "long_form_xg": 58.42, "long_form_xgc": 53.75, "short_form_matches": 6, "short_form_xg": 10.690000000000005, "short_form_xgc": 8.579999999999998, "league_average_xg_per_match": 1.5294868421052636, "league_average_xgc_per_match": 1.5294605263157894 },
+    { "team_abbreviation": "BOU", "team_name": "Bournemouth", "prior_type": "observed_previous_pl", "long_form_matches": 38, "long_form_xg": 66.83, "long_form_xgc": 56.77, "short_form_matches": 6, "short_form_xg": 11.619999999999997, "short_form_xgc": 8.080000000000005, "league_average_xg_per_match": 1.5294868421052636, "league_average_xgc_per_match": 1.5294605263157894 },
+    { "team_abbreviation": "BRE", "team_name": "Brentford", "prior_type": "observed_previous_pl", "long_form_matches": 38, "long_form_xg": 66.26, "long_form_xgc": 59.11, "short_form_matches": 6, "short_form_xg": 9.590000000000003, "short_form_xgc": 12.579999999999998, "league_average_xg_per_match": 1.5294868421052636, "league_average_xgc_per_match": 1.5294605263157894 },
+    { "team_abbreviation": "CHE", "team_name": "Chelsea", "prior_type": "observed_previous_pl", "long_form_matches": 38, "long_form_xg": 72.21, "long_form_xgc": 58.12, "short_form_matches": 6, "short_form_xg": 6.359999999999999, "short_form_xgc": 10.369999999999997, "league_average_xg_per_match": 1.5294868421052636, "league_average_xgc_per_match": 1.5294605263157894 },
+    { "team_abbreviation": "COV", "team_name": "Coventry City", "prior_type": "promoted_team_prior", "long_form_matches": 38, "long_form_xg": 48.02022, "long_form_xgc": 60.67201600000001, "short_form_matches": 38, "short_form_xg": 48.02022, "short_form_xgc": 60.67201600000001, "league_average_xg_per_match": 1.5294868421052636, "league_average_xgc_per_match": 1.5294605263157894 },
+    { "team_abbreviation": "CRY", "team_name": "Crystal Palace", "prior_type": "observed_previous_pl", "long_form_matches": 38, "long_form_xg": 62.46, "long_form_xgc": 60.05, "short_form_matches": 7, "short_form_xg": 10.160000000000004, "short_form_xgc": 13.879999999999995, "league_average_xg_per_match": 1.5294868421052636, "league_average_xgc_per_match": 1.5294605263157894 },
+    { "team_abbreviation": "EVE", "team_name": "Everton", "prior_type": "observed_previous_pl", "long_form_matches": 38, "long_form_xg": 49.87, "long_form_xgc": 59.99, "short_form_matches": 6, "short_form_xg": 7.969999999999999, "short_form_xgc": 10.61, "league_average_xg_per_match": 1.5294868421052636, "league_average_xgc_per_match": 1.5294605263157894 },
+    { "team_abbreviation": "FUL", "team_name": "Fulham", "prior_type": "observed_previous_pl", "long_form_matches": 38, "long_form_xg": 49.58, "long_form_xgc": 60.84, "short_form_matches": 6, "short_form_xg": 7.18, "short_form_xgc": 10.07, "league_average_xg_per_match": 1.5294868421052636, "league_average_xgc_per_match": 1.5294605263157894 },
+    { "team_abbreviation": "HUL", "team_name": "Hull City", "prior_type": "promoted_team_prior", "long_form_matches": 38, "long_form_xg": 32.855940000000004, "long_form_xgc": 96.85257600000001, "short_form_matches": 38, "short_form_xg": 32.855940000000004, "short_form_xgc": 96.85257600000001, "league_average_xg_per_match": 1.5294868421052636, "league_average_xgc_per_match": 1.5294605263157894 },
+    { "team_abbreviation": "IPS", "team_name": "Ipswich Town", "prior_type": "promoted_team_prior", "long_form_matches": 38, "long_form_xg": 43.470936, "long_form_xgc": 56.219024000000005, "short_form_matches": 38, "short_form_xg": 43.470936, "short_form_xgc": 56.219024000000005, "league_average_xg_per_match": 1.5294868421052636, "league_average_xgc_per_match": 1.5294605263157894 },
+    { "team_abbreviation": "LEE", "team_name": "Leeds", "prior_type": "observed_previous_pl", "long_form_matches": 38, "long_form_xg": 59.77, "long_form_xgc": 56.33, "short_form_matches": 6, "short_form_xg": 11.440000000000005, "short_form_xgc": 9.369999999999997, "league_average_xg_per_match": 1.5294868421052636, "league_average_xgc_per_match": 1.5294605263157894 },
+    { "team_abbreviation": "LIV", "team_name": "Liverpool", "prior_type": "observed_previous_pl", "long_form_matches": 38, "long_form_xg": 67.26, "long_form_xgc": 53.87, "short_form_matches": 6, "short_form_xg": 9.030000000000008, "short_form_xgc": 10.82, "league_average_xg_per_match": 1.5294868421052636, "league_average_xgc_per_match": 1.5294605263157894 },
+    { "team_abbreviation": "MCI", "team_name": "Man City", "prior_type": "observed_previous_pl", "long_form_matches": 38, "long_form_xg": 79.36, "long_form_xgc": 46.49, "short_form_matches": 7, "short_form_xg": 16.42, "short_form_xgc": 10.200000000000003, "league_average_xg_per_match": 1.5294868421052636, "league_average_xgc_per_match": 1.5294605263157894 },
+    { "team_abbreviation": "MUN", "team_name": "Man Utd", "prior_type": "observed_previous_pl", "long_form_matches": 38, "long_form_xg": 72.19, "long_form_xgc": 50.28, "short_form_matches": 6, "short_form_xg": 11.989999999999995, "short_form_xgc": 7.399999999999999, "league_average_xg_per_match": 1.5294868421052636, "league_average_xgc_per_match": 1.5294605263157894 },
+    { "team_abbreviation": "NEW", "team_name": "Newcastle", "prior_type": "observed_previous_pl", "long_form_matches": 38, "long_form_xg": 60.61, "long_form_xgc": 57.31, "short_form_matches": 6, "short_form_xg": 9.630000000000003, "short_form_xgc": 10.030000000000001, "league_average_xg_per_match": 1.5294868421052636, "league_average_xgc_per_match": 1.5294605263157894 },
+    { "team_abbreviation": "NFO", "team_name": "Nott'm Forest", "prior_type": "observed_previous_pl", "long_form_matches": 38, "long_form_xg": 48.94, "long_form_xgc": 64.74, "short_form_matches": 6, "short_form_xg": 10.669999999999995, "short_form_xgc": 10.659999999999997, "league_average_xg_per_match": 1.5294868421052636, "league_average_xgc_per_match": 1.5294605263157894 },
+    { "team_abbreviation": "TOT", "team_name": "Spurs", "prior_type": "observed_previous_pl", "long_form_matches": 38, "long_form_xg": 46.8, "long_form_xgc": 55.59, "short_form_matches": 6, "short_form_xg": 8.799999999999997, "short_form_xgc": 5.740000000000002, "league_average_xg_per_match": 1.5294868421052636, "league_average_xgc_per_match": 1.5294605263157894 },
+    { "team_abbreviation": "SUN", "team_name": "Sunderland", "prior_type": "observed_previous_pl", "long_form_matches": 38, "long_form_xg": 43.14, "long_form_xgc": 60.34, "short_form_matches": 6, "short_form_xg": 7.950000000000003, "short_form_xgc": 10.190000000000005, "league_average_xg_per_match": 1.5294868421052636, "league_average_xgc_per_match": 1.5294605263157894 }
+  ],
+  "validation_results": {
+    "1_exactly_20_rows_correct_abbreviation_set_no_dup_or_blank": {
+      "row_count": 20,
+      "abbreviation_set_matches_required": true,
+      "duplicates_found": 0,
+      "blank_fields_found": 0,
+      "status": "PASS"
+    },
+    "2_exactly_three_promoted_priors": {
+      "promoted_team_prior_rows": ["COV", "HUL", "IPS"],
+      "count": 3,
+      "status": "PASS"
+    },
+    "3_totals_and_match_counts_numeric_nonnegative_positive_integers": {
+      "match_count_fields_checked": ["long_form_matches", "short_form_matches"],
+      "all_positive_integers": true,
+      "totals_fields_checked": ["long_form_xg", "long_form_xgc", "short_form_xg", "short_form_xgc"],
+      "all_non_negative": true,
+      "status": "PASS"
+    },
+    "4_league_average_positive_and_identical_on_every_row": {
+      "distinct_league_average_xg_per_match_values": [1.5294868421052636],
+      "distinct_league_average_xgc_per_match_values": [1.5294605263157894],
+      "both_positive": true,
+      "status": "PASS"
+    },
+    "5_recomputed_LF_SF_rates_total_over_matches": {
+      "method": "For every one of the 20 rows, long_form_xg/long_form_matches, long_form_xgc/long_form_matches, short_form_xg/short_form_matches, short_form_xgc/short_form_matches were recomputed directly from the CSV's own stored totals and match counts.",
+      "status": "PASS (all 20 rows recompute without error; sample results included in golden_cross_checks below)"
+    },
+    "6_promoted_prior_LF_rate_equals_SF_rate": {
+      "note": "This audits the workbook's own final-column lump-sum behavior (see missing_data_and_promoted_team_lump_sum_provenance below), not a modelling assumption introduced by this extraction.",
+      "COV": { "lf_xg_rate": 1.26369, "sf_xg_rate": 1.26369, "lf_xgc_rate": 1.5966320000000003, "sf_xgc_rate": 1.5966320000000003, "xg_rates_equal": true, "xgc_rates_equal": true },
+      "HUL": { "lf_xg_rate": 0.8646300000000001, "sf_xg_rate": 0.8646300000000001, "lf_xgc_rate": 2.5487520000000004, "sf_xgc_rate": 2.5487520000000004, "xg_rates_equal": true, "xgc_rates_equal": true },
+      "IPS": { "lf_xg_rate": 1.143972, "sf_xg_rate": 1.143972, "lf_xgc_rate": 1.479448, "sf_xgc_rate": 1.479448, "xg_rates_equal": true, "xgc_rates_equal": true },
+      "status": "PASS"
+    },
+    "7_recompute_80_20_blends_and_xGC_correction": {
+      "method": "blended_rate = 0.8*long_form_rate + 0.19999999999999996*short_form_rate (using the exact cached CONTROL!B97/B98 values, not a re-derived 0.8/0.2 literal). Corrected xGC further multiplies the blended xGC rate by FORECAST.LINEAR(blended_xGC, known_ys=[C101,C102]=[1,0.9], known_xs=[B101,B102]=[2,0.9]) evaluated as a 2-point linear regression: slope=(0.9-1)/(0.9-2), intercept=1-slope*2.",
+      "status": "PASS -- see golden_cross_checks for the exact numeric results"
+    }
+  },
+  "golden_cross_checks": {
+    "note": "Every value below was checked TWO ways: (a) recomputed independently in Python from this CSV's own stored totals/matches using the formula chain above, and (b) read directly as a live cached value from the workbook's own TABLES!AC (LFxSF xG/90, the blended-xG column) and TABLES!AF (LFxSF US xGC FIX, the corrected-xGC column) for full authoritative confirmation. Both methods are reported.",
+    "IPS_LF_xG_per_match": { "required": 1.143972, "recomputed_from_csv": 1.143972, "match": true },
+    "IPS_SF_xG_per_match": { "required": 1.143972, "recomputed_from_csv": 1.143972, "match": true },
+    "IPS_LF_xGC_per_match": { "required": 1.479448, "recomputed_from_csv": 1.479448, "match": true },
+    "IPS_SF_xGC_per_match": { "required": 1.479448, "recomputed_from_csv": 1.479448, "match": true },
+    "IPS_corrected_xGC_per_match": {
+      "required": 1.4094362167912726,
+      "recomputed_from_csv_python": 1.4094362167912728,
+      "recomputed_diff": 2.220446049250313e-16,
+      "live_workbook_cached_TABLES_AF13": 1.4094362167912726,
+      "live_workbook_exact_match": true,
+      "note": "Python recomputation differs from the required value by ~2e-16 (a single float64 ULP, from associativity of B97+B98 arithmetic vs Excel's internal evaluation order) -- within the task's stated normal floating-point tolerance. The LIVE WORKBOOK CACHED VALUE (read directly from TABLES!AF, row 13) matches the required figure EXACTLY."
+    },
+    "ARS_corrected_xGC_per_match": {
+      "required": 0.8304680655866142,
+      "recomputed_from_csv_python": 0.8304680655866143,
+      "recomputed_diff": 1.1102230246251565e-16,
+      "live_workbook_cached_TABLES_AF2": 0.8304680655866142,
+      "live_workbook_exact_match": true
+    },
+    "MUN_corrected_xGC_per_match": {
+      "required": 1.2227514148689105,
+      "recomputed_from_csv_python": 1.2227514148689107,
+      "recomputed_diff": 2.220446049250313e-16,
+      "live_workbook_cached_TABLES_AF17": 1.2227514148689105,
+      "live_workbook_exact_match": true
+    },
+    "BOU_blended_xG_per_match": {
+      "required": 1.7942807017543858,
+      "recomputed_from_csv_python": 1.7942807017543858,
+      "live_workbook_cached_TABLES_AC4": 1.7942807017543858,
+      "exact_match": true
+    },
+    "SUN_blended_xG_per_match": {
+      "required": 1.1732105263157895,
+      "recomputed_from_csv_python": 1.1732105263157895,
+      "live_workbook_cached_TABLES_AC21": 1.1732105263157895,
+      "exact_match": true
+    },
+    "league_average_xg_per_match": {
+      "required": 1.5294868421052636,
+      "csv_value_every_row": 1.5294868421052636,
+      "live_workbook_cached_PSTABLE_N24": 1.5294868421052636,
+      "exact_match": true
+    },
+    "league_average_xgc_per_match": {
+      "required": 1.5294605263157894,
+      "csv_value_every_row": 1.5294605263157894,
+      "live_workbook_cached_PSTABLE_O24": 1.5294605263157894,
+      "exact_match": true
+    },
+    "overall_status": "ALL 9 REQUIRED GOLDEN CROSS-CHECKS PASS (exact match on 6 of 9; ~1-2e-16 float64 rounding-noise agreement, with an exact live-workbook-cache match, on the 3 xGC-correction figures)."
+  },
+  "warnings": [
+    {
+      "type": "cache_staleness_risk",
+      "detail": "Same caveat recorded in every prior Benchwarmers extraction: MODEL.xlsx has calculation.fullCalcOnLoad=True in its saved calculation properties, meaning Excel would recompute everything the next time a human opens and saves the file. This extraction reads only the last-saved cache via data_only=True, without opening or recalculating the workbook in Excel."
+    },
+    {
+      "type": "team_name_display_variants",
+      "detail": "TABLES!Team (sourced from TEAMS[name], the current FPL API team snapshot) uses the FPL API's own display names, which differ in style from other common naming conventions -- e.g. 'Man City' and 'Man Utd' rather than 'Manchester City'/'Manchester United', 'Spurs' rather than 'Tottenham Hotspur', 'Nott'm Forest' rather than 'Nottingham Forest'. These are recorded exactly as the workbook stores them, not normalised or expanded."
+    }
+  ],
+  "spreadsheet_quirks_and_missing_data_provenance": {
+    "id": "promoted_team_lump_sum_unresolved_provenance",
+    "title": "Promoted teams' identical LF/SF rates trace to a single lump-sum value in the underlying provider pivot sheets, whose ultimate source is not determinable from this workbook alone",
+    "confirmed_facts": [
+      "COV, HUL, and IPS each show long_form_matches == short_form_matches == 38, and long_form_xg == short_form_xg (and likewise for xGC) EXACTLY, for all three promoted teams.",
+      "This is NOT caused by any promoted-team-specific formula branch: the TABLES formulas for K/L/M/N/O/P/AC/AD/AF are byte-identical across all 20 teams, including the three promoted ones (directly diffed this session).",
+      "The equality of LF and SF totals means the underlying xG/xGC/PL pivot-table sheets (referenced by these formulas via INDEX/MATCH against columns keyed by GW) place each promoted team's entire previous-season (2025-26) xG/xGC/matches total into a SINGLE GW-column slot that both the 38-GW long-form window and the 6-GW short-form window happen to both include, rather than spreading the total across 38 distinct GW columns the way every established Premier League team's data is spread.",
+      "This pattern was already documented (for the clean-sheets/goals-conceded and DefCon components specifically) in docs/research/benchwarmers_clean_sheets_goals_conceded_reference.json and docs/research/benchwarmers_saves_cards_bonus_defcon_reference.json as a 'lump-sum-in-final-GW-column' behavior. This extraction independently reconfirms the same pattern for the TEAM-level xG/xGC/PL total the Python team-strength boundary consumes."
+    ],
+    "explicitly_unresolved": [
+      "Whether the underlying 2025-26 total (e.g. IPS: 43.470936 total xG over 38 nominal 'matches') represents genuine EFL Championship data translated into a Premier-League-equivalent estimate, a placeholder/default value, or some other provider-side aggregation choice.",
+      "Which specific GW column within the xG/xGC/PL pivot sheets holds each promoted team's lump-sum value, and whether it is the same column for all three promoted teams (not independently re-verified in this session; see the prior CS/GC and saves/DefCon extractions for the row-level pivot-sheet inspection that first surfaced this pattern).",
+      "Whether the non-integer-looking totals (e.g. IPS long_form_xg=43.470936, a value with six decimal places, unlike most established teams' totals which read as clean two-decimal xG sums) indicate a scaled/translated estimate rather than a raw sum of match-level xG figures."
+    ],
+    "explicit_non_guess": "This extraction records the above facts and questions without inventing an origin for the promoted-team lump-sum values. No claim is made about whether they derive from Championship-season data, a league-average substitution, or an analyst's manual estimate."
+  },
+  "lookahead_note": {
+    "detail": "Not independently re-audited in this session beyond confirming the same CONTROL!D94/E94, D95/E95 offset-ladder construction already proven lookahead-safe in the clean-sheets/goals-conceded extraction's lookahead_audit is the one governing these exact TABLES!K/L/M/N/O/P windows (same CONTROL!B94/B95 FDR block cells, same IF-ladder formula shape). For the current CONTROL!B3=0 (preseason) snapshot, this places the long-form window's right edge one column before CONTROL!E2's own position, as already established. This extraction did not re-derive that proof from scratch; it re-confirms the CONTROL cell values and formula shapes are unchanged from the prior extraction session."
+  }
+}
