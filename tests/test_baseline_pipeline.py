@@ -3,10 +3,15 @@ from __future__ import annotations
 import json
 
 import duckdb
+import pandas as pd
 import pytest
 
 from fpl_model.model.baseline_pipeline import materialize_preseason_baseline
 from fpl_model.storage import initialize_database
+from fpl_model.validation.gap_triage import (
+    export_preseason_rate_gap_triage,
+    preseason_rate_gap_triage,
+)
 
 
 def _seed_baseline_inputs(database_path) -> None:
@@ -81,7 +86,7 @@ def _seed_baseline_inputs(database_path) -> None:
             ) VALUES ('rates', 'fixture_history', 38, 6, 10, 'test', 1, 'completed');
             INSERT INTO player_rate_history VALUES (
                 'rates', 519634, 'Jenson Seelt', 'DEF', 133, 1, 0, 0, 0, 0, 10,
-                133, 0.05, 0.02, 133, 0.05, 0.02,
+                133, 0.0, 0.02, 133, 0.0, 0.02,
                 133, 10, 133, 10, '[]'
             );
 
@@ -176,3 +181,79 @@ def test_preseason_baseline_rejects_in_season_gameweeks(tmp_path):
             target_gameweek=2,
             database_path=tmp_path / "baseline.duckdb",
         )
+
+
+def test_preseason_baseline_treats_zero_minute_rate_row_as_gap(tmp_path):
+    database_path = tmp_path / "baseline.duckdb"
+    _seed_baseline_inputs(database_path)
+    with duckdb.connect(str(database_path)) as connection:
+        connection.execute(
+            """
+            INSERT INTO player_snapshot (
+                ingestion_run_id, season, fpl_id, player_code, first_name,
+                second_name, web_name, team_id, fpl_position, price, fpl_status
+            ) VALUES (
+                'snapshot', '2026-27', 3, 577974, 'Harry', 'Amass', 'Amass',
+                1, 'DEF', 4.0, 'a'
+            );
+            INSERT INTO player_appearance_history VALUES (
+                'appearance_history', 577974, 'Harry Amass', 0, 0, 0, 0.0, 0.0
+            );
+            INSERT INTO player_appearance_projection VALUES (
+                'appearance', 3, 577974, 1.0, 0.0, 0.01, 0.01, 0.0,
+                0.18, 0.01, 0.0, 0.01, '["ZERO_PRIOR_STARTS"]'
+            );
+            INSERT INTO player_rate_history VALUES (
+                'rates', 577974, 'Harry Amass', 'DEF', 0, 0, 0, 0, 0, 0, 0,
+                0, 0.0, 0.0, 0, 0.0, 0.0,
+                0, 0, 0, 0,
+                '["ZERO_DEFCON_HISTORY_MINUTES", "ZERO_LONG_FORM_MINUTES", "ZERO_PRIOR_STARTS"]'
+            );
+            """
+        )
+
+    result = materialize_preseason_baseline(
+        appearance_projection_run_id="appearance",
+        player_rate_run_id="rates",
+        team_strength_run_id="strength",
+        database_path=database_path,
+    )
+
+    with duckdb.connect(str(database_path), read_only=True) as connection:
+        flags = connection.execute(
+            """
+            SELECT data_quality_flags FROM baseline_projection_gap
+            WHERE model_run_id = ? AND fpl_id = 3
+            """,
+            [result.model_run_id],
+        ).fetchone()[0]
+
+    assert result.current_players == 3
+    assert result.projected_fixture_rows == 1
+    assert result.gap_players == 2
+    assert set(json.loads(flags)) == {
+        "NO_USABLE_PLAYER_RATE_HISTORY",
+        "ZERO_DEFCON_HISTORY_MINUTES",
+        "ZERO_LONG_FORM_MINUTES",
+        "ZERO_PRIOR_STARTS",
+    }
+
+    triage = preseason_rate_gap_triage(
+        database_path=database_path,
+        model_run_id=result.model_run_id,
+    )
+    assert triage[["player_name", "rate_history_status"]].values.tolist() == [
+        ["New Player", "missing_rate_row"],
+        ["Amass", "zero_minute_placeholder"],
+    ]
+    output_path = tmp_path / "outputs" / "triage.csv"
+    exported = export_preseason_rate_gap_triage(
+        output_path,
+        database_path=database_path,
+        model_run_id=result.model_run_id,
+    )
+    assert exported.equals(triage)
+    assert pd.read_csv(output_path)["player_name"].tolist() == [
+        "New Player",
+        "Amass",
+    ]

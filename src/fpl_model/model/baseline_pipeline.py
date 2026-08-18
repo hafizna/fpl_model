@@ -40,7 +40,7 @@ from fpl_model.model.secondary import (
 )
 from fpl_model.storage import DEFAULT_DATABASE_PATH, initialize_database
 
-POLICY_VERSION = "coherent_benchwarmers_preseason_baseline_v4"
+POLICY_VERSION = "coherent_benchwarmers_preseason_baseline_v6"
 REGULATION_MINUTES = 90.0
 AVERAGE_BPS_PER_START = 14.862318964622457
 AVERAGE_BONUS_PER_START = 0.29431670795024134
@@ -164,6 +164,13 @@ def _appearance_projection(row: tuple[object, ...]) -> AppearanceProjection | No
     if any(value is None for value in values):
         return None
     return AppearanceProjection(*map(float, values))
+
+
+def _has_usable_rate_history(rate: tuple[object, ...]) -> bool:
+    """Require observed minutes, not merely a provider placeholder row."""
+    season_minutes = float(rate[1])
+    long_form_minutes = float(rate[8])
+    return season_minutes > 0.0 and long_form_minutes > 0.0
 
 
 def _minutes_inputs(
@@ -414,8 +421,12 @@ def materialize_preseason_baseline(
                     )
                     if minutes is None:
                         flags.add("MISSING_MINUTES_SCENARIO")
+            rate_is_usable = rate is not None and _has_usable_rate_history(rate)
             if rate is None:
                 flags.add("NO_PREVIOUS_PL_PLAYER_RATE_HISTORY")
+            elif not rate_is_usable:
+                flags.update(json.loads(rate[-1]))
+                flags.add("NO_USABLE_PLAYER_RATE_HISTORY")
             if own_strength is None:
                 flags.add("MISSING_TEAM_STRENGTH")
             elif own_strength.is_promoted_prior:
@@ -425,7 +436,7 @@ def materialize_preseason_baseline(
             if (
                 appearance is None
                 or minutes is None
-                or rate is None
+                or not rate_is_usable
                 or own_strength is None
                 or not player_fixtures
             ):

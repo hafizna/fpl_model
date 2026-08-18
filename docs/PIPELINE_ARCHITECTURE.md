@@ -231,6 +231,16 @@ stored with the run. `completed_with_gaps` is a valid research result: it means 
 projected while missing inputs were itemised in `baseline_projection_gap`. It must not be treated
 as full player-pool coverage by the later CSV export or optimiser.
 
+Generate the manual-research allowlist without introducing an uncalibrated importance score:
+
+```bash
+python scripts/export_preseason_rate_gap_triage.py --gameweek 1
+```
+
+The complete CSV is ordered by selectability, expected minutes, and then FPL ownership. This order
+only prioritises data collection; it never changes xPts. Missing rate rows and linked zero-minute
+provider placeholders remain distinct, auditable categories.
+
 ## Decision layer: squad planner and transfer recommender
 
 The eventual user-facing feature sits downstream of calibrated player-fixture projections. Its

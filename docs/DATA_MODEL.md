@@ -144,6 +144,9 @@ The preseason rate materialisation stores the workbook's prior-season windows ex
 Window inputs remain raw totals and minutes. Conversion to per-start rates and application of
 appearance probabilities happen later in the component model. A current player without linked
 Premier League history remains missing pending an explicit promoted/new/returning-player prior.
+Likewise, a linked provider row with zero season and long-form minutes is not usable history: the
+baseline records `NO_USABLE_PLAYER_RATE_HISTORY` rather than interpreting its zero event totals as
+zero ability. A zero short-form window alone remains valid when the long-form sample has minutes.
 
 ### Preseason team-strength boundary
 
