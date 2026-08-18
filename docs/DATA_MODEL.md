@@ -128,6 +128,23 @@ observation timestamp, target gameweek, and optional expiry. Availability remain
 input: for example, 50% availability scales the scenario probabilities rather than multiplying
 component xPts directly.
 
+### Player-fixture rate-history boundary
+
+Previous-season xG, xA, saves, cards, bonus, BPS, and defensive contributions are imported from a
+pinned Vaastav Git revision. Each canonical fact is keyed by stable player code and fixture ID and
+retains its gameweek and kickoff. Exact full-row duplicates are removed; conflicting duplicates or
+season totals that do not reconcile to `players_raw.csv` are rejected.
+
+The preseason rate materialisation stores the workbook's prior-season windows explicitly:
+
+- long form: GW1--38;
+- attacking short form: GW33--38 (six gameweeks);
+- DefCon short form: GW29--38 (ten gameweeks).
+
+Window inputs remain raw totals and minutes. Conversion to per-start rates and application of
+appearance probabilities happen later in the component model. A current player without linked
+Premier League history remains missing pending an explicit promoted/new/returning-player prior.
+
 ## Projection fact
 
 The projection table will contain component-level expected points, not only a final number:

@@ -1,0 +1,60 @@
+{
+  "audit_date": "2026-08-18",
+  "source": "vaastav/Fantasy-Premier-League",
+  "season": "2025-26",
+  "source_revision": "f9ed3e8839b0f970e0d5d4a83c5628f6eaee755a",
+  "source_committed_at": "2026-06-17T12:19:44+00:00",
+  "canonical_export_hashes": {
+    "players_raw.csv": "29479c0968626dd77ab196a4302cc5b22cb62f135c28c675b066ea9f25d67ca1",
+    "merged_gw.csv": "f22f8601603e2c53ccd54db320dfda99b07c43eb573fe2e274a253a999971934"
+  },
+  "result": {
+    "import_run_id": "player_history_ae118d1588eeaf84",
+    "rate_run_id": "player_rates_6a133c3d17d65b75",
+    "players": 841,
+    "raw_fixture_rows": 29757,
+    "exact_duplicate_rows_removed": 10,
+    "canonical_fixture_rows": 29747
+  },
+  "validation": {
+    "season_total_fields_checked": [
+      "minutes",
+      "starts",
+      "expected_goals",
+      "expected_assists",
+      "saves",
+      "yellow_cards",
+      "red_cards",
+      "bonus",
+      "bps",
+      "defensive_contribution"
+    ],
+    "players_with_any_total_mismatch": 0,
+    "duplicate_policy": "Remove exact full-row duplicates; reject conflicting player-fixture duplicates."
+  },
+  "workbook_cross_checks": [
+    {
+      "player_code": 223094,
+      "player": "Erling Haaland",
+      "long_form": {"minutes": 2953, "xg": 25.5, "xa": 2.67},
+      "short_form_gw33_to_gw38": {"minutes": 450, "xg": 3.86, "xa": 0.73},
+      "matches_workbook_reference": true
+    },
+    {
+      "player_code": 244851,
+      "player": "Cole Palmer",
+      "long_form": {"minutes": 1954, "xg": 10.55, "xa": 2.49},
+      "short_form_gw33_to_gw38": {"minutes": 448, "xg": 1.68, "xa": 0.39},
+      "matches_workbook_reference": true
+    }
+  ],
+  "current_player_bridge": {
+    "availability_resolution_run_id": "availability_87e4074a9199481a",
+    "as_of": "2026-08-17T16:19:35.122370+07:00",
+    "current_players": 587,
+    "linked_to_2025_26_player_rate_history": 459,
+    "without_2025_26_premier_league_rate_history": 128,
+    "missing_policy": "Keep missing and apply a separately reviewed promoted/new/returning-player prior later; never convert absence of history to a zero rate."
+  },
+  "reproduction_command": "python scripts/import_vaastav_player_history.py --season 2025-26"
+}

@@ -150,6 +150,12 @@ gameweek-specific conditional playing-time scenario through
 `scripts/add_appearance_scenario_override.py`. Missing history is otherwise retained as a flagged
 gap rather than fabricated as zero.
 
+Archive a pinned Vaastav revision and materialise the previous-season player rate windows with:
+
+```bash
+python scripts/import_vaastav_player_history.py --season 2025-26
+```
+
 See `docs/PIPELINE_ARCHITECTURE.md` for the weekly refresh, injury/eligibility snapshot, and Excel
 output contract.
 

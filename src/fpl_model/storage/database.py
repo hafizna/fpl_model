@@ -8,7 +8,7 @@ from pathlib import Path
 import duckdb
 
 DEFAULT_DATABASE_PATH = Path("data/processed/fpl_model.duckdb")
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -259,6 +259,128 @@ CREATE TABLE IF NOT EXISTS appearance_scenario_override (
     CHECK (minutes_per_start BETWEEN 0.0 AND 90.0),
     CHECK (minutes_per_substitute BETWEEN 0.0 AND 90.0),
     CHECK (effective_until IS NULL OR effective_until >= observed_at)
+);
+
+CREATE TABLE IF NOT EXISTS player_fixture_history_import_run (
+    import_run_id VARCHAR PRIMARY KEY,
+    season VARCHAR NOT NULL,
+    source VARCHAR NOT NULL,
+    source_revision VARCHAR NOT NULL,
+    source_committed_at TIMESTAMPTZ NOT NULL,
+    imported_at TIMESTAMPTZ NOT NULL,
+    players_source_path VARCHAR NOT NULL,
+    gameweeks_source_path VARCHAR NOT NULL,
+    players_sha256 VARCHAR NOT NULL,
+    gameweeks_sha256 VARCHAR NOT NULL,
+    player_rows INTEGER NOT NULL,
+    fixture_rows INTEGER NOT NULL,
+    exact_duplicate_rows_removed INTEGER NOT NULL,
+    status VARCHAR NOT NULL,
+    CHECK (player_rows > 0),
+    CHECK (fixture_rows > 0),
+    CHECK (exact_duplicate_rows_removed >= 0),
+    CHECK (status = 'completed')
+);
+
+CREATE TABLE IF NOT EXISTS player_fixture_history (
+    import_run_id VARCHAR NOT NULL
+        REFERENCES player_fixture_history_import_run(import_run_id),
+    player_code BIGINT NOT NULL,
+    source_player_id INTEGER NOT NULL,
+    player_name VARCHAR NOT NULL,
+    position VARCHAR NOT NULL,
+    team VARCHAR NOT NULL,
+    gameweek INTEGER NOT NULL,
+    fixture_id INTEGER NOT NULL,
+    kickoff_time TIMESTAMPTZ NOT NULL,
+    was_home BOOLEAN NOT NULL,
+    opponent_team_id INTEGER NOT NULL,
+    minutes INTEGER NOT NULL,
+    starts INTEGER NOT NULL,
+    expected_goals DOUBLE NOT NULL,
+    expected_assists DOUBLE NOT NULL,
+    saves INTEGER NOT NULL,
+    yellow_cards INTEGER NOT NULL,
+    red_cards INTEGER NOT NULL,
+    bonus INTEGER NOT NULL,
+    bps INTEGER NOT NULL,
+    defensive_contribution INTEGER NOT NULL,
+    PRIMARY KEY (import_run_id, player_code, fixture_id),
+    CHECK (position IN ('GK', 'DEF', 'MID', 'FWD')),
+    CHECK (gameweek BETWEEN 1 AND 38),
+    CHECK (minutes BETWEEN 0 AND 90),
+    CHECK (starts IN (0, 1)),
+    CHECK (expected_goals >= 0.0),
+    CHECK (expected_assists >= 0.0),
+    CHECK (saves >= 0),
+    CHECK (yellow_cards >= 0),
+    CHECK (red_cards >= 0),
+    CHECK (bonus >= 0),
+    CHECK (defensive_contribution >= 0)
+);
+
+CREATE TABLE IF NOT EXISTS player_rate_history_run (
+    rate_run_id VARCHAR PRIMARY KEY,
+    source_import_run_id VARCHAR NOT NULL
+        REFERENCES player_fixture_history_import_run(import_run_id),
+    long_form_gameweeks INTEGER NOT NULL,
+    short_form_gameweeks INTEGER NOT NULL,
+    defcon_short_form_gameweeks INTEGER NOT NULL,
+    policy_version VARCHAR NOT NULL,
+    player_rows INTEGER NOT NULL,
+    status VARCHAR NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
+    UNIQUE (source_import_run_id, policy_version),
+    CHECK (long_form_gameweeks BETWEEN 1 AND 38),
+    CHECK (short_form_gameweeks BETWEEN 1 AND long_form_gameweeks),
+    CHECK (
+        defcon_short_form_gameweeks BETWEEN 1 AND long_form_gameweeks
+    ),
+    CHECK (player_rows > 0),
+    CHECK (status = 'completed')
+);
+
+CREATE TABLE IF NOT EXISTS player_rate_history (
+    rate_run_id VARCHAR NOT NULL REFERENCES player_rate_history_run(rate_run_id),
+    player_code BIGINT NOT NULL,
+    player_name VARCHAR NOT NULL,
+    position VARCHAR NOT NULL,
+    season_minutes INTEGER NOT NULL,
+    season_starts INTEGER NOT NULL,
+    season_saves INTEGER NOT NULL,
+    season_yellow_cards INTEGER NOT NULL,
+    season_red_cards INTEGER NOT NULL,
+    season_bonus INTEGER NOT NULL,
+    season_bps INTEGER NOT NULL,
+    long_form_minutes INTEGER NOT NULL,
+    long_form_expected_goals DOUBLE NOT NULL,
+    long_form_expected_assists DOUBLE NOT NULL,
+    short_form_minutes INTEGER NOT NULL,
+    short_form_expected_goals DOUBLE NOT NULL,
+    short_form_expected_assists DOUBLE NOT NULL,
+    long_form_defcon_minutes INTEGER NOT NULL,
+    long_form_defensive_contribution INTEGER NOT NULL,
+    short_form_defcon_minutes INTEGER NOT NULL,
+    short_form_defensive_contribution INTEGER NOT NULL,
+    data_quality_flags VARCHAR NOT NULL,
+    PRIMARY KEY (rate_run_id, player_code),
+    CHECK (position IN ('GK', 'DEF', 'MID', 'FWD')),
+    CHECK (season_minutes >= 0),
+    CHECK (season_starts >= 0),
+    CHECK (season_saves >= 0),
+    CHECK (season_yellow_cards >= 0),
+    CHECK (season_red_cards >= 0),
+    CHECK (season_bonus >= 0),
+    CHECK (long_form_minutes >= 0),
+    CHECK (long_form_expected_goals >= 0.0),
+    CHECK (long_form_expected_assists >= 0.0),
+    CHECK (short_form_minutes >= 0),
+    CHECK (short_form_expected_goals >= 0.0),
+    CHECK (short_form_expected_assists >= 0.0),
+    CHECK (long_form_defcon_minutes >= 0),
+    CHECK (long_form_defensive_contribution >= 0),
+    CHECK (short_form_defcon_minutes >= 0),
+    CHECK (short_form_defensive_contribution >= 0)
 );
 
 CREATE TABLE IF NOT EXISTS appearance_projection_run (

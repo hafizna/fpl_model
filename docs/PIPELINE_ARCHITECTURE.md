@@ -191,6 +191,19 @@ These inputs describe playing time conditional on availability. They require tim
 and never modify an existing projection run. When the command requests a refresh, capture a new FPL
 snapshot, resolve availability again, and materialise a new appearance projection.
 
+Previous-season player rate inputs can be archived and materialised independently:
+
+```bash
+python scripts/import_vaastav_player_history.py --season 2025-26
+```
+
+The command selects the newest revision that actually changed `gws/merged_gw.csv`, fetches both
+source files from that exact commit, archives canonical CSVs and a manifest under
+`data/raw/vaastav/`, validates season totals, and transactionally stores player-fixture facts plus
+38-GW/6-GW/10-GW rate windows. It never reads current preseason FPL carry-over totals as if they
+were observations from the new season. The reproducible 2025/26 audit is in
+`docs/research/vaastav_preseason_rate_import_2025_26.json`.
+
 ## Decision layer: squad planner and transfer recommender
 
 The eventual user-facing feature sits downstream of calibrated player-fixture projections. Its
