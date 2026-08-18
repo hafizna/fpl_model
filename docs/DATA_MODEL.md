@@ -379,13 +379,29 @@ satisfy `kickoff_time + outcome_delay <= target_deadline`, mirroring the same ru
 `walk_forward_folds` already applies to `BacktestObservation.outcome_available_at`. The end-to-end
 backtest driver always supplies both.
 
-The backtest's CLI-level naive comparator (`matched_naive_observations` in
-`scripts/backtest_benchwarmers.py`) reuses this same causal rule and, critically, is scored on
-exactly the same `(player_code, fixture_id, gameweek)` keys the replicated model scored -- not the
-full player pool -- so `matched_naive_metrics` in the research JSON is a fair, apples-to-apples
-comparison. This is distinct from the unrelated smoke-test baseline in
+The backtest's naive comparator (`matched_naive_observations` in
+`src/fpl_model/validation/matched_naive.py`) reuses this same causal rule and, critically, is
+scored on exactly the same `(player_code, fixture_id, gameweek)` keys the replicated model scored --
+not the full player pool -- so `matched_naive_metrics` in the research JSON is a fair,
+apples-to-apples comparison. This is distinct from the unrelated smoke-test baseline in
 `materialize_expanding_player_mean_baseline`, which intentionally evaluates over the full
 population to validate pipeline mechanics rather than to benchmark the replicated model.
+
+`ScoredObservationDiagnostics` is a fifth in-memory-only record, built 1:1 alongside each
+`BacktestObservation` inside the backtest driver's own scoring loop from values it already
+computes (position, `AppearanceProjection.start_probability`/`expected_minutes`, and the raw,
+pre-home-away `ScoringComponents` fields). It exists because `BacktestObservation` is deliberately
+minimal and shared with the unrelated naive-mean smoke test, so it is never extended for
+backtest-specific segment analysis; `BacktestGapSummary` similarly carries a `position` field for
+the same reason. `scripts/diagnose_backtest_segments.py` is the sole consumer, joining
+`diagnostics` against `matched_naive_observations`' output by key to build the segment tables
+described in `docs/PIPELINE_ARCHITECTURE.md`.
+
+Before writing that output, `verify_self_check` in `src/fpl_model/validation/backtest_self_check.py`
+compares the diagnostic run's own recomputed aggregate metrics against a reference production
+backtest JSON and raises `ValueError` on any mismatch (see `docs/PIPELINE_ARCHITECTURE.md` for the
+exact fields and tolerance) -- the diagnostic script never writes a segment breakdown that has not
+passed this check.
 
 ### Historical materialisation smoke test
 

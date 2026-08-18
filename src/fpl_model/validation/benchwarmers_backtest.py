@@ -80,12 +80,54 @@ class BacktestGapSummary:
     fixture_id: int | None
     player_code: int
     team: str
+    position: str
     flags: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ScoredObservationDiagnostics:
+    """Per-observation context discarded by ``BacktestObservation``'s minimal shape.
+
+    Built alongside (never instead of) each ``BacktestObservation``, from
+    values the scoring loop already computes -- no new component calls, no
+    new rate/appearance/team-strength queries. Exists purely to let a
+    read-only diagnostic script segment the backtest's own scored rows by
+    position, expected minutes, start probability, predicted xPts, and each
+    of the 11 component contributions, without touching
+    ``validation/backtest.py``'s shared, minimal observation contract (also
+    used by the unrelated naive-mean smoke test).
+
+    ``component_*`` fields are ``baseline.components``'s raw, *pre-home-away*
+    values (matching ``ScoringComponents``); they sum to ``pre_home_away_xpts``,
+    not to ``predicted_xpts`` -- ``predicted_xpts`` already has the fixture's
+    1.05/0.95 home/away multiplier applied once by ``compose_baseline_projection``.
+    """
+
+    player_code: int
+    fixture_id: int
+    gameweek: int
+    position: str
+    start_probability: float
+    expected_minutes: float
+    predicted_xpts: float
+    actual_points: float
+    component_appearance: float
+    component_sixty_minutes: float
+    component_saves: float
+    component_yellow_cards: float
+    component_red_cards: float
+    component_bonus: float
+    component_assists: float
+    component_goals: float
+    component_clean_sheet: float
+    component_goals_conceded: float
+    component_defcon: float
 
 
 @dataclass(frozen=True, slots=True)
 class BenchwarmersBacktestResult:
     observations: tuple[BacktestObservation, ...]
+    diagnostics: tuple[ScoredObservationDiagnostics, ...]
     gaps: tuple[BacktestGapSummary, ...]
     evaluated_gameweeks: tuple[int, ...]
     candidate_player_fixture_rows: int
@@ -170,6 +212,7 @@ def materialize_benchwarmers_walk_forward_backtest(
     deadlines = infer_gameweek_deadlines(gameweeks_frame, deadline_buffer=deadline_buffer)
 
     observations: list[BacktestObservation] = []
+    diagnostics: list[ScoredObservationDiagnostics] = []
     gaps: list[BacktestGapSummary] = []
     candidate_rows = 0
     evaluated: list[int] = []
@@ -232,7 +275,9 @@ def materialize_benchwarmers_walk_forward_backtest(
             if player_code in double_gameweek_players:
                 flags.add(DOUBLE_GAMEWEEK_FIXTURE)
                 gaps.append(
-                    BacktestGapSummary(gameweek, fixture_id, player_code, team, tuple(sorted(flags)))
+                    BacktestGapSummary(
+                        gameweek, fixture_id, player_code, team, position, tuple(sorted(flags))
+                    )
                 )
                 continue
 
@@ -269,7 +314,9 @@ def materialize_benchwarmers_walk_forward_backtest(
 
             if flags:
                 gaps.append(
-                    BacktestGapSummary(gameweek, fixture_id, player_code, team, tuple(sorted(flags)))
+                    BacktestGapSummary(
+                        gameweek, fixture_id, player_code, team, position, tuple(sorted(flags))
+                    )
                 )
                 continue
 
@@ -327,6 +374,7 @@ def materialize_benchwarmers_walk_forward_backtest(
                         fixture_id,
                         player_code,
                         team,
+                        position,
                         (NEGATIVE_BONUS_SIGNAL,),
                     )
                 )
@@ -445,6 +493,7 @@ def materialize_benchwarmers_walk_forward_backtest(
             )
 
             kickoff = row.kickoff_time.to_pydatetime()
+            actual_points = float(row.total_points)
             observations.append(
                 BacktestObservation(
                     season=season,
@@ -456,12 +505,36 @@ def materialize_benchwarmers_walk_forward_backtest(
                     player_id=player_code,
                     fixture_id=fixture_id,
                     predicted_xpts=baseline.total_xpts,
-                    actual_points=float(row.total_points),
+                    actual_points=actual_points,
+                )
+            )
+            diagnostics.append(
+                ScoredObservationDiagnostics(
+                    player_code=player_code,
+                    fixture_id=fixture_id,
+                    gameweek=gameweek,
+                    position=position,
+                    start_probability=appearance.start_probability,
+                    expected_minutes=appearance.expected_minutes,
+                    predicted_xpts=baseline.total_xpts,
+                    actual_points=actual_points,
+                    component_appearance=baseline.components.appearance,
+                    component_sixty_minutes=baseline.components.sixty_minutes,
+                    component_saves=baseline.components.saves,
+                    component_yellow_cards=baseline.components.yellow_cards,
+                    component_red_cards=baseline.components.red_cards,
+                    component_bonus=baseline.components.bonus,
+                    component_assists=baseline.components.assists,
+                    component_goals=baseline.components.goals,
+                    component_clean_sheet=baseline.components.clean_sheet,
+                    component_goals_conceded=baseline.components.goals_conceded,
+                    component_defcon=baseline.components.defcon,
                 )
             )
 
     return BenchwarmersBacktestResult(
         observations=tuple(observations),
+        diagnostics=tuple(diagnostics),
         gaps=tuple(gaps),
         evaluated_gameweeks=tuple(evaluated),
         candidate_player_fixture_rows=candidate_rows,

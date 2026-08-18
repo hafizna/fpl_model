@@ -164,6 +164,65 @@ def test_backtest_scores_eligible_rows_across_gameweeks(tmp_path):
     assert metrics.observations == 10
 
 
+def test_backtest_diagnostics_match_observations_one_to_one(tmp_path):
+    result, database_path, players_frame, gameweeks_frame = _import(tmp_path)
+
+    with duckdb.connect(str(database_path)) as connection:
+        backtest = materialize_benchwarmers_walk_forward_backtest(
+            season="2025-26",
+            import_run_id=result.import_run_id,
+            connection=connection,
+            gameweeks_frame=gameweeks_frame,
+            players_raw_frame=players_frame,
+            evaluation_from_gw=3,
+            evaluation_to_gw=4,
+        )
+
+    assert len(backtest.diagnostics) == len(backtest.observations)
+    observation_keys = {
+        (o.player_id, o.fixture_id, o.gameweek) for o in backtest.observations
+    }
+    diagnostics_keys = {
+        (d.player_code, d.fixture_id, d.gameweek) for d in backtest.diagnostics
+    }
+    assert observation_keys == diagnostics_keys
+
+    # Each diagnostic's predicted_xpts/actual_points must match its paired
+    # observation exactly, and its position must match the seeded fixture.
+    observation_by_key = {
+        (o.player_id, o.fixture_id, o.gameweek): o for o in backtest.observations
+    }
+    for diagnostic in backtest.diagnostics:
+        key = (diagnostic.player_code, diagnostic.fixture_id, diagnostic.gameweek)
+        observation = observation_by_key[key]
+        assert diagnostic.predicted_xpts == observation.predicted_xpts
+        assert diagnostic.actual_points == observation.actual_points
+        assert 0.0 <= diagnostic.start_probability <= 1.0
+        assert diagnostic.expected_minutes >= 0.0
+        expected_position = next(
+            position for code, _, position, _ in PLAYERS if code == diagnostic.player_code
+        )
+        assert diagnostic.position == expected_position
+        # The 11 components sum to the pre-home-away total, not predicted_xpts
+        # itself (which has the fixture's home/away multiplier already
+        # applied) -- see ScoredObservationDiagnostics' docstring.
+        component_total = (
+            diagnostic.component_appearance
+            + diagnostic.component_sixty_minutes
+            + diagnostic.component_saves
+            + diagnostic.component_yellow_cards
+            + diagnostic.component_red_cards
+            + diagnostic.component_bonus
+            + diagnostic.component_assists
+            + diagnostic.component_goals
+            + diagnostic.component_clean_sheet
+            + diagnostic.component_goals_conceded
+            + diagnostic.component_defcon
+        )
+        multiplier = diagnostic.predicted_xpts / component_total if component_total else 0.0
+        assert multiplier == pytest.approx(1.05) or multiplier == pytest.approx(0.95)
+
+
 def test_backtest_flags_zero_minute_history_as_a_gap(tmp_path):
     gameweeks = _gameweeks(broken_player_code=5001)
     result, database_path, players_frame, _ = _import(tmp_path, gameweeks=gameweeks)
@@ -182,6 +241,7 @@ def test_backtest_flags_zero_minute_history_as_a_gap(tmp_path):
     broken_gaps = [gap for gap in backtest.gaps if gap.player_code == 5001]
     assert len(broken_gaps) == 1
     assert "NO_USABLE_PLAYER_RATE_HISTORY" in broken_gaps[0].flags
+    assert broken_gaps[0].position == "DEF"
     assert not any(o.player_id == 5001 for o in backtest.observations)
 
 

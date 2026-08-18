@@ -286,6 +286,31 @@ mechanically understates its MAE; that number must not be quoted as a benchmark 
 `scored_coverage` (`scored_player_fixture_rows / candidate_player_fixture_rows`) and the
 absolute/relative MAE and RMSE improvement over `matched_naive_metrics` are also persisted.
 
+### Segment diagnostics
+
+The aggregate metrics above cannot say *where* the model's bias concentrates. A read-only
+diagnostic re-runs the same backtest and segments its already-scored rows without changing any
+formula:
+
+```bash
+python scripts/diagnose_backtest_segments.py --season 2025-26
+```
+
+It writes `docs/research/walk_forward_benchwarmers_2025_26_segments.json`, breaking model MAE/RMSE,
+`matched_naive_metrics`, and mean predicted component contributions down by position, by individual
+gameweek and an early/late season split, and by population-adaptive quartile bands of expected
+minutes, start probability, and predicted xPts, alongside gap rate and gap-flag counts by position.
+
+Before any of that is written, `validation/backtest_self_check.py` loads a `--reference` JSON
+(defaulting to `walk_forward_benchwarmers_2025_26.json`) and compares this run's recomputed
+`import_run_id`, `evaluation_from_gw`, `evaluation_to_gw`, and aggregate `observations`/
+`mean_absolute_error`/`root_mean_squared_error`/`mean_error` against it -- exact equality for the
+identity/config fields, `math.isclose` with an `abs_tol` of `1e-9` for the floating-point metrics
+(machine-noise allowance only, not a methodology tolerance). Any mismatch raises `ValueError`
+listing every disagreeing field and the run exits before writing the segment JSON, so a silent
+divergence from the production scoring path fails loudly rather than producing a misleading
+breakdown. This informs later shrinkage/calibration decisions; it is not itself a scoring change.
+
 ## Decision layer: squad planner and transfer recommender
 
 The eventual user-facing feature sits downstream of calibrated player-fixture projections. Its
