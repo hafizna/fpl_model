@@ -40,7 +40,7 @@ from fpl_model.model.secondary import (
 )
 from fpl_model.storage import DEFAULT_DATABASE_PATH, initialize_database
 
-POLICY_VERSION = "coherent_benchwarmers_preseason_baseline_v3"
+POLICY_VERSION = "coherent_benchwarmers_preseason_baseline_v4"
 REGULATION_MINUTES = 90.0
 AVERAGE_BPS_PER_START = 14.862318964622457
 AVERAGE_BONUS_PER_START = 0.29431670795024134
@@ -395,6 +395,7 @@ def materialize_preseason_baseline(
             appearance = None
             minutes = None
             rate = rates.get(player_code)
+            own_strength = strengths.get(team_id)
             if player_code is None:
                 flags.add("MISSING_PLAYER_CODE")
             if raw_appearance is None:
@@ -415,9 +416,19 @@ def materialize_preseason_baseline(
                         flags.add("MISSING_MINUTES_SCENARIO")
             if rate is None:
                 flags.add("NO_PREVIOUS_PL_PLAYER_RATE_HISTORY")
+            if own_strength is None:
+                flags.add("MISSING_TEAM_STRENGTH")
+            elif own_strength.is_promoted_prior:
+                flags.add("OWN_TEAM_PROMOTED_PRIOR")
             if not player_fixtures:
                 flags.add("NO_GAMEWEEK_FIXTURE")
-            if appearance is None or minutes is None or rate is None or not player_fixtures:
+            if (
+                appearance is None
+                or minutes is None
+                or rate is None
+                or own_strength is None
+                or not player_fixtures
+            ):
                 gap_rows.append(
                     (
                         model_run_id,
@@ -516,9 +527,6 @@ def materialize_preseason_baseline(
                 else 0.0
             )
 
-            own_strength = strengths[team_id]
-            if own_strength.is_promoted_prior:
-                flags.add("OWN_TEAM_PROMOTED_PRIOR")
             for fixture in player_fixtures:
                 opponent_strength = strengths[fixture.opponent_id]
                 fixture_flags = set(flags)

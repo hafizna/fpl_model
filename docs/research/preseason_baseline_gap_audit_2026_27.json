@@ -1,0 +1,67 @@
+{
+  "purpose": "Classify missing inputs from the first complete GW1 baseline materialisation without filling any missing player rate with zero or an invented prior.",
+  "baseline_run": {
+    "model_run_id": "baseline_9c8c8edce88e593d",
+    "policy_version": "coherent_benchwarmers_preseason_baseline_v4",
+    "source_ingestion_run_id": "fpl_20260817T091935Z_9654bbef1ffd",
+    "appearance_projection_run_id": "appearance_9d58f703760188b3",
+    "player_rate_run_id": "player_rates_6a133c3d17d65b75",
+    "team_strength_run_id": "team_strength_run_36a130985d197898",
+    "current_players": 587,
+    "candidate_fixture_rows": 587,
+    "projected_fixture_rows": 457,
+    "gap_players": 130,
+    "status": "completed_with_gaps"
+  },
+  "gap_flag_counts": {
+    "NO_PREVIOUS_PL_PLAYER_RATE_HISTORY": 128,
+    "OWN_TEAM_PROMOTED_PRIOR": 88,
+    "MISSING_APPEARANCE_PROJECTION": 19,
+    "NO_WORKBOOK_APPEARANCE_HISTORY": 19,
+    "FPL_ROSTER_BLOCKED": 5
+  },
+  "player_rate_gap_partition": {
+    "total": 128,
+    "categories": [
+      {
+        "category": "promoted_team_player",
+        "players": 87,
+        "selectable_players": 82,
+        "also_missing_appearance": 7,
+        "rule": "OWN_TEAM_PROMOTED_PRIOR is present on the baseline gap row",
+        "required_prior_source": "Reviewed lower-division player history plus an explicit league-translation policy; team-strength priors alone are not player-rate priors."
+      },
+      {
+        "category": "summer_arrival_existing_pl_team",
+        "players": 35,
+        "selectable_players": 35,
+        "also_missing_appearance": 9,
+        "rule": "Not a promoted-team player and FPL team_join_date is on or after 2026-06-01",
+        "required_prior_source": "Previous-league player history with an explicit competition translation; do not infer quality from transfer status or price alone."
+      },
+      {
+        "category": "returning_or_development_player",
+        "players": 6,
+        "selectable_players": 6,
+        "also_missing_appearance": 1,
+        "rule": "Not a promoted-team player and FPL team_join_date is before 2026-06-01",
+        "required_prior_source": "Most recent senior competition or loan history with source and recency recorded; retain a gap if no suitable evidence exists."
+      }
+    ],
+    "returning_or_development_players": [
+      {"team": "AVL", "player_code": 690838, "player_name": "Madjo", "position": "FWD", "team_join_date": "2026-01-12"},
+      {"team": "AVL", "player_code": 578545, "player_name": "Nedeljkovic", "position": "DEF", "team_join_date": "2024-01-22"},
+      {"team": "LIV", "player_code": 464353, "player_name": "Davies", "position": "GK", "team_join_date": "2021-03-09"},
+      {"team": "LIV", "player_code": 432987, "player_name": "Jaros", "position": "GK", "team_join_date": "2019-07-10"},
+      {"team": "LIV", "player_code": 514514, "player_name": "Koumas", "position": "MID", "team_join_date": "2023-07-18"},
+      {"team": "NFO", "player_code": 538638, "player_name": "Bindon", "position": "DEF", "team_join_date": "2025-02-03"}
+    ]
+  },
+  "audit_notes": [
+    "The three player-rate categories are mutually exclusive and sum to 128.",
+    "The 2026-06-01 date is an audit partition for summer arrivals, not a modelling feature or evidence of playing strength.",
+    "Missing appearance and missing player rates are orthogonal: 17 players have both, two have only missing appearance, and 111 have only missing player rates.",
+    "The next safe action is coverage research and a reviewed prior import boundary, not automatic position-average imputation.",
+    "The local DuckDB file and generated projections remain gitignored."
+  ]
+}
