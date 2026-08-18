@@ -120,6 +120,14 @@ comparator scored on exactly the same rows as the model, for a fair naive baseli
 python scripts/backtest_benchwarmers.py --season 2025-26
 ```
 
+Paired, gameweek-cluster bootstrap uncertainty of the model's MAE/RMSE advantage over
+`matched_naive_metrics` -- whether that advantage is a stable signal or noise from one season's 36
+gameweeks (see `docs/PIPELINE_ARCHITECTURE.md`):
+
+```bash
+python scripts/analyze_backtest_uncertainty.py --season 2025-26
+```
+
 Audit whether historical Vaastav snapshots existed before each inferred deadline:
 
 ```bash
@@ -228,8 +236,11 @@ See `THIRD_PARTY_NOTICES.md`.
 ### Sprint 4 — Validation and decisions
 - [x] Walk-forward fold/metric primitives (smoke-tested)
 - [x] Genuine 11-component walk-forward backtest (2025-26, in-season)
+- [x] Segment diagnostics (position/gameweek/minutes/start-probability/xPts bands)
+- [x] Paired gameweek-cluster bootstrap uncertainty of the model-vs-naive MAE/RMSE advantage
 - [ ] Start-probability calibration
-- [ ] xPts uncertainty
+- [ ] Walk-forward xPts calibration
+- [ ] Per-player/per-fixture xPts uncertainty
 - [ ] Ablation tests for each contextual layer
 - [ ] Squad/transfer optimizer
 

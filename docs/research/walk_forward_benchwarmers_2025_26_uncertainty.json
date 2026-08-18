@@ -1,0 +1,85 @@
+{
+  "$schema_note": "Paired, gameweek-cluster bootstrap uncertainty of the 11-component model's MAE/RMSE advantage over the matched-naive comparator. Read-only measurement; no scoring/formula/calibration change.",
+  "clusters_gameweek": 36,
+  "evaluation_from_gw": 3,
+  "evaluation_to_gw": 38,
+  "fixture_cluster_bootstrap": {
+    "mae": {
+      "ci_high": 0.03408937662668107,
+      "ci_low": 0.005034079400625819,
+      "cluster_unit": "fixture_id",
+      "excludes_zero": true,
+      "p_improvement_positive": 0.9956,
+      "point_estimate": 0.01898386349845138,
+      "resamples": 10000,
+      "seed": 42
+    },
+    "note": "Sensitivity check only, clustered by fixture_id instead of gameweek; the gameweek_cluster_bootstrap block above is the primary result.",
+    "rmse": {
+      "ci_high": 0.0833677310119631,
+      "ci_low": 0.04659650812049433,
+      "cluster_unit": "fixture_id",
+      "excludes_zero": true,
+      "p_improvement_positive": 1.0,
+      "point_estimate": 0.0639185054295397,
+      "resamples": 10000,
+      "seed": 42
+    }
+  },
+  "gameweek_cluster_bootstrap": {
+    "mae": {
+      "ci_high": 0.03475411461201827,
+      "ci_low": 0.0057678737247124695,
+      "cluster_unit": "gameweek",
+      "excludes_zero": true,
+      "p_improvement_positive": 0.9989,
+      "point_estimate": 0.01898386349845138,
+      "resamples": 10000,
+      "seed": 42
+    },
+    "rmse": {
+      "ci_high": 0.09307750273912886,
+      "ci_low": 0.041785664948352653,
+      "cluster_unit": "gameweek",
+      "excludes_zero": true,
+      "p_improvement_positive": 1.0,
+      "point_estimate": 0.0639185054295397,
+      "resamples": 10000,
+      "seed": 42
+    }
+  },
+  "import_run_id": "player_history_ae118d1588eeaf84",
+  "limitations": [
+    "Bootstrap intervals describe uncertainty under this specific historical resampling scheme (gameweek-cluster percentile bootstrap over the 2025-26 archive); they are not a guarantee about future seasons or other leagues.",
+    "36 evaluated gameweeks is a small number of primary bootstrap clusters -- the percentile CI's own precision is itself limited by this count, not just by the resample count (which only approximates the true 36-cluster sampling distribution, it cannot exceed its information).",
+    "This is one season (2025-26) only; no cross-season validation exists yet.",
+    "An interval that excludes zero supports the model's advantage being stable within this sample; it is not proof of universal superiority over the matched-naive comparator in any other season or context."
+  ],
+  "mae_point_estimate": 0.01898386349845138,
+  "method_notes": [
+    "Positive improvement means naive_metric - model_metric > 0, i.e. the model beats the naive comparator; negative means naive beats the model. verdict_state is direction-aware: \"advantage\" requires both CIs entirely above zero, \"disadvantage\" requires both entirely below zero, anything else is \"mixed\".",
+    "RMSE improvement is not a per-row/per-cluster-additive quantity (RMSE is sqrt(mean(error^2))); it is recomputed on each resample's fully pooled rows, never averaged per-cluster.",
+    "Primary clustering unit is the gameweek: every row scored at one gameweek's deadline shares that gameweek's causally re-derived team-strength/rate/appearance inputs, so rows within a gameweek are not independent draws. A row-level bootstrap would understate this uncertainty.",
+    "Percentile bootstrap (2.5th/97.5th percentile of 10000 resamples, fixed seed 42 for this run -- defaults are 10000/42, overridable via --resamples/--seed) -- simplest, auditable, no scipy dependency; not a bias-corrected/accelerated (BCa) interval."
+  ],
+  "paired_rows": 16496,
+  "reproduce": ".venv\\Scripts\\python.exe scripts/analyze_backtest_uncertainty.py --season 2025-26",
+  "rmse_point_estimate": 0.0639185054295397,
+  "season": "2025-26",
+  "self_check": {
+    "checked_fields": [
+      "import_run_id",
+      "evaluation_from_gw",
+      "evaluation_to_gw",
+      "metrics.observations",
+      "metrics.mean_absolute_error",
+      "metrics.root_mean_squared_error",
+      "metrics.mean_error"
+    ],
+    "float_tolerance": 1e-09,
+    "reference_path": "docs\\research\\walk_forward_benchwarmers_2025_26.json",
+    "status": "passed"
+  },
+  "verdict": "The model's MAE and RMSE advantage over the matched-naive comparator is stable under the gameweek-cluster bootstrap: both 95% percentile intervals lie entirely above zero in this sample. This is a research heuristic, not a formal hypothesis-test p-value.",
+  "verdict_state": "advantage"
+}

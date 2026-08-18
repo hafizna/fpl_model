@@ -403,6 +403,15 @@ backtest JSON and raises `ValueError` on any mismatch (see `docs/PIPELINE_ARCHIT
 exact fields and tolerance) -- the diagnostic script never writes a segment breakdown that has not
 passed this check.
 
+`PairedRow` and `BootstrapResult`/`PairedUncertaintyResult` (`src/fpl_model/validation/
+paired_uncertainty.py`) are further in-memory-only records, never persisted to DuckDB: one
+`PairedRow` per matched `(player_id, fixture_id, gameweek)` key across the model and matched-naive
+observation sets, and one `BootstrapResult` per metric (MAE/RMSE) per clustering unit
+(gameweek/fixture). `scripts/analyze_backtest_uncertainty.py` is the sole consumer; it reuses
+`verify_self_check` exactly as the segment diagnostic does, plus an additional check that its own
+recomputed paired point estimates equal the reference's `absolute_mae_improvement`/
+`absolute_rmse_improvement` fields.
+
 ### Historical materialisation smoke test
 
 Vaastav's 2025/26 `merged_gw.csv` supplies complete realised player-fixture outcomes but not

@@ -311,6 +311,29 @@ listing every disagreeing field and the run exits before writing the segment JSO
 divergence from the production scoring path fails loudly rather than producing a misleading
 breakdown. This informs later shrinkage/calibration decisions; it is not itself a scoring change.
 
+### Paired uncertainty of the model-vs-naive advantage
+
+A single MAE/RMSE improvement number cannot say whether the model's advantage over
+`matched_naive_metrics` is a stable signal or noise from one season's 36 gameweeks. A read-only
+measurement quantifies this with a paired, gameweek-cluster bootstrap:
+
+```bash
+python scripts/analyze_backtest_uncertainty.py --season 2025-26
+```
+
+Rows within one gameweek are not independent -- every row scored at a gameweek's deadline shares
+that gameweek's causally re-derived team-strength/rate/appearance inputs -- so `validation/
+paired_uncertainty.py` resamples whole gameweeks (10,000 resamples, fixed seed `42` by default,
+2.5th/97.5th percentile CI), not individual rows, keeping every row inside a resampled gameweek
+together as one block. A fixture-clustered bootstrap is reported alongside as a labelled
+sensitivity check, never as the primary result. It writes
+`docs/research/walk_forward_benchwarmers_2025_26_uncertainty.json`, self-checking both the
+aggregate backtest metrics (reusing `verify_self_check`) and its own recomputed MAE/RMSE point
+estimates against the reference's `absolute_mae_improvement`/`absolute_rmse_improvement` before
+writing anything. Its `limitations` note that a CI excluding zero supports stability within this
+one-season sample, not universal superiority. This is measurement only; it does not itself change
+any formula, calibration, or shrinkage.
+
 ## Decision layer: squad planner and transfer recommender
 
 The eventual user-facing feature sits downstream of calibrated player-fixture projections. Its
