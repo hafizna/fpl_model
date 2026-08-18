@@ -8,7 +8,7 @@ from pathlib import Path
 import duckdb
 
 DEFAULT_DATABASE_PATH = Path("data/processed/fpl_model.duckdb")
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -381,6 +381,96 @@ CREATE TABLE IF NOT EXISTS player_rate_history (
     CHECK (long_form_defensive_contribution >= 0),
     CHECK (short_form_defcon_minutes >= 0),
     CHECK (short_form_defensive_contribution >= 0)
+);
+
+CREATE TABLE IF NOT EXISTS team_strength_import_run (
+    import_run_id VARCHAR PRIMARY KEY,
+    target_season VARCHAR NOT NULL,
+    previous_season VARCHAR NOT NULL,
+    source_label VARCHAR NOT NULL,
+    source_path VARCHAR NOT NULL,
+    source_sha256 VARCHAR NOT NULL,
+    imported_at TIMESTAMPTZ NOT NULL,
+    team_rows INTEGER NOT NULL,
+    status VARCHAR NOT NULL,
+    CHECK (team_rows = 20),
+    CHECK (status = 'completed')
+);
+
+CREATE TABLE IF NOT EXISTS team_strength_history (
+    import_run_id VARCHAR NOT NULL REFERENCES team_strength_import_run(import_run_id),
+    team_abbreviation VARCHAR NOT NULL,
+    team_name VARCHAR NOT NULL,
+    prior_type VARCHAR NOT NULL,
+    long_form_matches INTEGER NOT NULL,
+    long_form_xg DOUBLE NOT NULL,
+    long_form_xgc DOUBLE NOT NULL,
+    short_form_matches INTEGER NOT NULL,
+    short_form_xg DOUBLE NOT NULL,
+    short_form_xgc DOUBLE NOT NULL,
+    league_average_xg_per_match DOUBLE NOT NULL,
+    league_average_xgc_per_match DOUBLE NOT NULL,
+    PRIMARY KEY (import_run_id, team_abbreviation),
+    CHECK (prior_type IN ('observed_previous_pl', 'promoted_team_prior')),
+    CHECK (long_form_matches > 0),
+    CHECK (long_form_xg >= 0.0),
+    CHECK (long_form_xgc >= 0.0),
+    CHECK (short_form_matches > 0),
+    CHECK (short_form_xg >= 0.0),
+    CHECK (short_form_xgc >= 0.0),
+    CHECK (league_average_xg_per_match > 0.0),
+    CHECK (league_average_xgc_per_match > 0.0)
+);
+
+CREATE TABLE IF NOT EXISTS team_strength_run (
+    strength_run_id VARCHAR PRIMARY KEY,
+    source_import_run_id VARCHAR NOT NULL REFERENCES team_strength_import_run(import_run_id),
+    source_ingestion_run_id VARCHAR NOT NULL REFERENCES ingestion_run(ingestion_run_id),
+    target_gameweek INTEGER NOT NULL,
+    policy_version VARCHAR NOT NULL,
+    team_rows INTEGER NOT NULL,
+    status VARCHAR NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
+    UNIQUE (source_import_run_id, source_ingestion_run_id, target_gameweek, policy_version),
+    CHECK (target_gameweek BETWEEN 1 AND 38),
+    CHECK (team_rows = 20),
+    CHECK (status = 'completed')
+);
+
+CREATE TABLE IF NOT EXISTS team_strength_projection (
+    strength_run_id VARCHAR NOT NULL REFERENCES team_strength_run(strength_run_id),
+    team_id INTEGER NOT NULL,
+    team_code INTEGER NOT NULL,
+    team_abbreviation VARCHAR NOT NULL,
+    team_name VARCHAR NOT NULL,
+    is_promoted_prior BOOLEAN NOT NULL,
+    long_form_xg_per_match DOUBLE NOT NULL,
+    short_form_xg_per_match DOUBLE NOT NULL,
+    blended_xg_per_match DOUBLE NOT NULL,
+    long_form_xgc_per_match DOUBLE NOT NULL,
+    short_form_xgc_per_match DOUBLE NOT NULL,
+    blended_xgc_per_match DOUBLE NOT NULL,
+    corrected_xgc_per_match DOUBLE NOT NULL,
+    league_average_xg_per_match DOUBLE NOT NULL,
+    league_average_xgc_per_match DOUBLE NOT NULL,
+    attack_ratio DOUBLE NOT NULL,
+    defensive_weakness_ratio DOUBLE NOT NULL,
+    workbook_defensive_bonus_multiplier DOUBLE NOT NULL,
+    defensive_bonus_multiplier DOUBLE NOT NULL,
+    data_quality_flags VARCHAR NOT NULL,
+    PRIMARY KEY (strength_run_id, team_id),
+    CHECK (long_form_xg_per_match >= 0.0),
+    CHECK (short_form_xg_per_match >= 0.0),
+    CHECK (blended_xg_per_match >= 0.0),
+    CHECK (long_form_xgc_per_match >= 0.0),
+    CHECK (short_form_xgc_per_match >= 0.0),
+    CHECK (blended_xgc_per_match >= 0.0),
+    CHECK (corrected_xgc_per_match >= 0.0),
+    CHECK (league_average_xg_per_match > 0.0),
+    CHECK (league_average_xgc_per_match > 0.0),
+    CHECK (attack_ratio >= 0.0),
+    CHECK (defensive_weakness_ratio >= 0.0),
+    CHECK (defensive_bonus_multiplier >= 0.0)
 );
 
 CREATE TABLE IF NOT EXISTS appearance_projection_run (

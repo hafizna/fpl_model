@@ -145,6 +145,18 @@ Window inputs remain raw totals and minutes. Conversion to per-start rates and a
 appearance probabilities happen later in the component model. A current player without linked
 Premier League history remains missing pending an explicit promoted/new/returning-player prior.
 
+### Preseason team-strength boundary
+
+Team attacking and defensive strength uses reviewed workbook totals rather than current FPL
+strength ratings or player-level Vaastav aggregates. The import records 38-GW and six-GW xG/xGC
+totals and matches, previous-season league averages, and whether each row is observed Premier
+League history or an explicit promoted-team prior. The current FPL snapshot supplies only the
+team identity bridge and fixtures.
+
+The materialised layer exposes raw LF/SF rates, their 80/20 blends, the workbook's defensive xGC
+correction, opponent attack and defensive-weakness ratios, and promoted-prior flags. It currently
+supports GW1 only. Missing or extra teams fail validation instead of receiving zero strength.
+
 ## Projection fact
 
 The projection table will contain component-level expected points, not only a final number:

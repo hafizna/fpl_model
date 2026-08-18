@@ -204,6 +204,21 @@ source files from that exact commit, archives canonical CSVs and a manifest unde
 were observations from the new season. The reproducible 2025/26 audit is in
 `docs/research/vaastav_preseason_rate_import_2025_26.json`.
 
+Team-strength input is a separate reviewed workbook boundary because aggregating Vaastav's
+player-level xG does not reproduce the workbook team rates. After completing
+`docs/research/CLAUDE_TEAM_STRENGTH_EXPORT_PROMPT.md`, import and materialise it with:
+
+```bash
+python scripts/import_team_strength.py \
+  --csv data/raw/workbooks/benchwarmers_team_strength_2026_27.csv \
+  --target-season 2026-27 --previous-season 2025-26 \
+  --source-label "MODEL.xlsx TABLES resolved preseason team windows"
+```
+
+The importer requires all 20 current FPL abbreviations and exactly three explicit promoted-team
+priors. The official FPL snapshot supplies current team IDs and the GW1 deadline; it does not
+silently override the reviewed xG/xGC rates.
+
 ## Decision layer: squad planner and transfer recommender
 
 The eventual user-facing feature sits downstream of calibrated player-fixture projections. Its

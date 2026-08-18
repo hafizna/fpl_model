@@ -156,6 +156,10 @@ Archive a pinned Vaastav revision and materialise the previous-season player rat
 python scripts/import_vaastav_player_history.py --season 2025-26
 ```
 
+The separate team-strength workbook export contract is documented in
+`docs/research/CLAUDE_TEAM_STRENGTH_EXPORT_PROMPT.md` and consumed by
+`scripts/import_team_strength.py`.
+
 See `docs/PIPELINE_ARCHITECTURE.md` for the weekly refresh, injury/eligibility snapshot, and Excel
 output contract.
 
