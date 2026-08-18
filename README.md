@@ -35,6 +35,7 @@ This repository currently includes:
 - season/model configuration
 - network-free unit tests for core transformations
 - component-level Benchwarmers baseline projections
+- an end-to-end GW1 baseline materialiser with immutable input lineage and explicit gaps
 - explicit fixture/DGW composition and one-time home/away adjustment
 - deadline-safe walk-forward fold and metric primitives
 
@@ -159,6 +160,17 @@ python scripts/import_vaastav_player_history.py --season 2025-26
 The separate team-strength workbook export contract is documented in
 `docs/research/CLAUDE_TEAM_STRENGTH_EXPORT_PROMPT.md` and consumed by
 `scripts/import_team_strength.py`.
+
+Once appearance, player-rate, and team-strength runs exist, materialise the explainable GW1
+player-fixture baseline with:
+
+```bash
+python scripts/project_preseason_baseline.py --gameweek 1
+```
+
+The runner stores all eleven component values, applies home/away once, and records missing player
+history as a gap rather than assigning zero xPts. Optional run-ID arguments pin an exact upstream
+lineage when reproducing a result.
 
 See `docs/PIPELINE_ARCHITECTURE.md` for the weekly refresh, injury/eligibility snapshot, and Excel
 output contract.

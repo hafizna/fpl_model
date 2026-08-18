@@ -166,6 +166,27 @@ def test_blank_fixture_has_no_final_projection_but_retains_workbook_bg_quirk():
     assert projection.single_application_true_total_xpts == 0.0
 
 
+def test_cameo_to_start_minutes_ratio_is_not_a_probability():
+    projection = project_workbook_fixture_totals(
+        ScoringComponents(goals=1.0),
+        is_home=True,
+        t1_appearance_xpts=0.75,
+        start_probability=0.5,
+        substitute_to_start_minutes_ratio=82.0 / 52.0,
+    )
+
+    assert projection.if_not_start_total_xpts > projection.if_start_total_xpts
+
+    with pytest.raises(ValueError, match="finite and non-negative"):
+        project_workbook_fixture_totals(
+            ScoringComponents(goals=1.0),
+            is_home=True,
+            t1_appearance_xpts=0.75,
+            start_probability=0.5,
+            substitute_to_start_minutes_ratio=-0.1,
+        )
+
+
 def test_coherent_projection_applies_home_away_once():
     home = apply_home_away_once(5.0, is_home=True)
     away = apply_home_away_once(5.0, is_home=False)

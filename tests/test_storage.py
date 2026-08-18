@@ -18,6 +18,8 @@ def test_database_initialisation_is_persistent_and_idempotent(tmp_path):
     assert first.tables == second.tables
     assert {
         "availability_signal",
+        "baseline_projection_gap",
+        "baseline_projection_run",
         "fixture_snapshot",
         "ingestion_run",
         "model_run",

@@ -298,7 +298,7 @@ def project_workbook_fixture_totals(
     if not isfinite(t1_appearance_xpts):
         raise ValueError("t1_appearance_xpts must be finite")
     _validate_probability(start_probability, "start_probability")
-    _validate_probability(
+    _validate_non_negative(
         substitute_to_start_minutes_ratio,
         "substitute_to_start_minutes_ratio",
     )

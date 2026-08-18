@@ -22,6 +22,10 @@ from fpl_model.model.baseline import (
     BaselineProjection,
     compose_baseline_projection,
 )
+from fpl_model.model.baseline_pipeline import (
+    BaselineRunResult,
+    materialize_preseason_baseline,
+)
 from fpl_model.model.defence import (
     DefensiveProjection,
     DefensiveRateProjection,
@@ -67,6 +71,7 @@ __all__ = [
     "AttackingWindow",
     "BaselineComponentProjections",
     "BaselineProjection",
+    "BaselineRunResult",
     "BonusRateProjection",
     "DefConRateProjection",
     "DefensiveProjection",
@@ -93,6 +98,7 @@ __all__ = [
     "expected_poisson_bundles",
     "fixture_contexts_for_team",
     "home_away_multiplier",
+    "materialize_preseason_baseline",
     "poisson_tail_probability",
     "project_appearance",
     "project_benchwarmers_appearance",

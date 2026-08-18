@@ -193,7 +193,7 @@ def weight_defensive_rates(
     conceded use the exact repeated deduction under a full-match Poisson rate;
     the substitute branch rescales lambda before applying the nonlinear rule.
     """
-    _validate_probability(
+    _validate_non_negative(
         substitute_to_start_minutes_ratio,
         "substitute_to_start_minutes_ratio",
     )

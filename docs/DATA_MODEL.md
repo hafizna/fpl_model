@@ -319,6 +319,25 @@ been resolved inside the appropriate component. The composer performs no new rat
 does not reapply appearance probability. It applies the fixture's home/away scalar once and returns
 both the component breakdown and final xPts.
 
+The GW1 materialiser binds one appearance run, one prior-season player-rate run, one team-strength
+run, and their shared FPL snapshot into an immutable `model_run`. Each successfully linked
+player-fixture receives a row in `player_fixture_projection` plus eleven rows in
+`projection_component`. Players without an appearance scenario, prior player rates, or a scheduled
+fixture are written to `baseline_projection_gap`; they are never silently assigned zero value.
+
+Mean starter and substitute minutes follow the same fallback policy as the appearance component.
+In particular, a player with substitute appearances but no historical start uses the explicit
+59.4-minute starter prior when converting per-90 rates. A substitute/start minute ratio is an
+exposure ratio, not a probability, and may exceed one. Such cases are retained but flagged when
+supported by fewer than five historical appearances; Jenson Seelt's 82-minute substitute sample
+versus 52-minute start sample is the current concrete edge case, not evidence of goalkeeper
+rotation or a positional reclassification.
+
+The current preseason run is intentionally limited to GW1. It has no context adjustment or
+uncertainty estimate yet, and it cannot project new, promoted, returning, or transferred players
+without an explicit player-rate prior. Those gaps must be resolved before the output is suitable
+for complete squad optimisation.
+
 ### Walk-forward backtest fact
 
 One `BacktestObservation` represents one historical player-fixture prediction and records:

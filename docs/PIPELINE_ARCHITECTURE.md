@@ -219,6 +219,18 @@ The importer requires all 20 current FPL abbreviations and exactly three explici
 priors. The official FPL snapshot supplies current team IDs and the GW1 deadline; it does not
 silently override the reviewed xG/xGC rates.
 
+With all three baseline inputs available, compose and persist GW1 projections with:
+
+```bash
+python scripts/project_preseason_baseline.py --gameweek 1
+```
+
+For an exact reproduction, also pass `--appearance-run`, `--player-rate-run`, and
+`--team-strength-run`. The selected IDs, policy version, FPL snapshot, as-of time, and deadline are
+stored with the run. `completed_with_gaps` is a valid research result: it means linked players were
+projected while missing inputs were itemised in `baseline_projection_gap`. It must not be treated
+as full player-pool coverage by the later CSV export or optimiser.
+
 ## Decision layer: squad planner and transfer recommender
 
 The eventual user-facing feature sits downstream of calibrated player-fixture projections. Its

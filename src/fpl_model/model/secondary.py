@@ -170,7 +170,7 @@ def weight_saves(
     substitute_to_start_minutes_ratio: float,
 ) -> WeightedExpectedPoints:
     """Apply start/substitute probabilities to discrete save bundles."""
-    _validate_probability(
+    _validate_non_negative(
         substitute_to_start_minutes_ratio,
         "substitute_to_start_minutes_ratio",
     )
@@ -221,7 +221,7 @@ def weight_linear_component(
     """Weight a minutes-linear component without assigning value to absences."""
     if not isfinite(xpts_if_start):
         raise ValueError("xpts_if_start must be finite")
-    _validate_probability(
+    _validate_non_negative(
         substitute_to_start_minutes_ratio,
         "substitute_to_start_minutes_ratio",
     )
@@ -371,7 +371,7 @@ def weight_defcon(
     position: str,
 ) -> WeightedExpectedPoints:
     """Apply threshold probabilities separately to start and substitute branches."""
-    _validate_probability(
+    _validate_non_negative(
         substitute_to_start_minutes_ratio,
         "substitute_to_start_minutes_ratio",
     )

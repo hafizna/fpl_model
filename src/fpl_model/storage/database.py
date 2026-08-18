@@ -8,7 +8,7 @@ from pathlib import Path
 import duckdb
 
 DEFAULT_DATABASE_PATH = Path("data/processed/fpl_model.duckdb")
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -564,6 +564,37 @@ CREATE TABLE IF NOT EXISTS projection_component (
         'appearance', 'sixty_minutes', 'goals', 'assists', 'clean_sheets',
         'goals_conceded', 'saves', 'yellow_cards', 'red_cards', 'bonus', 'defcon'
     ))
+);
+
+CREATE TABLE IF NOT EXISTS baseline_projection_run (
+    model_run_id VARCHAR PRIMARY KEY REFERENCES model_run(model_run_id),
+    appearance_projection_run_id VARCHAR NOT NULL
+        REFERENCES appearance_projection_run(projection_run_id),
+    player_rate_run_id VARCHAR NOT NULL
+        REFERENCES player_rate_history_run(rate_run_id),
+    team_strength_run_id VARCHAR NOT NULL
+        REFERENCES team_strength_run(strength_run_id),
+    policy_version VARCHAR NOT NULL,
+    current_players INTEGER NOT NULL,
+    candidate_fixture_rows INTEGER NOT NULL,
+    projected_fixture_rows INTEGER NOT NULL,
+    gap_players INTEGER NOT NULL,
+    status VARCHAR NOT NULL,
+    CHECK (current_players > 0),
+    CHECK (candidate_fixture_rows >= 0),
+    CHECK (projected_fixture_rows >= 0),
+    CHECK (projected_fixture_rows <= candidate_fixture_rows),
+    CHECK (gap_players >= 0),
+    CHECK (status IN ('completed', 'completed_with_gaps'))
+);
+
+CREATE TABLE IF NOT EXISTS baseline_projection_gap (
+    model_run_id VARCHAR NOT NULL REFERENCES baseline_projection_run(model_run_id),
+    fpl_id INTEGER NOT NULL,
+    player_code BIGINT,
+    team_id INTEGER NOT NULL,
+    data_quality_flags VARCHAR NOT NULL,
+    PRIMARY KEY (model_run_id, fpl_id)
 );
 """
 

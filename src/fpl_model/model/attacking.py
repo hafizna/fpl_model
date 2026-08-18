@@ -180,7 +180,7 @@ def weight_attacking_rates(
     includes genuine absences. The coherent baseline instead uses the explicit
     substitute-appearance probability produced by the appearance component.
     """
-    _validate_probability(
+    _validate_non_negative(
         substitute_to_start_minutes_ratio,
         "substitute_to_start_minutes_ratio",
     )
