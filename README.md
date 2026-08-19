@@ -145,6 +145,15 @@ applied to any production projection (see `docs/PIPELINE_ARCHITECTURE.md`):
 python scripts/assess_appearance_calibration.py --season 2025-26
 ```
 
+Segment the appearance model's own calibration bias by fixed start_probability/expected_minutes
+bands, position, and season phase, across the primary cohort plus xPts-scored and xPts-high-band
+sensitivity cohorts -- measurement only, not applied to any production projection (see
+`docs/PIPELINE_ARCHITECTURE.md`):
+
+```bash
+python scripts/diagnose_appearance_segments.py --season 2025-26
+```
+
 Audit whether historical Vaastav snapshots existed before each inferred deadline:
 
 ```bash

@@ -434,6 +434,36 @@ modules, matching this codebase's per-module convention of small local duplicati
 cross-module coupling for validation code. `scripts/assess_appearance_calibration.py` is the sole
 consumer.
 
+`AppearanceSegmentRow` and `SegmentSummary` (`src/fpl_model/validation/appearance_segments.py`)
+are further in-memory-only records built from `AppearanceObservation`: one `AppearanceSegmentRow`
+per observation per target, carrying `position` (absent from `AppearanceCalibrationRow`, which
+does not need it) plus its fixed start_probability/expected_minutes band and gameweek phase
+labels, and one `SegmentSummary` per cohort/target/segment with descriptive statistics only --
+never a fitted slope (see the module's own docstring for why). `SegmentSummary.bias_sum`
+(`mean_bias * rows`) is reported alongside `mean_bias` specifically so segment "contribution to
+aggregate bias" rankings use an additive quantity (sums exactly across a partition), not
+`abs(mean_bias)` alone, which cannot distinguish a segment adding to the aggregate bias from one
+offsetting it. `xpts_high_band_aligned` and `xpts_same_window_aligned` cohort membership are both
+derived from ONE call to `walk_forward_calibration.walk_forward_calibration`
+(`xpts_high_band_and_same_window_keys_from_backtest_observations`) rather than a re-derived
+percentile or an inferred min/max-gameweek window, the one deliberate exception to the
+duplicate-not-import convention above -- made so membership can never silently drift from the
+committed xPts calibration's own rows, and so the two cohorts are guaranteed to share the same
+eligible-gameweek window (`xpts_same_window_aligned` is the correct comparator for any
+`xpts_high_band_aligned` claim; the wider `xpts_scored_aligned`, which spans every evaluated
+gameweek including cold-start ones, is not). `gameweek_phase` boundaries (GW1-13/14-26/27-38) are
+a new diagnostic convention documented in the module's own docstring, deliberately NOT this
+section's short-form rate windows above (a previous-season rate-history boundary for an unrelated
+purpose). `ContrastBootstrap` and `paired_contrast_bootstrap` (same module) answer a distinct
+question from `SegmentSummary`'s own per-side CI: whether `focus_bias - comparator_bias` -- not
+merely the focus side's own bias -- has a gameweek-cluster bootstrap CI lying entirely above zero.
+Every replicate draws ONE shared set of gameweek-cluster labels and applies it to both sides' own
+per-gameweek sufficient statistics (never two independently-bootstrapped CIs subtracted, which
+would ignore the correlation two sides sharing gameweeks induces), so a "concentrated"/"larger"
+claim is licensed only by this paired contrast, never by a single side's own CI excluding zero.
+`scripts/diagnose_appearance_segments.py` is the sole consumer, reusing `verify_self_check` before
+any segment work begins.
+
 ### Historical materialisation smoke test
 
 Vaastav's 2025/26 `merged_gw.csv` supplies complete realised player-fixture outcomes but not

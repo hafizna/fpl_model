@@ -385,6 +385,64 @@ with MSE treated as the primary "is this a real miscalibration" signal for that 
 aggregate backtest metrics before any calibration work begins. This is measurement only: no
 calibration is applied to any production projection or scoring formula.
 
+### Appearance-model bias segment diagnostic
+
+The appearance calibration above found both targets' pooled slope below 1.0 in aggregate; it
+cannot say *where* that average over/under-prediction bias concentrates (note: mean(predicted -
+actual) measures bias, not "confidence" -- overconfidence is the correct word for the pooled
+slope above, not for this segmented mean bias). A further read-only diagnostic segments the same
+causal predictions by fixed `start_probability`/`expected_minutes` bands, position, and a
+fixed-boundary gameweek phase, over four cohorts -- `appearance_eligible` (primary),
+`xpts_scored_aligned` (sensitivity, spans every evaluated gameweek), `xpts_high_band_aligned`
+(sensitivity: the subset of `xpts_scored_aligned` whose keys were also members of the xPts
+calibration's own out-of-sample, prior-only 75th-percentile high-band), and
+`xpts_same_window_aligned` (sensitivity: the correct comparator for high-band claims -- the
+subset of `xpts_scored_aligned` sharing the SAME eligible-gameweek window `xpts_high_band_aligned`
+was drawn from, read directly from `walk_forward_calibration`'s own `overall_evaluation_rows`,
+never inferred from the high band's own min/max gameweek). Both new cohorts are derived from one
+`walk_forward_calibration` call so membership can never drift from that committed result or from
+each other's window:
+
+```bash
+python scripts/diagnose_appearance_segments.py --season 2025-26
+```
+
+`validation/appearance_segments.py` deliberately never fits a per-segment regression slope --
+several required segments (e.g. the top start_probability/expected_minutes band) have too little
+predictor variance to support one -- and instead reports mean bias (predicted - actual), `bias_sum`
+(`mean_bias * rows`, additive across a partition -- the mathematically real "contribution to
+aggregate bias" quantity, unlike `abs(mean_bias)` alone, which cannot distinguish a segment
+contributing to the aggregate from one offsetting it), a gameweek-cluster bootstrap CI, and Brier
+score/observed start rate or MSE/MAE, flagging `insufficient_variation` rather than fabricating an
+unstable slope. Segment bands are fixed absolute thresholds, not population-adaptive quantiles
+(unlike `diagnose_backtest_segments.py`'s unrelated xPts-band quartiles), so a band's meaning is
+stable across cohorts and reruns; the gameweek-phase boundaries are a new, fixed diagnostic
+convention -- canonical season thirds GW1-13/14-26/27-38 -- documented in that module (not
+`docs/DATA_MODEL.md`'s short-form rate windows, which are a previous-season rate-history boundary
+for an unrelated purpose). "Stable"/"excludes zero" wording on any bootstrap CI is withheld below
+a minimum distinct-gameweek-cluster count regardless of what the CI itself shows, since a
+percentile bootstrap from very few clusters can exclude zero by chance. The gameweek-cluster
+bootstrap itself is computed from precomputed per-gameweek sufficient statistics rather than
+rescanning every row per resample -- a runtime optimisation only, reproducing
+`block_bootstrap_statistic`'s numbers to floating-point tolerance.
+
+Any "concentrated"/"larger" claim comparing two cohorts (a top band vs the primary cohort's
+overall bias; the xPts high band vs its same-window comparator) is licensed ONLY by
+`paired_contrast_bootstrap`'s own PAIRED gameweek-cluster contrast CI
+(`focus_bias - comparator_bias`, one shared cluster-label draw per replicate applied to both
+sides, never two independently-bootstrapped CIs subtracted) lying entirely above zero -- a single
+side's own CI excluding zero is necessary but not sufficient, since both sides can be individually
+significant and same-signed while their difference's own sampling uncertainty still crosses zero.
+`correction_recommendation` requires all four required contrasts (both top bands vs overall; both
+xPts-high-vs-same-window targets) to show this before suggesting high-end-only shrinkage is worth
+testing; any other combination reports mixed/inconclusive evidence target by target instead. It
+writes `docs/research/walk_forward_benchwarmers_2025_26_appearance_segments.json`, self-checking
+the aggregate backtest metrics before any segment work begins. This is measurement only: it does
+not prove which component causes total xPts error in a biased segment (the per-90 rate components
+are highly correlated with start_probability/expected_minutes in exactly the bands found most
+biased), has not compared a global calibration policy against a high-end-only policy out of
+sample, and no calibration, shrinkage, or formula change is applied to production.
+
 ## Decision layer: squad planner and transfer recommender
 
 The eventual user-facing feature sits downstream of calibrated player-fixture projections. Its
