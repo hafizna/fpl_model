@@ -1,0 +1,157 @@
+{
+  "$schema_note": "Causal WALK-FORWARD EXECUTION (not an independent confirmatory backtest) of appearance start_probability calibration policies (raw/global/high_end_shrinkage) chosen from an EXPLORATORY, SAME-SEASON (2025-26) policy specification -- see exploratory_comparison_note. Each policy's predicted_xpts is recomputed from a policy-specific AppearanceProjection (an OLS transform of start_probability plus a proportional rescale of its dependent fields, never a pure start_probability substitution) and re-scored through the UNCHANGED project_benchwarmers_*/weight_* component chain. Every policy's threshold/fit is derived ONLY from strictly-prior, deadline-safe gameweeks at each walk-forward step -- so no future OUTCOME ever enters an earlier fit -- but the DECISION to test these specific policies was informed by diagnose_appearance_segments.py's own 2025-26 findings, then evaluated on that SAME season again; this script's bootstrap CIs do not account for that selection uncertainty. Pairs with docs/research/walk_forward_benchwarmers_2025_26_appearance_segments.json (the read-only diagnostic that motivated testing these policies) and docs/research/walk_forward_benchwarmers_2025_26.json (raw policy's own self-check reference). Read-only measurement; no production formula changed.",
+  "candidate_player_fixture_rows": 28352,
+  "comparisons": {
+    "global_vs_raw": {
+      "comparator_policy": "raw",
+      "focus_policy": "global",
+      "mae_improvement": {
+        "ci_high": 0.03912254648581283,
+        "ci_low": 0.027772072142804156,
+        "cluster_unit": "gameweek",
+        "p_improvement_positive": 1.0,
+        "point_estimate": 0.033323143877511896,
+        "resamples": 10000,
+        "seed": 42
+      },
+      "paired_rows": 16496,
+      "rmse_improvement": {
+        "ci_high": 0.014208847872087914,
+        "ci_low": 0.007033786184382463,
+        "cluster_unit": "gameweek",
+        "p_improvement_positive": 1.0,
+        "point_estimate": 0.01060023712195024,
+        "resamples": 10000,
+        "seed": 42
+      },
+      "verdict": "improves"
+    },
+    "high_end_shrinkage_vs_global": {
+      "comparator_policy": "global",
+      "focus_policy": "high_end_shrinkage",
+      "mae_improvement": {
+        "ci_high": -0.006065221496383272,
+        "ci_low": -0.011016668917767041,
+        "cluster_unit": "gameweek",
+        "p_improvement_positive": 0.0,
+        "point_estimate": -0.008530174952327219,
+        "resamples": 10000,
+        "seed": 42
+      },
+      "paired_rows": 16496,
+      "rmse_improvement": {
+        "ci_high": 0.0003087402511471547,
+        "ci_low": -0.00420857788670761,
+        "cluster_unit": "gameweek",
+        "p_improvement_positive": 0.0459,
+        "point_estimate": -0.001965204392642139,
+        "resamples": 10000,
+        "seed": 42
+      },
+      "verdict": "mixed_or_inconclusive"
+    },
+    "high_end_shrinkage_vs_raw": {
+      "comparator_policy": "raw",
+      "focus_policy": "high_end_shrinkage",
+      "mae_improvement": {
+        "ci_high": 0.02924732597822844,
+        "ci_low": 0.02027867779210162,
+        "cluster_unit": "gameweek",
+        "p_improvement_positive": 1.0,
+        "point_estimate": 0.024792968925184677,
+        "resamples": 10000,
+        "seed": 42
+      },
+      "paired_rows": 16496,
+      "rmse_improvement": {
+        "ci_high": 0.012450149658775153,
+        "ci_low": 0.0048310812809512,
+        "cluster_unit": "gameweek",
+        "p_improvement_positive": 1.0,
+        "point_estimate": 0.0086350327293081,
+        "resamples": 10000,
+        "seed": 42
+      },
+      "verdict": "improves"
+    }
+  },
+  "eligible_fit_gameweeks": {
+    "global": 31,
+    "high_end_shrinkage": 31
+  },
+  "evaluated_gameweeks": 36,
+  "evaluation_from_gw": 3,
+  "evaluation_to_gw": 38,
+  "expected_minutes_out_of_scope_note": "A separate expected_minutes-target OLS calibration is out of scope for this policy backtest: tracing every weight_*/project_benchwarmers_* function in fpl_model.model, only AppearanceProjection.start_probability (and the fields dependent on it -- substitute_appearance_probability, sixty_minute_probability, appearance_xpts, sixty_minute_xpts) are ever read by the scoring chain -- fitting or applying an independent expected_minutes calibration could not change any policy's score, so this module never does that. This is distinct from rescale_appearance_projection RECOMPUTING expected_minutes from the already-calibrated start/substitute probabilities for internal consistency (calibrated_start_probability * mean_minutes_per_start + rescaled_substitute_probability * mean_minutes_per_substitute) -- that recomputation has no independently fitted parameters and still cannot move any score, since expected_minutes remains causally inert for scoring purposes either way. Both facts (no independent expected_minutes calibration; expected_minutes itself has no causal path to predicted_xpts) are notable findings in their own right, surfaced here explicitly, not a silent omission.",
+  "exploratory_comparison_note": "This verdict is better-supported WITHIN this exploratory, same-season 2025-26 comparison only -- the decision to test high_end_shrinkage at all was informed by diagnose_appearance_segments.py's own 2025-26 findings, then evaluated on that SAME season again, and this script's bootstrap CIs do not account for that policy-selection uncertainty. An independent season or a prospectively frozen 2026-27 evaluation is required before production adoption.",
+  "high_end_start_probability_threshold": 0.8,
+  "import_run_id": "player_history_ae118d1588eeaf84",
+  "limitations": [
+    "expected_minutes OLS calibration is out of scope: it has no causal path to predicted_xpts under the current formula (only start_probability and its dependent fields reach any scoring component) -- see expected_minutes_out_of_scope_note. expected_minutes IS still recomputed (not passed through unchanged) for internal projection consistency, but that recomputation has no independently fitted parameters and cannot move any score either.",
+    "Every tested policy is NOT a pure start_probability substitution: each applies an OLS transform to start_probability and proportionally rescales the dependent substitute/60-minute probabilities (and expected_minutes) -- the performance results evaluate that complete reconstruction rule, not calibrated start_probability in isolation. See validation.appearance_policy_backtest.rescale_appearance_projection.",
+    "This is CAUSAL WALK-FORWARD EXECUTION of an EXPLORATORY, SAME-SEASON policy specification, not an independent confirmatory backtest: the high_end_shrinkage threshold (0.8) and the start_probability OLS calibration fit at every gameweek are fixed constants / fit ONLY from strictly-prior, deadline-safe gameweeks -- so no future gameweek's OUTCOME ever enters an earlier fit -- but the DECISION to test high-end-only shrinkage as a candidate policy at all was made after inspecting diagnose_appearance_segments.py's own 2025-26 findings, then evaluated on that SAME 2025-26 season again. This script's bootstrap CIs quantify sampling uncertainty in the paired MAE/RMSE comparison ONLY -- they do NOT account for this policy/model-selection uncertainty. Any verdict is better-supported WITHIN this exploratory 2025-26 comparison, not independently confirmed; an independent season or a prospectively frozen 2026-27 evaluation (policy specified before that season's results are known) is required before production adoption.",
+    "raw's own aggregate metrics are checked against --reference, AND its individual rows are checked against the canonical materializer's own output field-by-field (raw_row_level_parity) -- the aggregate check alone cannot rule out two different row-level results sharing the same aggregate mean/sum-of-squares. Both checks run before any policy comparison is trusted; a mismatch in either means this script's duplicated walk-forward loop has diverged from the committed materializer, and nothing is written.",
+    "Paired bootstrap contrasts compare MAE/RMSE improvement (naive here meaning the OTHER policy in the pair, not the unrelated matched-naive comparator elsewhere in this codebase) using the gameweek-cluster scheme validation.paired_uncertainty already uses for the model-vs-matched-naive comparison -- valid because all three policies score IDENTICAL candidate rows by construction (verified before any comparison is computed).",
+    "This is one season (2025-26) only; no cross-season or prospectively frozen validation exists yet -- see the exploratory-comparison limitation above.",
+    "A policy's out-of-sample MAE/RMSE advantage in this backtest is evidence for, but does not by itself constitute, a decision to change baseline_pipeline.py's production formula -- adopting any policy in production remains a separate, explicit step this script does not take, and should not be taken on this exploratory run's evidence alone."
+  ],
+  "methodology_notes": [
+    "All three policies (raw/global/high_end_shrinkage) are materialized from ONE shared walk-forward pass over the same candidate rows -- policy-independent upstream queries (team strength, player rates, appearance history, league-average bonus rates) are computed once per gameweek; only the AppearanceProjection substitution and the downstream weight_*/compose_baseline_projection calls are repeated per policy.",
+    "raw uses the raw, unmodified AppearanceProjection -- confirmed to have EXACT FIELD-LEVEL PARITY (every observation and gap field, plus every count) with validation.benchwarmers_backtest's own committed materializer by BOTH this run's aggregate self_check against --reference AND its row-level raw_row_level_parity check -- the aggregate check alone cannot rule out two different row-level results sharing the same aggregate mean/sum-of-squares.",
+    "global applies the causal walk-forward start_probability calibration (fit_for_gameweek, refit every step on strictly-prior, DEADLINE-SAFE gameweeks only -- row.gameweek < target AND row.outcome_available_at <= target_deadline, so a postponed fixture's outcome cannot enter a fit before it was actually known) to every row; high_end_shrinkage applies that SAME fit only to rows whose raw start_probability >= high_end_start_probability_threshold, else raw.",
+    "A gameweek with no eligible prior-gameweeks-only fit (see eligible_fit_gameweeks) scores global/high_end_shrinkage identically to raw for that gameweek's rows -- never a fabricated calibration.",
+    "Comparisons reuse validation.paired_uncertainty.build_paired_rows/cluster_bootstrap -- the SAME gameweek-cluster percentile bootstrap the model-vs-matched-naive comparator already uses -- valid here because all three policies score IDENTICAL candidate rows by construction (verified before any comparison is computed).",
+    "verdict is direction-aware (mirrors paired_uncertainty.interpret_paired_verdict's own three-state classification): 'improves' requires BOTH MAE and RMSE improvement CIs entirely above zero, 'worsens' requires both entirely below zero, anything else is 'mixed_or_inconclusive'. This verdict describes THIS exploratory comparison only -- see exploratory_comparison_note; it is not an independently confirmed result."
+  ],
+  "minimum_calibration_gameweeks": 5,
+  "policy_metrics": {
+    "global": {
+      "mean_absolute_error": 1.6792802760239938,
+      "mean_actual_points": 1.8915494665373425,
+      "mean_error": 0.007407859231043667,
+      "mean_predicted_xpts": 1.898957325768386,
+      "observations": 16496,
+      "root_mean_squared_error": 2.537196912631126
+    },
+    "high_end_shrinkage": {
+      "mean_absolute_error": 1.687810450976321,
+      "mean_actual_points": 1.8915494665373425,
+      "mean_error": 0.0395783070976666,
+      "mean_predicted_xpts": 1.931127773635009,
+      "observations": 16496,
+      "root_mean_squared_error": 2.539162117023768
+    },
+    "raw": {
+      "mean_absolute_error": 1.7126034199015057,
+      "mean_actual_points": 1.8915494665373425,
+      "mean_error": 0.11756044026669629,
+      "mean_predicted_xpts": 2.0091099068040386,
+      "observations": 16496,
+      "root_mean_squared_error": 2.5477971497530763
+    }
+  },
+  "raw_row_level_parity": {
+    "canonical_rows": 16496,
+    "matches": true,
+    "note": "Row-by-row comparison of this run's raw policy against materialize_benchwarmers_walk_forward_backtest's own canonical output over the same inputs -- EVERY observation field (season, actual_points, predicted_xpts, deadline, fixture_kickoff, feature_cutoff, outcome_available_at), EVERY gap field (team, position, flags -- not flags alone), candidate_player_fixture_rows, and evaluated_gameweeks. Duplicate observation/gap keys on either side are detected explicitly before any dict-keyed comparison (a dict construction would otherwise silently collapse a duplicate key, hiding a real bug behind an apparent match). This is the row-level evidence the aggregate self_check above cannot provide by itself (aggregate metrics can match even when individual rows disagree). Only matches=true licenses describing raw as having EXACT FIELD-LEVEL PARITY with the canonical materializer's dataclass output (not 'byte-identical' -- that term is reserved for actual serialized bytes/files, e.g. this run's own JSON output on a determinism rerun); this script raises before writing anything if it were false, so a written result always has matches=true.",
+    "policy_backtest_rows": 16496
+  },
+  "recommendation": "global improves over raw (both MAE and RMSE improvement CIs above zero, 16496 paired rows). high_end_shrinkage_vs_raw is improves but high_end_shrinkage_vs_global is mixed_or_inconclusive (its paired verdict is 'mixed_or_inconclusive' under the two-metrics-must-agree rule, but at least one metric's own CI lies entirely below zero -- a one-sided signal that shrinkage is not simply as-good-as global, even though it is not a two-sided 'worsens' verdict) -- global calibration, not high-end-only shrinkage, is the better-supported result within this exploratory comparison. This verdict is better-supported WITHIN this exploratory, same-season 2025-26 comparison only -- the decision to test high_end_shrinkage at all was informed by diagnose_appearance_segments.py's own 2025-26 findings, then evaluated on that SAME season again, and this script's bootstrap CIs do not account for that policy-selection uncertainty. An independent season or a prospectively frozen 2026-27 evaluation is required before production adoption.",
+  "reproduce": ".venv\\Scripts\\python.exe scripts/backtest_appearance_calibration_policies.py --season 2025-26",
+  "scored_player_fixture_rows": 16496,
+  "season": "2025-26",
+  "self_check": {
+    "checked_fields": [
+      "import_run_id",
+      "evaluation_from_gw",
+      "evaluation_to_gw",
+      "metrics.observations",
+      "metrics.mean_absolute_error",
+      "metrics.root_mean_squared_error",
+      "metrics.mean_error"
+    ],
+    "float_tolerance": 1e-09,
+    "reference_path": "docs\\research\\walk_forward_benchwarmers_2025_26.json",
+    "status": "passed"
+  }
+}

@@ -464,6 +464,72 @@ claim is licensed only by this paired contrast, never by a single side's own CI 
 `scripts/diagnose_appearance_segments.py` is the sole consumer, reusing `verify_self_check` before
 any segment work begins.
 
+`AppearancePolicyCalibrationRow`, `AppearancePolicyBacktestResult`, `AppearancePolicyBacktestGap`,
+`AppearancePolicyBacktestBundle`, and `RawRowLevelParityResult`
+(`src/fpl_model/validation/appearance_policy_backtest.py`) are further in-memory-only records
+supporting a CAUSAL (not read-only) backtest: three `start_probability` calibration policies --
+`raw` (unmodified control), `global` (the causal walk-forward OLS fit applied to every row),
+`high_end_shrinkage` (that same fit applied only to rows with raw `start_probability >= 0.8`,
+`validation/appearance_segments.py`'s own `[.8,1]` band edge) -- are materialized from ONE shared
+walk-forward pass and each produce their own `BacktestObservation` tuple with a POLICY-SPECIFIC
+`predicted_xpts`, recomputed by substituting a rescaled `AppearanceProjection`
+(`rescale_appearance_projection`) into the UNCHANGED
+`project_benchwarmers_*`/`weight_*`/`compose_baseline_projection` chain -- never a new scoring
+formula. `rescale_appearance_projection` scales every DEPENDENT field (not "start-conditional":
+`substitute_appearance_probability` is itself dependent on `start_probability` despite describing
+the non-start branch) -- `substitute_appearance_probability`, `sixty_minute_probability` -- by
+`calibrated_start_probability / raw_start_probability`, clamped to each field's own natural
+ceiling, and recomputes `appearance_xpts`/`sixty_minute_xpts`/`total_xpts`/`expected_minutes` with
+the same arithmetic `model.appearance.project_appearance`/`blend_conditional_appearance` already
+use (`expected_minutes = calibrated_start_probability * mean_minutes_per_start +
+rescaled_substitute_probability * mean_minutes_per_substitute`, using the per-player
+`mean_minutes_per_start`/`mean_minutes_per_substitute` `AppearanceHistoryAsOf` already carries).
+This makes the returned projection genuinely self-consistent -- `expected_minutes` is no longer
+passed through unchanged while the probabilities it depends on change. A SEPARATE
+`expected_minutes`-target OLS calibration remains out of scope: tracing every
+`weight_*`/`project_benchwarmers_*` function confirms `expected_minutes` has no causal path to any
+scoring component, so neither an independent calibration nor this recomputation can move any score
+(see `EXPECTED_MINUTES_OUT_OF_SCOPE_NOTE`). None of the three policies is a pure `start_probability`
+substitution -- each is the complete OLS-transform-plus-proportional-rescale reconstruction rule,
+and the backtest's performance results evaluate that whole rule.
+
+Each gameweek's calibration fit (`fit_for_gameweek`) is refit from DEADLINE-SAFE strictly-prior
+rows only: a row is eligible only when BOTH `row.gameweek < target` AND
+`row.outcome_available_at <= target_deadline` (`outcome_available_at` = `kickoff_time +
+outcome_delay`, populated on `AppearancePolicyCalibrationRow`) -- `gameweek < target` alone is not
+sufficient, since a postponed fixture can carry an earlier gameweek label while its outcome becomes
+known only after a later gameweek's deadline. The distinct-gameweek count against
+`minimum_calibration_gameweeks` is taken AFTER this availability filter, not before. A gameweek
+without an eligible fit scores `global`/`high_end_shrinkage` identically to `raw` for that
+gameweek's rows, never a fabricated calibration. This module duplicates the SHAPE of
+`benchwarmers_backtest.materialize_benchwarmers_walk_forward_backtest`'s walk-forward loop but
+computes each gameweek's policy-independent upstream queries (team strength, player rates,
+appearance history, league-average bonus rates) ONCE, not once per policy.
+
+`verify_raw_row_level_parity` compares the `raw` policy's own observations against
+`materialize_benchwarmers_walk_forward_backtest`'s canonical output FIELD BY FIELD, by exact
+`(player_id, fixture_id, gameweek)` key -- EVERY `BacktestObservation` field (including `season`,
+compared like any other field rather than exempted as caller-supplied) and EVERY
+`BacktestGapSummary`/`AppearancePolicyBacktestGap` field (`team`/`position`, not `flags` alone),
+plus `candidate_player_fixture_rows` and `evaluated_gameweeks`. Duplicate observation/gap keys on
+either side are detected explicitly BEFORE either side is converted to a dict -- a dict
+comprehension over a duplicate-containing sequence silently keeps only the last row for that key,
+which would hide a real duplicate-row materializer bug behind an apparent match. This is the
+evidence that actually establishes `raw` has EXACT FIELD-LEVEL PARITY with the canonical
+materializer's dataclass output ("byte-identical" is reserved for actual serialized bytes/files,
+e.g. this script's own JSON output across a determinism rerun, not for a dataclass-field
+comparison); the aggregate self-check alone cannot rule out two different row-level results
+sharing the same aggregate mean/sum-of-squares. `scripts/backtest_appearance_calibration_policies.py`
+is the sole consumer: it runs this row-level check (raising before writing anything if it fails)
+AND `verify_self_check` against `raw`'s own aggregate metrics, and reuses
+`paired_uncertainty.build_paired_rows`/`cluster_bootstrap` for the three pairwise policy
+comparisons -- valid because all three policies always score identical candidate rows by
+construction. This is causal walk-forward EXECUTION of an EXPLORATORY, SAME-SEASON (2025-26)
+policy specification -- the decision to test `high_end_shrinkage` was informed by
+`diagnose_appearance_segments.py`'s own 2025-26 findings, then evaluated on that same season again
+-- not an independent confirmatory backtest; its bootstrap CIs do not account for that
+policy-selection uncertainty.
+
 ### Historical materialisation smoke test
 
 Vaastav's 2025/26 `merged_gw.csv` supplies complete realised player-fixture outcomes but not

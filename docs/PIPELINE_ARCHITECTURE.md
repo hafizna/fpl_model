@@ -443,6 +443,84 @@ are highly correlated with start_probability/expected_minutes in exactly the ban
 biased), has not compared a global calibration policy against a high-end-only policy out of
 sample, and no calibration, shrinkage, or formula change is applied to production.
 
+### Causal appearance calibration policy backtest
+
+The segment diagnostic above is read-only: it never recomputes `predicted_xpts` under any
+calibration, so it cannot say whether applying one would actually help out of sample. A further
+script materializes and scores three POLICIES head-to-head from one shared walk-forward pass:
+
+```bash
+python scripts/backtest_appearance_calibration_policies.py --season 2025-26
+```
+
+- `raw`: the existing, unmodified model (the control) -- its own aggregate metrics are checked
+  against `--reference`, AND its individual rows are compared field-by-field (EVERY
+  `BacktestObservation` field including `season`; every gap's `team`/`position`/`flags`, not flags
+  alone; duplicate keys on either side detected explicitly before any dict-keyed comparison) against
+  `benchwarmers_backtest.py`'s own canonical materializer output (`raw_row_level_parity`) before any
+  comparison is trusted. The aggregate self-check alone cannot rule out two different row-level
+  results sharing the same aggregate mean/sum-of-squares; the row-level check is the evidence that
+  actually establishes `validation/appearance_policy_backtest.py`'s duplicated walk-forward loop has
+  exact field-level parity with the committed materializer.
+- `global`: the causal walk-forward `start_probability` OLS calibration (refit every gameweek on
+  strictly-prior, DEADLINE-SAFE gameweeks only -- see below) applied to every row.
+- `high_end_shrinkage`: that SAME per-gameweek fit applied only to rows whose RAW
+  `start_probability` is at or above 0.8 -- the fixed `[.8,1]` band edge
+  `validation/appearance_segments.py` already uses. Every other row keeps its raw prediction.
+
+**What "causal" does and does not mean here.** Every fit is deadline-safe in the same sense the
+primary xPts backtest already is: a calibration row is eligible for gameweek `G`'s fit only when
+BOTH `row.gameweek < G` AND `row.outcome_available_at <= G`'s deadline (`kickoff_time +
+outcome_delay`) -- `row.gameweek < G` alone is not sufficient, since a postponed fixture can carry
+an earlier gameweek label while its outcome becomes known only after a later gameweek's deadline.
+This closes the same hazard `benchwarmers_backtest.py`'s own deadline-safety fix already closed for
+the primary backtest, applied a second time to the calibration rows specifically. That guarantees no
+future OUTCOME ever enters an earlier fit -- but it does NOT mean the segment diagnostic's findings
+"cannot leak" into this evaluation in the broader sense: the DECISION to test `high_end_shrinkage` as
+a candidate policy at all was made after inspecting `diagnose_appearance_segments.py`'s own 2025-26
+results, then evaluated on that SAME season again. This is causal walk-forward EXECUTION of an
+EXPLORATORY, SAME-SEASON policy specification, not an independent confirmatory backtest -- the
+script's own bootstrap CIs quantify sampling uncertainty in the paired comparison only, not this
+policy-selection uncertainty. Any verdict is better-supported WITHIN this exploratory comparison; an
+independent season or a prospectively frozen 2026-27 evaluation is required before production
+adoption.
+
+A separate `expected_minutes` OLS calibration is out of scope: tracing every
+`weight_*`/`project_benchwarmers_*` function, only `start_probability` (and the fields dependent on
+it) is ever read by the scoring chain, so fitting/applying an independent `expected_minutes`
+calibration could not move any policy's score -- a notable finding surfaced explicitly, not a silent
+omission. None of the three tested policies is a pure `start_probability` substitution, though:
+each applies an OLS transform to `start_probability` and then proportionally rescales every DEPENDENT
+field (`substitute_appearance_probability`, `sixty_minute_probability`, `appearance_xpts`,
+`sixty_minute_xpts`, `total_xpts`, and `expected_minutes`) so the returned projection stays
+genuinely self-consistent; `rescale_appearance_projection` scales every dependent field by
+`calibrated_start_probability / raw_start_probability` (clamped to each field's own natural ceiling)
+and recomputes `expected_minutes` itself from the calibrated/rescaled start and substitute
+probabilities (`calibrated_start_probability * mean_minutes_per_start + rescaled_substitute_probability
+* mean_minutes_per_substitute`, the same weighted-sum formula
+`model.appearance.blend_conditional_appearance` already uses) -- not a new scoring rule, and this
+recomputation still cannot move any score, since `expected_minutes` remains causally inert. The
+performance results this backtest produces evaluate that COMPLETE reconstruction rule, not calibrated
+`start_probability` in isolation. The rescaled projection is then threaded through the UNCHANGED
+`weight_*`/`compose_baseline_projection` chain -- `baseline_pipeline.py` and every
+`project_benchwarmers_*`/`weight_*` component formula are never modified.
+
+Policy comparisons (`global_vs_raw`, `high_end_shrinkage_vs_raw`, `high_end_shrinkage_vs_global`)
+reuse `validation/paired_uncertainty.py`'s `build_paired_rows`/`cluster_bootstrap` -- the SAME
+gameweek-cluster percentile bootstrap the model-vs-matched-naive comparator already uses, valid
+here because all three policies score identical candidate rows by construction (verified before
+any comparison is computed). A verdict of `"improves"` requires both MAE and RMSE improvement CIs
+entirely above zero (mirroring `interpret_paired_verdict`'s own direction-aware three-state
+classification); the script's own `recommendation` additionally checks for a one-sided reliable
+loss on either metric even when the two-metric verdict is `"mixed_or_inconclusive"`, so a
+high-end-only policy that is reliably worse than global on MAE alone is not silently treated as a
+tie. It writes
+`docs/research/walk_forward_benchwarmers_2025_26_appearance_policy_backtest.json`. This is
+measurement only, and an EXPLORATORY same-season comparison: an out-of-sample MAE/RMSE advantage
+here is evidence for, but does not by itself constitute, a decision to change
+`baseline_pipeline.py`'s production formula -- an independent season or prospectively frozen
+evaluation is required first.
+
 ## Decision layer: squad planner and transfer recommender
 
 The eventual user-facing feature sits downstream of calibrated player-fixture projections. Its

@@ -154,6 +154,17 @@ sensitivity cohorts -- measurement only, not applied to any production projectio
 python scripts/diagnose_appearance_segments.py --season 2025-26
 ```
 
+Causal walk-forward execution of three appearance calibration policies (raw / global /
+high-end-only shrinkage above start_probability 0.8), each policy's predicted_xpts recomputed and
+re-scored -- fit/threshold derived only from strictly-prior, deadline-safe gameweeks at each step.
+This is an EXPLORATORY, same-season (2025-26) comparison, not an independent confirmatory
+backtest: the decision to test high-end-only shrinkage was itself informed by the segment
+diagnostic's own 2025-26 findings (see `docs/PIPELINE_ARCHITECTURE.md`):
+
+```bash
+python scripts/backtest_appearance_calibration_policies.py --season 2025-26
+```
+
 Audit whether historical Vaastav snapshots existed before each inferred deadline:
 
 ```bash
@@ -268,7 +279,13 @@ See `THIRD_PARTY_NOTICES.md`.
 - [ ] Apply xPts calibration to production projections
 - [x] Walk-forward appearance-model (start-probability/expected-minutes) calibration assessment
       (measurement only; see below)
-- [ ] Appearance-model shrinkage in production, if the assessment above supports it
+- [x] Appearance-model bias segment diagnostic (where the miscalibration concentrates)
+- [x] Causal, exploratory same-season head-to-head appearance calibration policy backtest (raw /
+      global / high-end shrinkage; measurement only; see below)
+- [ ] Independent-season or prospectively frozen 2026-27 confirmatory evaluation of the
+      better-supported policy from the exploratory backtest above
+- [ ] Apply appearance-model calibration to production projections, if the confirmatory
+      evaluation above supports it
 - [ ] Per-player/per-fixture xPts uncertainty
 - [ ] Ablation tests for each contextual layer
 - [ ] Squad/transfer optimizer
