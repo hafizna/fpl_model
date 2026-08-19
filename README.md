@@ -136,6 +136,15 @@ applied to any production projection (see `docs/PIPELINE_ARCHITECTURE.md`):
 python scripts/assess_backtest_calibration.py --season 2025-26
 ```
 
+Walk-forward calibration of the appearance model's own predictions (`start_probability` against
+realised starts, `expected_minutes` against realised minutes), isolating whether xPts
+overprediction traces back to appearance or to the per-90 rate components -- measurement only, not
+applied to any production projection (see `docs/PIPELINE_ARCHITECTURE.md`):
+
+```bash
+python scripts/assess_appearance_calibration.py --season 2025-26
+```
+
 Audit whether historical Vaastav snapshots existed before each inferred deadline:
 
 ```bash
@@ -246,9 +255,11 @@ See `THIRD_PARTY_NOTICES.md`.
 - [x] Genuine 11-component walk-forward backtest (2025-26, in-season)
 - [x] Segment diagnostics (position/gameweek/minutes/start-probability/xPts bands)
 - [x] Paired gameweek-cluster bootstrap uncertainty of the model-vs-naive MAE/RMSE advantage
-- [ ] Start-probability calibration
 - [x] Walk-forward xPts calibration assessment (measurement only; see below)
 - [ ] Apply xPts calibration to production projections
+- [x] Walk-forward appearance-model (start-probability/expected-minutes) calibration assessment
+      (measurement only; see below)
+- [ ] Appearance-model shrinkage in production, if the assessment above supports it
 - [ ] Per-player/per-fixture xPts uncertainty
 - [ ] Ablation tests for each contextual layer
 - [ ] Squad/transfer optimizer

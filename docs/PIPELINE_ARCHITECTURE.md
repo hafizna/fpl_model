@@ -359,6 +359,32 @@ shared `block_bootstrap_statistic` primitive. It writes
 backtest metrics before any calibration work begins. This is measurement only: no calibration is
 applied to any production projection or scoring formula.
 
+### Walk-forward appearance-model calibration
+
+The xPts calibration's high-predicted-xPts band is materially overconfident, but
+`start_probability`/`expected_minutes` and the per-90 rate components built on top of them
+(goals/assists/bonus/etc.) are highly correlated there, so that finding alone cannot say which
+side of the model is responsible. A separate read-only measurement isolates the appearance model
+itself, using the identical walk-forward/no-lookahead methodology:
+
+```bash
+python scripts/assess_appearance_calibration.py --season 2025-26
+```
+
+`validation/appearance_calibration.py` fits two independent causal OLS calibrations at each
+eligible evaluation gameweek: `actual_started ~ start_probability` and `actual_minutes ~
+expected_minutes`, both using only strictly-prior gameweeks, applied only to that gameweek's own
+unseen evaluation rows. Realised `actual_started`/`actual_minutes` are read directly from that
+gameweek's own `merged_gw.csv` row, the same source `actual_points` is read from. As with the xPts
+calibration, a pooled diagnostic slope is reported separately from the causal calibrated
+prediction, and is never used to produce one (that would be in-sample). Because
+`start_probability` is a bounded 0/1 target, MAE and MSE can disagree in sign -- OLS minimises
+squared error, so a slope below 1.0 can reduce MSE while increasing MAE -- so both are reported,
+with MSE treated as the primary "is this a real miscalibration" signal for that target. It writes
+`docs/research/walk_forward_benchwarmers_2025_26_appearance_calibration.json`, self-checking the
+aggregate backtest metrics before any calibration work begins. This is measurement only: no
+calibration is applied to any production projection or scoring formula.
+
 ## Decision layer: squad planner and transfer recommender
 
 The eventual user-facing feature sits downstream of calibrated player-fixture projections. Its

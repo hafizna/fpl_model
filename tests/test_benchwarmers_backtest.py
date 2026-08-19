@@ -223,6 +223,84 @@ def test_backtest_diagnostics_match_observations_one_to_one(tmp_path):
         assert multiplier == pytest.approx(1.05) or multiplier == pytest.approx(0.95)
 
 
+def test_backtest_appearance_observations_match_observations_one_to_one(tmp_path):
+    result, database_path, players_frame, gameweeks_frame = _import(tmp_path)
+
+    with duckdb.connect(str(database_path)) as connection:
+        backtest = materialize_benchwarmers_walk_forward_backtest(
+            season="2025-26",
+            import_run_id=result.import_run_id,
+            connection=connection,
+            gameweeks_frame=gameweeks_frame,
+            players_raw_frame=players_frame,
+            evaluation_from_gw=3,
+            evaluation_to_gw=4,
+        )
+
+    assert len(backtest.appearance_observations) == len(backtest.observations)
+    observation_keys = {
+        (o.player_id, o.fixture_id, o.gameweek) for o in backtest.observations
+    }
+    appearance_keys = {
+        (a.player_code, a.fixture_id, a.gameweek) for a in backtest.appearance_observations
+    }
+    assert observation_keys == appearance_keys
+
+    for appearance_observation in backtest.appearance_observations:
+        assert 0.0 <= appearance_observation.predicted_start_probability <= 1.0
+        assert appearance_observation.predicted_expected_minutes >= 0.0
+        # Every seeded row plays the full 90 minutes and starts (see _gameweeks).
+        assert appearance_observation.actual_minutes == 90.0
+        assert appearance_observation.actual_started is True
+        expected_position = next(
+            position
+            for code, _, position, _ in PLAYERS
+            if code == appearance_observation.player_code
+        )
+        assert appearance_observation.position == expected_position
+
+
+def test_backtest_appearance_observation_reflects_this_gameweeks_own_realised_minutes_and_starts(
+    tmp_path,
+):
+    # Give player 5001 a substitute cameo (started=0, partial minutes) only in
+    # GW4, its own realised outcome for that gameweek -- must be read from
+    # GW4's own row, not defaulted, not derived from any other gameweek.
+    gameweeks = _gameweeks()
+    cameo_mask = (gameweeks["GW"] == 4) & (gameweeks["code"] == 5001)
+    assert cameo_mask.sum() == 1
+    gameweeks.loc[cameo_mask, "minutes"] = 23
+    gameweeks.loc[cameo_mask, "starts"] = 0
+    result, database_path, players_frame, gameweeks_frame = _import(
+        tmp_path, gameweeks=gameweeks
+    )
+
+    with duckdb.connect(str(database_path)) as connection:
+        backtest = materialize_benchwarmers_walk_forward_backtest(
+            season="2025-26",
+            import_run_id=result.import_run_id,
+            connection=connection,
+            gameweeks_frame=gameweeks_frame,
+            players_raw_frame=players_frame,
+            evaluation_from_gw=4,
+            evaluation_to_gw=4,
+        )
+
+    cameo_observation = next(
+        a for a in backtest.appearance_observations if a.player_code == 5001
+    )
+    assert cameo_observation.actual_minutes == 23.0
+    assert cameo_observation.actual_started is False
+
+    # Every other scored player in GW4 is unaffected: this is a per-row
+    # realised outcome, not a gameweek-wide default.
+    other_observations = [
+        a for a in backtest.appearance_observations if a.player_code != 5001
+    ]
+    assert other_observations  # sanity: other players were still scored
+    assert all(a.actual_minutes == 90.0 and a.actual_started is True for a in other_observations)
+
+
 def test_backtest_flags_zero_minute_history_as_a_gap(tmp_path):
     gameweeks = _gameweeks(broken_player_code=5001)
     result, database_path, players_frame, _ = _import(tmp_path, gameweeks=gameweeks)
@@ -243,6 +321,45 @@ def test_backtest_flags_zero_minute_history_as_a_gap(tmp_path):
     assert "NO_USABLE_PLAYER_RATE_HISTORY" in broken_gaps[0].flags
     assert broken_gaps[0].position == "DEF"
     assert not any(o.player_id == 5001 for o in backtest.observations)
+
+
+def test_backtest_appearance_observation_present_despite_xpts_rate_gap(tmp_path):
+    # Player 5001's entire history is zero-minute rows: has_usable_rate_history
+    # requires season_minutes > 0 (fails, so no xPts observation), but
+    # appearance_as_of's build_minutes_scenarios accepts zero-minute rows as
+    # valid scenarios (succeeds, so an AppearanceObservation IS produced).
+    # AppearanceObservation must not be gated on unrelated xPts requirements
+    # (player rates, team strength, team IDs, league-average bonus rates).
+    gameweeks = _gameweeks(broken_player_code=5001)
+    result, database_path, players_frame, _ = _import(tmp_path, gameweeks=gameweeks)
+
+    with duckdb.connect(str(database_path)) as connection:
+        backtest = materialize_benchwarmers_walk_forward_backtest(
+            season="2025-26",
+            import_run_id=result.import_run_id,
+            connection=connection,
+            gameweeks_frame=gameweeks,
+            players_raw_frame=players_frame,
+            evaluation_from_gw=3,
+            evaluation_to_gw=3,
+        )
+
+    # Still excluded from xPts scoring (the pre-existing behaviour).
+    broken_gaps = [gap for gap in backtest.gaps if gap.player_code == 5001]
+    assert len(broken_gaps) == 1
+    assert "NO_USABLE_PLAYER_RATE_HISTORY" in broken_gaps[0].flags
+    assert "MISSING_APPEARANCE_HISTORY" not in broken_gaps[0].flags
+    assert not any(o.player_id == 5001 for o in backtest.observations)
+
+    # But an AppearanceObservation IS produced -- the appearance-calibration
+    # cohort is not conditioned on xPts scoring success.
+    broken_appearance = [
+        a for a in backtest.appearance_observations if a.player_code == 5001
+    ]
+    assert len(broken_appearance) == 1
+    assert broken_appearance[0].gameweek == 3
+    assert broken_appearance[0].actual_started is False
+    assert broken_appearance[0].actual_minutes == 0.0
 
 
 def test_backtest_excludes_double_gameweek_players(tmp_path):

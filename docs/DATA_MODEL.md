@@ -421,6 +421,19 @@ bootstrap `paired_uncertainty.py` exposes alongside its existing `cluster_bootst
 by both modules; `scripts/assess_backtest_calibration.py` is the sole consumer of the calibration
 records, reusing `verify_self_check` before any calibration work begins.
 
+`AppearanceObservation` (`src/fpl_model/validation/benchwarmers_backtest.py`) is a further
+in-memory-only record, built alongside (never instead of) `BacktestObservation`/
+`ScoredObservationDiagnostics` in the same scoring loop: one per scored player-fixture, carrying
+`predicted_start_probability`/`predicted_expected_minutes` (already-causal appearance-model
+outputs) alongside that gameweek's own realised `actual_started`/`actual_minutes`, read directly
+from the same `merged_gw.csv` row `actual_points` is read from.
+`src/fpl_model/validation/appearance_calibration.py`'s `OlsFit`, `AppearanceCalibrationRow`, and
+`GameweekAppearanceCalibrationRecord` mirror `walk_forward_calibration.py`'s shapes for these two
+appearance targets; the closed-form OLS math itself is duplicated (not imported) between the two
+modules, matching this codebase's per-module convention of small local duplication over
+cross-module coupling for validation code. `scripts/assess_appearance_calibration.py` is the sole
+consumer.
+
 ### Historical materialisation smoke test
 
 Vaastav's 2025/26 `merged_gw.csv` supplies complete realised player-fixture outcomes but not

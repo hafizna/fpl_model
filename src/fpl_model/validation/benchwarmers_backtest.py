@@ -125,12 +125,55 @@ class ScoredObservationDiagnostics:
 
 
 @dataclass(frozen=True, slots=True)
+class AppearanceObservation:
+    """One player-fixture's causal appearance prediction vs its realised outcome.
+
+    Built alongside (never instead of) ``BacktestObservation``/
+    ``ScoredObservationDiagnostics`` from values the scoring loop already
+    computes (``start_probability``, ``expected_minutes``) plus two new
+    realised fields read directly from ``gameweeks_frame`` (``minutes``,
+    ``starts``) -- no new appearance/rate/team-strength queries, no change to
+    ``validation/backtest.py``'s shared, minimal observation contract. Exists
+    purely to let a read-only calibration script measure whether the
+    appearance model's own predictions (as opposed to the per-90 rate
+    components built on top of them) are themselves well calibrated.
+
+    ``predicted_start_probability``/``predicted_expected_minutes`` are
+    themselves already causal (``appearance_as_of``'s own deadline gate);
+    ``actual_started``/``actual_minutes`` are this row's own realised
+    outcome, read from the same gameweek's ``merged_gw.csv`` row
+    ``actual_points`` is already read from.
+    """
+
+    player_code: int
+    fixture_id: int
+    gameweek: int
+    position: str
+    predicted_start_probability: float
+    predicted_expected_minutes: float
+    actual_started: bool
+    actual_minutes: float
+
+
+@dataclass(frozen=True, slots=True)
 class BenchwarmersBacktestResult:
     observations: tuple[BacktestObservation, ...]
     diagnostics: tuple[ScoredObservationDiagnostics, ...]
+    appearance_observations: tuple[AppearanceObservation, ...]
     gaps: tuple[BacktestGapSummary, ...]
     evaluated_gameweeks: tuple[int, ...]
     candidate_player_fixture_rows: int
+    # Coverage counters for appearance_observations, parallel to (but
+    # independent of) candidate_player_fixture_rows/scored_player_fixture_rows
+    # -- appearance_observations is gated only on non-DGW + a causal
+    # appearance prediction, never on the xPts-only requirements
+    # (player rates/team strength/team IDs/league-average bonus rates) that
+    # gate observations/diagnostics. See the loop body for the exact gate.
+    # len(appearance_observations) is the appearance-eligible row count;
+    # candidate_player_fixture_rows == dgw_excluded_appearance_rows +
+    # missing_appearance_rows + len(appearance_observations).
+    dgw_excluded_appearance_rows: int
+    missing_appearance_rows: int
     scored_player_fixture_rows: int
 
 
@@ -146,6 +189,8 @@ def _fixture_row_columns(gameweeks_frame: pd.DataFrame) -> None:
         "was_home",
         "opponent_team",
         "total_points",
+        "minutes",
+        "starts",
     }
     missing = required - set(gameweeks_frame.columns)
     if missing:
@@ -213,8 +258,11 @@ def materialize_benchwarmers_walk_forward_backtest(
 
     observations: list[BacktestObservation] = []
     diagnostics: list[ScoredObservationDiagnostics] = []
+    appearance_observations: list[AppearanceObservation] = []
     gaps: list[BacktestGapSummary] = []
     candidate_rows = 0
+    dgw_excluded_appearance_rows = 0
+    missing_appearance_rows = 0
     evaluated: list[int] = []
 
     for gameweek in range(evaluation_from_gw, evaluation_to_gw + 1):
@@ -274,6 +322,7 @@ def materialize_benchwarmers_walk_forward_backtest(
 
             if player_code in double_gameweek_players:
                 flags.add(DOUBLE_GAMEWEEK_FIXTURE)
+                dgw_excluded_appearance_rows += 1
                 gaps.append(
                     BacktestGapSummary(
                         gameweek, fixture_id, player_code, team, position, tuple(sorted(flags))
@@ -301,8 +350,21 @@ def materialize_benchwarmers_walk_forward_backtest(
 
             own_team_id = team_name_to_id.get(team)
 
+            # Every applicable flag is collected here -- unchanged from the
+            # original combined gate -- so BacktestGapSummary's flags/counts
+            # stay exactly as before (a row missing BOTH appearance history
+            # and usable rate history still reports both flags on one gap
+            # record). AppearanceObservation is emitted separately, below,
+            # gated ONLY on appearance_entry -- never on the xPts-only flags
+            # collected here (player rates, team strength, team IDs,
+            # league-average bonus rates). Gating AppearanceObservation on
+            # those unrelated xPts requirements would condition
+            # appearance-model calibration on xPts scoring success, biasing
+            # the calibration sample toward players/fixtures with complete
+            # xPts inputs.
             if appearance_entry is None:
                 flags.add(MISSING_APPEARANCE_HISTORY)
+                missing_appearance_rows += 1
             if rate_entry is None or not has_usable_rate_history(rate_entry):
                 flags.add(NO_USABLE_PLAYER_RATE_HISTORY)
             if own_strength is None or opponent_strength is None:
@@ -311,6 +373,20 @@ def materialize_benchwarmers_walk_forward_backtest(
                 flags.add(MISSING_TEAM_ID)
             if avg_bps is None:
                 flags.add(NO_LEAGUE_AVERAGE_BONUS_RATES)
+
+            if appearance_entry is not None:
+                appearance_observations.append(
+                    AppearanceObservation(
+                        player_code=player_code,
+                        fixture_id=fixture_id,
+                        gameweek=gameweek,
+                        position=position,
+                        predicted_start_probability=appearance_entry.appearance.start_probability,
+                        predicted_expected_minutes=appearance_entry.appearance.expected_minutes,
+                        actual_started=bool(row.starts),
+                        actual_minutes=float(row.minutes),
+                    )
+                )
 
             if flags:
                 gaps.append(
@@ -535,8 +611,11 @@ def materialize_benchwarmers_walk_forward_backtest(
     return BenchwarmersBacktestResult(
         observations=tuple(observations),
         diagnostics=tuple(diagnostics),
+        appearance_observations=tuple(appearance_observations),
         gaps=tuple(gaps),
         evaluated_gameweeks=tuple(evaluated),
         candidate_player_fixture_rows=candidate_rows,
+        dgw_excluded_appearance_rows=dgw_excluded_appearance_rows,
+        missing_appearance_rows=missing_appearance_rows,
         scored_player_fixture_rows=len(observations),
     )
