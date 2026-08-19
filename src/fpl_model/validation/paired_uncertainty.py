@@ -18,7 +18,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from math import sqrt
-from typing import Literal
+from typing import Literal, Protocol, TypeVar
 
 import numpy as np
 
@@ -28,6 +28,15 @@ DEFAULT_RESAMPLES = 10_000
 DEFAULT_SEED = 42
 
 VerdictState = Literal["advantage", "disadvantage", "mixed"]
+
+
+class HasGameweek(Protocol):
+    """Structural requirement for ``block_bootstrap_statistic``'s row type."""
+
+    gameweek: int
+
+
+RowT = TypeVar("RowT", bound=HasGameweek)
 
 
 @dataclass(frozen=True, slots=True)
@@ -371,3 +380,60 @@ def build_method_notes(*, resamples: int, seed: int) -> tuple[str, str, str, str
         "overridable via --resamples/--seed) -- simplest, auditable, no scipy dependency; "
         "not a bias-corrected/accelerated (BCa) interval.",
     )
+
+
+def block_bootstrap_statistic(
+    rows: Sequence[RowT],
+    *,
+    statistic: Callable[[Sequence[RowT]], float],
+    resamples: int = DEFAULT_RESAMPLES,
+    seed: int = DEFAULT_SEED,
+) -> tuple[float, float, float, np.ndarray]:
+    """Gameweek-block percentile bootstrap CI for an arbitrary scalar ``statistic``.
+
+    Generalises the same gameweek-clustering methodology
+    ``cluster_bootstrap`` uses (rows within one gameweek share that
+    gameweek's causally-derived inputs, so resampling must draw whole
+    gameweeks, not individual rows) to any row type exposing a
+    ``.gameweek: int`` attribute and any scalar-producing ``statistic``
+    callable -- e.g. a pooled OLS slope or a paired MAE-improvement, not just
+    the MAE/RMSE-improvement pair ``cluster_bootstrap`` itself computes.
+
+    This is a standalone primitive, not a refactor of ``cluster_bootstrap``:
+    that function's two-statistics-per-draw structure (MAE and RMSE
+    improvement from one shared set of resample draws) is deliberately left
+    untouched so its already-published numeric results stay exactly
+    reproducible. Callers needing a new statistic's CI (e.g. walk-forward
+    calibration) should call this function directly instead.
+
+    Returns ``(point_estimate, ci_low, ci_high, replicates)`` where
+    ``replicates`` is the raw length-``resamples`` array of resampled
+    statistic values (exposed for diagnostics such as
+    ``mean(replicates > threshold)``). The point estimate is ``statistic``
+    evaluated once on the true, unresampled ``rows``.
+    """
+    if not rows:
+        raise ValueError("at least one row is required")
+    if resamples < 1:
+        raise ValueError("resamples must be a positive integer")
+
+    clusters: dict[int, list[RowT]] = {}
+    for row in rows:
+        clusters.setdefault(row.gameweek, []).append(row)
+    cluster_labels = sorted(clusters)
+    cluster_count = len(cluster_labels)
+
+    point_estimate = statistic(rows)
+
+    rng = np.random.default_rng(seed)
+    replicates = np.empty(resamples, dtype=np.float64)
+    label_indices = rng.integers(0, cluster_count, size=(resamples, cluster_count))
+    for resample_index in range(resamples):
+        drawn = label_indices[resample_index]
+        pooled: list[RowT] = []
+        for cluster_index in drawn:
+            pooled.extend(clusters[cluster_labels[cluster_index]])
+        replicates[resample_index] = statistic(pooled)
+
+    ci_low, ci_high = np.percentile(replicates, [2.5, 97.5])
+    return float(point_estimate), float(ci_low), float(ci_high), replicates

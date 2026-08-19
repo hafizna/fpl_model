@@ -412,6 +412,15 @@ observation sets, and one `BootstrapResult` per metric (MAE/RMSE) per clustering
 recomputed paired point estimates equal the reference's `absolute_mae_improvement`/
 `absolute_rmse_improvement` fields.
 
+`OlsFit`, `CalibrationRow`, and `GameweekCalibrationRecord` (`src/fpl_model/validation/
+walk_forward_calibration.py`) are further in-memory-only records: one `CalibrationRow` per
+`BacktestObservation`, and one `GameweekCalibrationRecord` per eligible evaluation gameweek,
+carrying that step's prior-fitted `OlsFit` (overall and high-band) alongside its own out-of-sample
+evaluation rows. `block_bootstrap_statistic` -- the generic single-statistic gameweek-block
+bootstrap `paired_uncertainty.py` exposes alongside its existing `cluster_bootstrap` -- is shared
+by both modules; `scripts/assess_backtest_calibration.py` is the sole consumer of the calibration
+records, reusing `verify_self_check` before any calibration work begins.
+
 ### Historical materialisation smoke test
 
 Vaastav's 2025/26 `merged_gw.csv` supplies complete realised player-fixture outcomes but not

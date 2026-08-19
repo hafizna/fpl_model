@@ -334,6 +334,31 @@ writing anything. Its `limitations` note that a CI excluding zero supports stabi
 one-season sample, not universal superiority. This is measurement only; it does not itself change
 any formula, calibration, or shrinkage.
 
+### Walk-forward xPts calibration
+
+A separate read-only measurement asks whether a post-hoc calibration slope
+(`actual_points ~ predicted_xpts`) would help, if it were fit strictly on prior gameweeks and
+applied only to the following gameweek's unseen rows:
+
+```bash
+python scripts/assess_backtest_calibration.py --season 2025-26
+```
+
+`validation/walk_forward_calibration.py` fits a closed-form OLS slope/intercept at each eligible
+evaluation gameweek `G` using only rows from gameweeks strictly before `G` (the same no-lookahead
+boundary every other backtest input already enforces), separately for the overall row set and for
+a high-predicted-xPts band whose threshold is itself recomputed from that same prior-only pool at
+each step. Two distinct slope numbers are reported: the **trajectory** (each step's own
+fitted-on-prior-data slope, showing whether the fit stabilises across the season) and the
+**pooled walk-forward slope** (a second OLS fit directly on the concatenation of every eligible
+step's own out-of-sample evaluation rows, answering how calibrated the walk-forward predictions
+actually were in aggregate). CIs for the pooled slope and for calibrated-vs-raw/calibrated-vs-naive
+MAE improvement reuse `validation/paired_uncertainty.py`'s gameweek-cluster bootstrap via the
+shared `block_bootstrap_statistic` primitive. It writes
+`docs/research/walk_forward_benchwarmers_2025_26_calibration.json`, self-checking the aggregate
+backtest metrics before any calibration work begins. This is measurement only: no calibration is
+applied to any production projection or scoring formula.
+
 ## Decision layer: squad planner and transfer recommender
 
 The eventual user-facing feature sits downstream of calibrated player-fixture projections. Its

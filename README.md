@@ -128,6 +128,14 @@ gameweeks (see `docs/PIPELINE_ARCHITECTURE.md`):
 python scripts/analyze_backtest_uncertainty.py --season 2025-26
 ```
 
+Walk-forward xPts calibration slope/intercept, fit strictly on prior gameweeks and compared
+out-of-sample against both the raw model and `matched_naive_metrics` -- measurement only, not
+applied to any production projection (see `docs/PIPELINE_ARCHITECTURE.md`):
+
+```bash
+python scripts/assess_backtest_calibration.py --season 2025-26
+```
+
 Audit whether historical Vaastav snapshots existed before each inferred deadline:
 
 ```bash
@@ -239,7 +247,8 @@ See `THIRD_PARTY_NOTICES.md`.
 - [x] Segment diagnostics (position/gameweek/minutes/start-probability/xPts bands)
 - [x] Paired gameweek-cluster bootstrap uncertainty of the model-vs-naive MAE/RMSE advantage
 - [ ] Start-probability calibration
-- [ ] Walk-forward xPts calibration
+- [x] Walk-forward xPts calibration assessment (measurement only; see below)
+- [ ] Apply xPts calibration to production projections
 - [ ] Per-player/per-fixture xPts uncertainty
 - [ ] Ablation tests for each contextual layer
 - [ ] Squad/transfer optimizer

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import itertools
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -13,6 +14,7 @@ from fpl_model.validation.paired_uncertainty import (
     PairedRow,
     _pooled_mae,
     _pooled_rmse,
+    block_bootstrap_statistic,
     build_method_notes,
     build_paired_rows,
     cluster_bootstrap,
@@ -444,3 +446,110 @@ def test_build_method_notes_returns_four_sentences():
 
     assert len(notes) == 4
     assert all(isinstance(note, str) and note for note in notes)
+
+
+# ---------------------------------------------------------------------------
+# block_bootstrap_statistic: standalone generic primitive
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class _ValueRow:
+    """Minimal HasGameweek-satisfying row for testing block_bootstrap_statistic
+    independently of PairedRow -- proves the primitive is genuinely generic,
+    not accidentally coupled to PairedRow's shape."""
+
+    gameweek: int
+    value: float
+
+
+def _mean_value(rows) -> float:
+    return sum(row.value for row in rows) / len(rows)
+
+
+def test_block_bootstrap_statistic_point_estimate_matches_unresampled_statistic():
+    rows = tuple(
+        _ValueRow(gameweek=gw, value=v)
+        for gw, values in {1: [1.0, 2.0], 2: [3.0, 4.0], 3: [5.0, 6.0]}.items()
+        for v in values
+    )
+
+    point_estimate, ci_low, ci_high, replicates = block_bootstrap_statistic(
+        rows, statistic=_mean_value, resamples=500, seed=1
+    )
+
+    assert point_estimate == pytest.approx(_mean_value(rows))
+    assert ci_low <= ci_high
+    assert len(replicates) == 500
+
+
+def test_block_bootstrap_statistic_ci_reflects_known_hand_computable_spread():
+    # Three gameweeks with distinct, known per-gameweek mean values (2, 4, 6).
+    # With equal-sized gameweeks, every resample's pooled mean is itself just
+    # the mean of the 3 drawn per-gameweek values (each gameweek contributes
+    # equally), so the achievable resample values are fully enumerable.
+    rows = (
+        _ValueRow(gameweek=1, value=2.0),
+        _ValueRow(gameweek=1, value=2.0),
+        _ValueRow(gameweek=2, value=4.0),
+        _ValueRow(gameweek=2, value=4.0),
+        _ValueRow(gameweek=3, value=6.0),
+        _ValueRow(gameweek=3, value=6.0),
+    )
+
+    point_estimate, ci_low, ci_high, replicates = block_bootstrap_statistic(
+        rows, statistic=_mean_value, resamples=3000, seed=2
+    )
+
+    assert point_estimate == pytest.approx(4.0)  # mean(2, 4, 6)
+    # Every achievable pooled mean is itself a mean of 3 draws from {2, 4, 6}
+    # with replacement -- bounded strictly within [2, 6].
+    assert replicates.min() >= 2.0
+    assert replicates.max() <= 6.0
+    assert 2.0 <= ci_low <= ci_high <= 6.0
+
+
+def test_block_bootstrap_statistic_is_deterministic_for_a_fixed_seed():
+    rows = tuple(
+        _ValueRow(gameweek=gw, value=float(gw) * 1.5)
+        for gw in range(1, 6)
+        for _ in range(4)
+    )
+
+    first = block_bootstrap_statistic(rows, statistic=_mean_value, resamples=300, seed=9)
+    second = block_bootstrap_statistic(rows, statistic=_mean_value, resamples=300, seed=9)
+
+    assert first[0] == second[0]
+    assert first[1] == second[1]
+    assert first[2] == second[2]
+    assert (first[3] == second[3]).all()
+
+
+def test_block_bootstrap_statistic_rejects_empty_rows():
+    with pytest.raises(ValueError, match="at least one row"):
+        block_bootstrap_statistic((), statistic=_mean_value, resamples=10, seed=1)
+
+
+def test_block_bootstrap_statistic_rejects_non_positive_resamples():
+    rows = (_ValueRow(gameweek=1, value=1.0),)
+    with pytest.raises(ValueError, match="resamples"):
+        block_bootstrap_statistic(rows, statistic=_mean_value, resamples=0, seed=1)
+
+
+def test_block_bootstrap_statistic_is_generic_over_row_type():
+    # Confirms the primitive works with PairedRow too (not just a bespoke
+    # test-only row type), satisfying HasGameweek via PairedRow's own
+    # gameweek attribute.
+    rows = (
+        PairedRow(player_id=1, fixture_id=100, gameweek=1, model_error=1.0, naive_error=2.0),
+        PairedRow(player_id=2, fixture_id=101, gameweek=2, model_error=-1.0, naive_error=3.0),
+    )
+
+    def _mean_model_error(paired_rows) -> float:
+        return sum(row.model_error for row in paired_rows) / len(paired_rows)
+
+    point_estimate, _, _, _ = block_bootstrap_statistic(
+        rows, statistic=_mean_model_error, resamples=50, seed=1
+    )
+
+    assert point_estimate == pytest.approx(0.0)  # mean(1.0, -1.0)
