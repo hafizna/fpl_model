@@ -12,6 +12,7 @@ from fpl_model.model.baseline_pipeline import (
 )
 from fpl_model.storage import initialize_database
 from fpl_model.validation.gap_triage import (
+    export_player_rate_evidence_template,
     export_preseason_rate_gap_triage,
     preseason_rate_gap_triage,
 )
@@ -382,3 +383,21 @@ def test_preseason_baseline_treats_zero_minute_rate_row_as_gap(tmp_path):
         "New Player",
         "Amass",
     ]
+    template_path = tmp_path / "outputs" / "evidence_template.csv"
+    template = export_player_rate_evidence_template(
+        template_path,
+        database_path=database_path,
+        model_run_id=result.model_run_id,
+        limit=1,
+    )
+    assert template["player_name"].tolist() == ["New Player"]
+    assert template["source_ingestion_run_id"].tolist() == ["snapshot"]
+    assert pd.isna(template.loc[0, "comparability_class"])
+    assert template_path.is_file()
+    excluded = export_player_rate_evidence_template(
+        tmp_path / "outputs" / "excluded.csv",
+        database_path=database_path,
+        model_run_id=result.model_run_id,
+        excluded_teams=("sun",),
+    )
+    assert excluded.empty

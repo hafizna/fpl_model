@@ -269,6 +269,17 @@ Archive a pinned Vaastav revision and materialise the previous-season player rat
 python scripts/import_vaastav_player_history.py --season 2025-26
 ```
 
+For current players still missing a usable previous-PL rate, export and import a small targeted
+evidence sheet. This stores source/comparability metadata only; it does not yet alter xPts:
+
+```bash
+python scripts/export_player_rate_evidence_template.py --help
+python scripts/import_player_rate_evidence.py --help
+```
+
+Academy samples use `comparability_class=academy_youth`; sourced role evidence without meaningful
+senior rate statistics uses `role_only`. See `docs/PLAYER_RATE_EVIDENCE.md`.
+
 The separate team-strength workbook export contract is documented in
 `docs/research/CLAUDE_TEAM_STRENGTH_EXPORT_PROMPT.md` and consumed by
 `scripts/import_team_strength.py`.

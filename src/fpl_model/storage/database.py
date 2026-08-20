@@ -8,7 +8,7 @@ from pathlib import Path
 import duckdb
 
 DEFAULT_DATABASE_PATH = Path("data/processed/fpl_model.duckdb")
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -381,6 +381,68 @@ CREATE TABLE IF NOT EXISTS player_rate_history (
     CHECK (long_form_defensive_contribution >= 0),
     CHECK (short_form_defcon_minutes >= 0),
     CHECK (short_form_defensive_contribution >= 0)
+);
+
+CREATE TABLE IF NOT EXISTS player_rate_evidence_import_run (
+    evidence_import_run_id VARCHAR PRIMARY KEY,
+    source_ingestion_run_id VARCHAR NOT NULL
+        REFERENCES ingestion_run(ingestion_run_id),
+    target_gameweek INTEGER NOT NULL,
+    source_label VARCHAR NOT NULL,
+    source_path VARCHAR NOT NULL,
+    source_sha256 VARCHAR NOT NULL,
+    imported_at TIMESTAMPTZ NOT NULL,
+    evidence_rows INTEGER NOT NULL,
+    status VARCHAR NOT NULL,
+    CHECK (target_gameweek BETWEEN 1 AND 38),
+    CHECK (evidence_rows > 0),
+    CHECK (status = 'completed')
+);
+
+CREATE TABLE IF NOT EXISTS player_rate_evidence (
+    evidence_import_run_id VARCHAR NOT NULL
+        REFERENCES player_rate_evidence_import_run(evidence_import_run_id),
+    source_ingestion_run_id VARCHAR NOT NULL,
+    fpl_id INTEGER NOT NULL,
+    player_code BIGINT NOT NULL,
+    player_name VARCHAR NOT NULL,
+    position VARCHAR NOT NULL,
+    comparability_class VARCHAR NOT NULL,
+    source_competition VARCHAR,
+    source_season VARCHAR,
+    sample_minutes INTEGER,
+    sample_starts INTEGER,
+    expected_goals DOUBLE,
+    expected_assists DOUBLE,
+    saves INTEGER,
+    yellow_cards INTEGER,
+    red_cards INTEGER,
+    bonus INTEGER,
+    bps INTEGER,
+    defensive_contribution INTEGER,
+    observed_at TIMESTAMPTZ NOT NULL,
+    source_reference VARCHAR NOT NULL,
+    rationale VARCHAR NOT NULL,
+    data_quality_flags VARCHAR NOT NULL,
+    PRIMARY KEY (evidence_import_run_id, player_code),
+    FOREIGN KEY (source_ingestion_run_id, fpl_id)
+        REFERENCES player_snapshot(ingestion_run_id, fpl_id),
+    CHECK (position IN ('GK', 'DEF', 'MID', 'FWD')),
+    CHECK (
+        comparability_class IN (
+            'senior_comparable', 'senior_non_comparable',
+            'academy_youth', 'role_only'
+        )
+    ),
+    CHECK (sample_minutes IS NULL OR sample_minutes >= 0),
+    CHECK (sample_starts IS NULL OR sample_starts >= 0),
+    CHECK (expected_goals IS NULL OR expected_goals >= 0.0),
+    CHECK (expected_assists IS NULL OR expected_assists >= 0.0),
+    CHECK (saves IS NULL OR saves >= 0),
+    CHECK (yellow_cards IS NULL OR yellow_cards >= 0),
+    CHECK (red_cards IS NULL OR red_cards >= 0),
+    CHECK (bonus IS NULL OR bonus >= 0),
+    CHECK (defensive_contribution IS NULL OR defensive_contribution >= 0)
 );
 
 CREATE TABLE IF NOT EXISTS team_strength_import_run (

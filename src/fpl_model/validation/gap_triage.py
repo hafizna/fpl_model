@@ -8,6 +8,7 @@ from pathlib import Path
 import duckdb
 import pandas as pd
 
+from fpl_model.ingest.player_rate_evidence import EVIDENCE_COLUMNS, IDENTITY_COLUMNS
 from fpl_model.storage import DEFAULT_DATABASE_PATH
 
 MISSING_RATE_FLAG = "NO_PREVIOUS_PL_PLAYER_RATE_HISTORY"
@@ -53,7 +54,8 @@ def preseason_rate_gap_triage(
 
         frame = connection.execute(
             """
-            SELECT g.model_run_id, m.target_gameweek, m.as_of, m.deadline,
+            SELECT g.model_run_id, m.source_ingestion_run_id,
+                   m.target_gameweek, m.as_of, m.deadline,
                    g.fpl_id, g.player_code, p.web_name AS player_name,
                    t.short_name AS team, p.fpl_position AS position,
                    p.price, p.fpl_status, ps.can_select,
@@ -125,3 +127,50 @@ def export_preseason_rate_gap_triage(
     path.parent.mkdir(parents=True, exist_ok=True)
     frame.to_csv(path, index=False, encoding="utf-8")
     return frame
+
+
+def export_player_rate_evidence_template(
+    output_path: str | Path,
+    *,
+    database_path: str | Path = DEFAULT_DATABASE_PATH,
+    model_run_id: str | None = None,
+    target_gameweek: int = 1,
+    limit: int | None = None,
+    excluded_teams: tuple[str, ...] = (),
+) -> pd.DataFrame:
+    """Write a targeted, prefilled evidence sheet without creating model inputs."""
+    if limit is not None and limit <= 0:
+        raise ValueError("limit must be positive when supplied")
+    triage = preseason_rate_gap_triage(
+        database_path=database_path,
+        model_run_id=model_run_id,
+        target_gameweek=target_gameweek,
+    )
+    normalized_exclusions = {team.strip().upper() for team in excluded_teams if team.strip()}
+    if normalized_exclusions:
+        triage = triage[~triage["team"].str.upper().isin(normalized_exclusions)].copy()
+    if limit is not None:
+        triage = triage.head(limit).copy()
+    context_columns = [
+        "research_rank",
+        "model_run_id",
+        "source_ingestion_run_id",
+        "target_gameweek",
+        "team",
+        "price",
+        "can_select",
+        "selected_by_percent",
+        "expected_minutes",
+        "rate_history_status",
+    ]
+    template = triage.loc[:, context_columns].copy()
+    for column in IDENTITY_COLUMNS:
+        template[column] = triage[column]
+    for column in EVIDENCE_COLUMNS:
+        template[column] = pd.NA
+    ordered = [*context_columns, *IDENTITY_COLUMNS, *EVIDENCE_COLUMNS]
+    template = template.loc[:, ordered]
+    path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    template.to_csv(path, index=False, encoding="utf-8")
+    return template.reset_index(drop=True)

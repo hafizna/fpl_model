@@ -244,6 +244,14 @@ The complete CSV is ordered by selectability, expected minutes, and then FPL own
 only prioritises data collection; it never changes xPts. Missing rate rows and linked zero-minute
 provider placeholders remain distinct, auditable categories.
 
+`scripts/export_player_rate_evidence_template.py` turns that allowlist into a targeted, prefilled
+research sheet and can exclude promoted teams so manual collection stays small. The validated
+importer stores completed rows in separate evidence tables with explicit comparability classes and
+nullable statistics. `academy_youth` and `role_only` evidence is never silently promoted into a
+senior performance rate. No evidence table is read by `baseline_pipeline.py`; league translation,
+sample-size shrinkage, and position priors require a separately versioned historical backtest before
+they can become production inputs.
+
 ## Walk-forward backtest of the replicated model
 
 Unlike the GW1 preseason baseline, the walk-forward backtest scores every gameweek of a season

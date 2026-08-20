@@ -24,6 +24,8 @@ def test_database_initialisation_is_persistent_and_idempotent(tmp_path):
         "ingestion_run",
         "model_run",
         "player_fixture_projection",
+        "player_rate_evidence",
+        "player_rate_evidence_import_run",
         "player_snapshot",
         "projection_component",
         "schema_version",

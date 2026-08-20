@@ -148,6 +148,15 @@ Likewise, a linked provider row with zero season and long-form minutes is not us
 baseline records `NO_USABLE_PLAYER_RATE_HISTORY` rather than interpreting its zero event totals as
 zero ability. A zero short-form window alone remains valid when the long-form sample has minutes.
 
+External evidence for these gaps is stored separately in `player_rate_evidence_import_run` and
+`player_rate_evidence`. Each reviewed row is tied to an exact official FPL snapshot and records its
+source, observation time, rationale, current player identity, nullable provider statistics, and one
+of four comparability classes: `senior_comparable`, `senior_non_comparable`, `academy_youth`, or
+`role_only`. Blank provider fields remain `NULL`; academy/youth evidence is explicitly flagged as
+not being a senior rate. These tables are research evidence only: the production baseline does not
+query them, and importing evidence cannot close a gap or change xPts. See
+`docs/PLAYER_RATE_EVIDENCE.md`.
+
 ### Preseason team-strength boundary
 
 Team attacking and defensive strength uses reviewed workbook totals rather than current FPL
