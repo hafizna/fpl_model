@@ -208,6 +208,17 @@ Build a rolling three-Gameweek plan from three explicit, frozen model runs:
 python scripts/plan_three_gameweeks.py --help
 ```
 
+Generate a standalone browser dashboard to compare named squad scenarios against those same
+three frozen runs:
+
+```bash
+python scripts/build_squad_dashboard.py --help
+```
+
+The dashboard reconciles private squad CSVs to a pinned official FPL snapshot, shows transactions,
+per-player coverage and GW1-GW3 xPts, and withholds lineup optimization when any player projection
+is missing. See `docs/SQUAD_DASHBOARD.md`.
+
 Create the anchor GW plus GW+1/GW+2 fixture projections from one frozen preseason baseline:
 
 ```bash

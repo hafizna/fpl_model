@@ -591,6 +591,13 @@ and captaincy for each retained squad in each GW. This enables general preseason
 manager snapshot is unavailable, without pretending the rolling one-transfer engine supports an
 unlimited-transfer state. The search remains explicitly approximate.
 
+The first presentation boundary is a generated local HTML dashboard. It reads scenario CSVs,
+official identity/status from one pinned ingestion, and exactly three compatible frozen model
+runs. It is read-only with respect to DuckDB and writes no decision back into projection tables.
+Scenario tabs expose transfer differences, budget legality, per-player xPts, and missing-data
+flags. Lineup recommendations are withheld unless all 15 players are covered, preserving the
+model's rule that a projection gap is not a zero. See `docs/SQUAD_DASHBOARD.md`.
+
 Implementation order remains deliberately simple and auditable:
 
 1. select an initial preseason squad from public data (implemented as a bounded beam search);

@@ -1,0 +1,70 @@
+{
+  "$schema_note": "Reviewed aggregate evidence for three current-squad players who lack previous-Premier-League rate history. These values are research-only and do not alter production xPts.",
+  "observed_at": "2026-08-20T12:30:00+07:00",
+  "source_attribution": "Data from FBref.com, a Sports Reference site. Please cite and link FBref/Sports Reference when these aggregates are used.",
+  "aggregation_scope": "2025-26 domestic top-flight league matches only; cup, UEFA, international, and friendly matches excluded",
+  "evidence": [
+    {
+      "player": "Christos Tzolis",
+      "fpl_id": 557,
+      "player_code": 439509,
+      "source_competition": "Belgian Pro League A",
+      "source_reference": "https://fbref.com/en/players/9f333379/matchlogs/2025-2026/Christos-Tzolis-Match-Logs",
+      "appearances": 36,
+      "starts": 34,
+      "minutes": 3068,
+      "minutes_note": "The FBref competition summary reports 3068 minutes; summing the displayed integer match-log minutes gives 3072. The published competition-summary value is retained.",
+      "goals": 17,
+      "assists": 23,
+      "goals_per_90": 0.5,
+      "assists_per_90": 0.67,
+      "yellow_cards": 6,
+      "red_cards": 0
+    },
+    {
+      "player": "Tarik Muharemović",
+      "fpl_id": 334,
+      "player_code": 522047,
+      "source_competition": "Serie A",
+      "source_reference": "https://fbref.com/en/players/426dda23/matchlogs/2025-2026/summary",
+      "appearances": 32,
+      "starts": 32,
+      "minutes": 2835,
+      "goals": 2,
+      "assists": 2,
+      "goals_per_90": 0.06,
+      "assists_per_90": 0.06,
+      "yellow_cards": 7,
+      "red_cards": 0
+    },
+    {
+      "player": "Jérémy Jacquet",
+      "fpl_id": 362,
+      "player_code": 606702,
+      "source_competition": "Ligue 1",
+      "source_reference": "https://fbref.com/en/players/cef70c94/matchlogs/2025-2026/Jeremy-Jacquet-Match-Logs",
+      "appearances": 19,
+      "starts": 19,
+      "minutes": 1671,
+      "goals": 0,
+      "assists": 0,
+      "goals_per_90": 0.0,
+      "assists_per_90": 0.0,
+      "yellow_cards": 6,
+      "red_cards": 1
+    }
+  ],
+  "not_available_in_supplied_logs": [
+    "expected_goals",
+    "expected_assists",
+    "FPL-equivalent defensive contributions",
+    "bonus",
+    "BPS"
+  ],
+  "metric_note": "Goals-per-90 and assists-per-90 are realised scoring rates, not expected-goals or expected-assists metrics. They are retained for audit context only.",
+  "modelling_decisions": [
+    "Do not infer that Jacquet was injured solely from gaps in the match log.",
+    "Do not manually increase Mosquera's start probability. Both the Aug-17 model snapshot and Aug-20 current snapshot already mark Saliba injured and Mosquera available, but neither snapshot proves the replacement hierarchy.",
+    "Do not close any production projection gap until an external-league translation and shrinkage policy is backtested."
+  ]
+}

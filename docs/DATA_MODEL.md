@@ -412,6 +412,12 @@ financial state transitions are exact for every retained path, but the output is
 global optimum. The planner currently considers at most one transfer per GW and no active chips.
 It records a scheduled replan after the third GW plus explicit emergency triggers.
 
+The squad dashboard adds no database tables. `scripts/build_squad_dashboard.py` creates an
+ephemeral standalone HTML document from explicit scenario CSV paths, a pinned official ingestion,
+and three compatible `model_run` IDs. The output records the input lineage and flags when the
+official squad snapshot is newer than the model source. It is a presentation artifact, not an
+immutable model run or a source of projection truth.
+
 `materialize_frozen_projection_horizon()` creates the three required model runs from one completed
 baseline anchor. The anchor run is reused unchanged. GW+1/GW+2 query their own fixtures and deadline
 from the same official ingestion, then rerun the eleven-component baseline against the new
