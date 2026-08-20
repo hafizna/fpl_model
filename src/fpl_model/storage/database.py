@@ -8,7 +8,7 @@ from pathlib import Path
 import duckdb
 
 DEFAULT_DATABASE_PATH = Path("data/processed/fpl_model.duckdb")
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -595,6 +595,70 @@ CREATE TABLE IF NOT EXISTS baseline_projection_gap (
     team_id INTEGER NOT NULL,
     data_quality_flags VARCHAR NOT NULL,
     PRIMARY KEY (model_run_id, fpl_id)
+);
+
+CREATE TABLE IF NOT EXISTS manager_entry (
+    entry_id BIGINT PRIMARY KEY,
+    entry_name VARCHAR,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
+    CHECK (entry_id > 0)
+);
+
+CREATE TABLE IF NOT EXISTS squad_snapshot (
+    squad_snapshot_id VARCHAR PRIMARY KEY,
+    entry_id BIGINT NOT NULL REFERENCES manager_entry(entry_id),
+    source_ingestion_run_id VARCHAR NOT NULL REFERENCES ingestion_run(ingestion_run_id),
+    season VARCHAR NOT NULL,
+    target_gameweek INTEGER NOT NULL,
+    captured_at TIMESTAMPTZ NOT NULL,
+    source_label VARCHAR NOT NULL,
+    source_path VARCHAR NOT NULL,
+    source_sha256 VARCHAR NOT NULL,
+    bank_tenths SMALLINT NOT NULL,
+    free_transfers SMALLINT,
+    unlimited_transfers BOOLEAN NOT NULL,
+    chip_period SMALLINT NOT NULL,
+    player_rows SMALLINT NOT NULL,
+    constraint_flags VARCHAR NOT NULL,
+    status VARCHAR NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
+    CHECK (target_gameweek BETWEEN 1 AND 38),
+    CHECK (bank_tenths >= 0),
+    CHECK (
+        (unlimited_transfers AND free_transfers IS NULL)
+        OR
+        (NOT unlimited_transfers AND free_transfers BETWEEN 0 AND 5)
+    ),
+    CHECK (chip_period IN (1, 2)),
+    CHECK (player_rows = 15),
+    CHECK (status = 'completed')
+);
+
+CREATE TABLE IF NOT EXISTS squad_snapshot_player (
+    squad_snapshot_id VARCHAR NOT NULL
+        REFERENCES squad_snapshot(squad_snapshot_id),
+    fpl_id INTEGER NOT NULL,
+    purchase_price_tenths SMALLINT NOT NULL,
+    selling_price_tenths SMALLINT NOT NULL,
+    squad_position SMALLINT NOT NULL,
+    is_captain BOOLEAN NOT NULL,
+    is_vice_captain BOOLEAN NOT NULL,
+    PRIMARY KEY (squad_snapshot_id, fpl_id),
+    UNIQUE (squad_snapshot_id, squad_position),
+    CHECK (purchase_price_tenths > 0),
+    CHECK (selling_price_tenths > 0),
+    CHECK (squad_position BETWEEN 1 AND 15),
+    CHECK (NOT (is_captain AND is_vice_captain))
+);
+
+CREATE TABLE IF NOT EXISTS squad_chip_state (
+    squad_snapshot_id VARCHAR NOT NULL
+        REFERENCES squad_snapshot(squad_snapshot_id),
+    chip_name VARCHAR NOT NULL,
+    chip_status VARCHAR NOT NULL,
+    PRIMARY KEY (squad_snapshot_id, chip_name),
+    CHECK (chip_name IN ('wildcard', 'free_hit', 'bench_boost', 'triple_captain')),
+    CHECK (chip_status IN ('available', 'active', 'played', 'expired'))
 );
 """
 

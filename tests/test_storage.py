@@ -27,6 +27,9 @@ def test_database_initialisation_is_persistent_and_idempotent(tmp_path):
         "player_snapshot",
         "projection_component",
         "schema_version",
+        "squad_chip_state",
+        "squad_snapshot",
+        "squad_snapshot_player",
     }.issubset(first.tables)
 
 

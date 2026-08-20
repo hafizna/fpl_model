@@ -177,6 +177,32 @@ Initialise the gitignored local snapshot database:
 python scripts/init_local_db.py
 ```
 
+Import an immutable current-manager squad snapshot after refreshing official FPL data:
+
+```bash
+python scripts/import_squad_snapshot.py --help
+```
+
+The manual CSV contains only private manager state (FPL IDs, purchase/selling prices, squad order,
+captain, and vice-captain); player identity and current market state are joined from a pinned FPL
+snapshot. See `docs/SQUAD_TRACKER.md` for the full contract and 2026/27 rules validation.
+
+Recommend the best legal XI and captaincy from a completed same-Gameweek model run:
+
+```bash
+python scripts/recommend_lineup.py --help
+```
+
+Compare no transfer with every affordable, legal single transfer for that Gameweek:
+
+```bash
+python scripts/recommend_transfers.py --help
+```
+
+The transfer command is deliberately an explainable one-Gameweek baseline. It uses the manager's
+actual selling prices, bank, free-transfer state, and a four-point hit when necessary; multi-GW
+planning, chips, price-change forecasts, and risk preferences remain future work.
+
 Fetch and persist a timestamped official FPL player/fixture snapshot:
 
 ```bash
@@ -288,7 +314,9 @@ See `THIRD_PARTY_NOTICES.md`.
       evaluation above supports it
 - [ ] Per-player/per-fixture xPts uncertainty
 - [ ] Ablation tests for each contextual layer
-- [ ] Squad/transfer optimizer
+- [x] Immutable manager-squad snapshot foundation
+- [x] Exhaustive single-Gameweek lineup and single-transfer recommender
+- [ ] Multi-Gameweek squad/transfer optimizer
 
 ## License
 

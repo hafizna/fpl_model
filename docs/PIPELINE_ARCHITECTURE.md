@@ -537,3 +537,27 @@ The decision layer will produce:
 - an explanation of the components and assumptions driving each recommendation.
 
 Missing projections remain explicit gaps and cannot be interpreted as cheap zero-value players.
+
+The first implemented decision-layer boundary is the immutable squad tracker. A manager CSV keeps
+only private state (owned FPL IDs, purchase/selling prices, order, captaincy), while a pinned
+official `ingestion_run` supplies identity, team, position, current price, and deadline. The
+validated import writes `manager_entry`, `squad_snapshot`, `squad_snapshot_player`, and
+`squad_chip_state`; DBeaver or another SQL client may inspect them read-only, but operational writes
+go through `scripts/import_squad_snapshot.py` so lineage and FPL-constraint checks cannot be
+bypassed accidentally.
+
+The next implemented boundary is deliberately solver-free. `scripts/recommend_lineup.py`
+exhaustively enumerates legal XIs from the fixed squad. `scripts/recommend_transfers.py` compares
+that no-transfer baseline with every affordable, legal, same-position one-player swap, rerunning
+the XI and captain search after each swap. It uses exact selling values and bank, applies an
+immediate hit when no free transfer exists, aggregates DGWs, excludes untransactable or unprojected
+targets with explicit counts, and preserves all quality flags. This is a transparent single-GW
+benchmark, not yet the multi-GW planner described above.
+
+Implementation order remains deliberately simple and auditable:
+
+1. validate and version the exact 15-player manager state;
+2. enumerate a legal starting XI, bench order, captain, and vice-captain from that fixed squad;
+3. enumerate no-transfer and single-transfer alternatives using exact sale value and bank;
+4. add multi-Gameweek scoring and uncertainty;
+5. introduce a solver only when multi-transfer/chip planning makes enumeration insufficient.

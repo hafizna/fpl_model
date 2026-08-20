@@ -341,6 +341,41 @@ uncertainty estimate yet, and it cannot project new, promoted, returning, or tra
 without an explicit player-rate prior. Those gaps must be resolved before the output is suitable
 for complete squad optimisation.
 
+## Manager squad snapshots
+
+The decision layer begins with an immutable `squad_snapshot` tied to one official
+`ingestion_run`. The official snapshot supplies player identity, team, FPL position, current market
+price, and deadline. A six-column manual CSV supplies only state that is private to the manager:
+`fpl_id`, purchase price, selling price, squad position, captain, and vice-captain.
+
+Snapshot-level state records entry ID, season, target Gameweek, capture time, bank (integer tenths
+of £1m), zero-to-five free transfers or an explicit unlimited-transfer state, chip period, and the
+four chip states. `squad_snapshot_player` stores the 15 player selections and prices;
+`squad_chip_state` stores Wildcard, Free Hit, Bench Boost, and Triple Captain as available, active,
+played, or expired.
+
+The import boundary enforces the 2026/27 2 GK / 5 DEF / 5 MID / 3 FWD composition, three-player
+club cap, legal XI, one starting captain and vice-captain, exact squad ordering, price precision,
+and `captured_at <= target deadline`. Money becomes integer tenths before persistence so transfer
+affordability never depends on binary floating-point comparisons. A repeated identical import is
+idempotent; a changed observation creates a new snapshot. See `docs/SQUAD_TRACKER.md`.
+
+An official FPL exception is preserved rather than rejected: a real-world player transfer can
+temporarily leave an existing manager with more than three players registered to one club. Such a
+snapshot receives `GRANDFATHERED_TEAM_LIMIT` in `constraint_flags`; the next transfer planner must
+return the squad to the normal limit rather than treating the observed state as invalid input.
+
+The initial decision implementation reads one squad snapshot and one completed model run for the
+same Gameweek. Fixture rows are aggregated to player-Gameweek xPts (including DGWs), then every
+legal XI is enumerated. The single-transfer layer enumerates every same-position replacement,
+checks exact selling-value-plus-bank affordability, restores the normal club limit, and reruns the
+lineup/captain search. Its output is ephemeral JSON rather than a model projection table: it is a
+decision derived from two immutable inputs, not another estimate of player ability.
+
+This recommender's current objective is one-Gameweek mean xPts net of an immediate four-point hit.
+It must not be described as a multi-Gameweek optimizer: future fixtures, transfer carry value,
+chips, price forecasts, and risk preference are not yet in its objective.
+
 ### Walk-forward backtest fact
 
 One `BacktestObservation` represents one historical player-fixture prediction and records:
