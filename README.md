@@ -214,6 +214,17 @@ Create the anchor GW plus GW+1/GW+2 fixture projections from one frozen preseaso
 python scripts/project_frozen_horizon.py --anchor-model-run-id baseline_...
 ```
 
+Choose a legal public-data initial squad over those three frozen Gameweeks, without requiring a
+manager screenshot or private squad state:
+
+```bash
+python scripts/optimize_initial_squad.py --help
+```
+
+The initial-squad search enforces the £100.0m budget, 2/5/5/3 positions, and three-player club cap,
+then re-optimizes XI and captaincy per GW. It is a bounded candidate/beam search, not a certified
+global optimum; see `docs/INITIAL_SQUAD_OPTIMIZER.md`.
+
 The planner follows the intended three-GW review cadence, with injury, suspension, real-world
 transfer, or material role change documented as emergency replan triggers. The search is a
 candidate-pruned beam search rather than a claim of a global optimum. Horizon projection rescoring

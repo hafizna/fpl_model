@@ -1,5 +1,10 @@
 """Decision-layer primitives for squad, lineup, and transfer planning."""
 
+from fpl_model.decision.initial_squad import (
+    InitialSquadOptimizerResult,
+    InitialSquadPlan,
+    optimize_initial_squad,
+)
 from fpl_model.decision.lineup import (
     LineupRecommendation,
     PlayerGameweekProjection,
@@ -32,6 +37,8 @@ __all__ = [
     "CHIP_NAMES",
     "CHIP_STATUSES",
     "GameweekProjectionPool",
+    "InitialSquadOptimizerResult",
+    "InitialSquadPlan",
     "MAX_FREE_TRANSFERS",
     "LineupRecommendation",
     "PlayerGameweekProjection",
@@ -45,6 +52,7 @@ __all__ = [
     "ValidatedSquad",
     "apply_single_transfer",
     "plan_three_gameweeks",
+    "optimize_initial_squad",
     "recommend_lineup",
     "recommend_single_transfers",
     "validate_squad",

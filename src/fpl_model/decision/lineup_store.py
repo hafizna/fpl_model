@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from decimal import Decimal
 from math import sqrt
@@ -25,6 +26,11 @@ class StoredLineupInputs:
 def _flags(value: str | None) -> set[str]:
     if value is None or not value.strip():
         return set()
+    if value.lstrip().startswith("["):
+        parsed = json.loads(value)
+        if not isinstance(parsed, list) or any(not isinstance(flag, str) for flag in parsed):
+            raise ValueError("projection data_quality_flags JSON must be a list of strings")
+        return {flag.strip() for flag in parsed if flag.strip()}
     return {flag.strip() for flag in value.split("|") if flag.strip()}
 
 

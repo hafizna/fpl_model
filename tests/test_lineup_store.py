@@ -6,9 +6,15 @@ import duckdb
 import pytest
 
 from fpl_model.decision.lineup import recommend_lineup
-from fpl_model.decision.lineup_store import load_lineup_inputs
+from fpl_model.decision.lineup_store import _flags, load_lineup_inputs
 from fpl_model.decision.transfer_store import load_transfer_inputs
 from tests.test_squad_snapshot import _import
+
+
+def test_projection_flags_accept_canonical_json_and_legacy_pipe_format():
+    assert _flags('["SECOND", "FIRST", "FIRST"]') == {"FIRST", "SECOND"}
+    assert _flags("SECOND|FIRST") == {"FIRST", "SECOND"}
+    assert _flags("[]") == set()
 
 
 def _model_run(database_path, *, missing_fpl_id: int | None = None) -> str:

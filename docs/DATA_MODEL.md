@@ -372,6 +372,15 @@ checks exact selling-value-plus-bank affordability, restores the normal club lim
 lineup/captain search. Its output is ephemeral JSON rather than a model projection table: it is a
 decision derived from two immutable inputs, not another estimate of player ability.
 
+Preseason initial selection is a separate public-data boundary and does not require a
+`squad_snapshot`. `load_initial_squad_inputs()` reads three consecutive completed model runs that
+share one official source ingestion, model version, and frozen `as_of`. It retains only officially
+transferable players projected in all three Gameweeks. `optimize_initial_squad()` constructs legal
+£100.0m 2/5/5/3 squads, then uses the same exhaustive lineup/captain scorer in each Gameweek. Its
+result is ephemeral JSON; missing projection coverage is reported and never represented as zero.
+The search is candidate-pruned and beam-bounded, so constraints are exact for retained squads but
+global optimality is not claimed. See `docs/INITIAL_SQUAD_OPTIMIZER.md`.
+
 This recommender's current objective is one-Gameweek mean xPts net of an immediate four-point hit.
 It must not be described as a multi-Gameweek optimizer: future fixtures, transfer carry value,
 chips, price forecasts, and risk preference are not yet in its objective.

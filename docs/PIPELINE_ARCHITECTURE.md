@@ -575,11 +575,20 @@ the anchor `as_of`; every future projection row carries an explicit frozen-input
 a substitute for the future in-season horizon refresh, which still needs causal current-season
 inputs and an availability-decay/return policy.
 
+The public-data preseason decision boundary is also implemented separately from manager tracking.
+`scripts/optimize_initial_squad.py` consumes the same three compatible model runs and requires no
+private squad input. It prunes candidates through horizon-xPts, value, and cheap-enabler lenses,
+constructs budget/position/club-legal squads with a bounded beam, and exactly re-optimizes lineup
+and captaincy for each retained squad in each GW. This enables general preseason selection while a
+manager snapshot is unavailable, without pretending the rolling one-transfer engine supports an
+unlimited-transfer state. The search remains explicitly approximate.
+
 Implementation order remains deliberately simple and auditable:
 
-1. validate and version the exact 15-player manager state;
-2. enumerate a legal starting XI, bench order, captain, and vice-captain from that fixed squad;
-3. enumerate no-transfer and single-transfer alternatives using exact sale value and bank;
-4. add rolling three-Gameweek scoring, FT state, and uncertainty (implemented as bounded beam
+1. select an initial preseason squad from public data (implemented as a bounded beam search);
+2. validate and version the exact 15-player manager state;
+3. enumerate a legal starting XI, bench order, captain, and vice-captain from that fixed squad;
+4. enumerate no-transfer and single-transfer alternatives using exact sale value and bank;
+5. add rolling three-Gameweek scoring, FT state, and uncertainty (implemented as bounded beam
    search; awaiting future-GW projections and backtesting);
-5. add multi-transfer/chip state and introduce a solver only when the expanded search requires it.
+6. add multi-transfer/chip state and introduce a solver only when the expanded search requires it.
