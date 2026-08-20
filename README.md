@@ -200,8 +200,19 @@ python scripts/recommend_transfers.py --help
 ```
 
 The transfer command is deliberately an explainable one-Gameweek baseline. It uses the manager's
-actual selling prices, bank, free-transfer state, and a four-point hit when necessary; multi-GW
-planning, chips, price-change forecasts, and risk preferences remain future work.
+actual selling prices, bank, free-transfer state, and a four-point hit when necessary.
+
+Build a rolling three-Gameweek plan from three explicit, frozen model runs:
+
+```bash
+python scripts/plan_three_gameweeks.py --help
+```
+
+The planner follows the intended three-GW review cadence, with injury, suspension, real-world
+transfer, or material role change documented as emergency replan triggers. The search is a
+candidate-pruned beam search rather than a claim of a global optimum. Current preseason projection
+materialisation only supports GW1, so a real three-GW plan remains blocked until the projection
+pipeline can create GW+1 and GW+2 runs from the same pre-deadline snapshot.
 
 Fetch and persist a timestamped official FPL player/fixture snapshot:
 
@@ -316,7 +327,10 @@ See `THIRD_PARTY_NOTICES.md`.
 - [ ] Ablation tests for each contextual layer
 - [x] Immutable manager-squad snapshot foundation
 - [x] Exhaustive single-Gameweek lineup and single-transfer recommender
-- [ ] Multi-Gameweek squad/transfer optimizer
+- [x] Rolling three-Gameweek planning engine and frozen-run input contract
+- [ ] Deadline-safe GW+1/GW+2 projection materialisation
+- [ ] Walk-forward evaluation of the rolling planner before operational use
+- [ ] Multi-transfer and chip-aware optimizer
 
 ## License
 

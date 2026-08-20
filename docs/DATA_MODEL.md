@@ -376,6 +376,24 @@ This recommender's current objective is one-Gameweek mean xPts net of an immedia
 It must not be described as a multi-Gameweek optimizer: future fixtures, transfer carry value,
 chips, price forecasts, and risk preference are not yet in its objective.
 
+The rolling decision engine accepts exactly three `GameweekProjectionPool` values. Its DuckDB
+boundary requires three consecutive `model_run` records completed by the first deadline and tied to the squad snapshot's
+source ingestion, one model version, and one frozen `as_of` no later than the first deadline. Each
+fixture-level run is aggregated to player-Gameweek xPts before planning. A player must have all
+three projections to be eligible as a transfer target; an owned player missing any required
+projection makes the plan invalid rather than silently contributing zero.
+
+Each search state contains the full 15-player squad, integer-tenths bank and sale values, free
+transfers, cumulative net xPts, hit cost, and a per-GW optimized lineup. A no-transfer step adds one
+free transfer up to five. A one-transfer step consumes one and then applies the next-GW accrual;
+transfers beyond the available count cost four points. Current prices are frozen across the horizon,
+and a newly purchased player's purchase/selling value is initialized to that price.
+
+Candidate-per-position pruning plus beam search makes the three-GW result approximate. Legal and
+financial state transitions are exact for every retained path, but the output is not proof of the
+global optimum. The planner currently considers at most one transfer per GW and no active chips.
+It records a scheduled replan after the third GW plus explicit emergency triggers.
+
 ### Walk-forward backtest fact
 
 One `BacktestObservation` represents one historical player-fixture prediction and records:

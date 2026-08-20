@@ -108,6 +108,43 @@ This first result is not yet a season planner. It does not value future fixtures
 transfers, expected price changes, chips, or risk tolerance. Those need an explicit multi-GW
 objective and walk-forward evaluation before they should influence a real transfer decision.
 
+## Rolling three-Gameweek planning
+
+The next decision boundary is implemented in `scripts/plan_three_gameweeks.py`. It requires three
+explicit model runs for consecutive Gameweeks. All three must be completed by the first deadline,
+use the squad's pinned
+official snapshot, share one `model_version`, and share one pre-deadline `as_of` timestamp. The
+planner never substitutes the current GW's projection for a missing future GW.
+
+```powershell
+.venv\Scripts\python.exe scripts/plan_three_gameweeks.py `
+  --squad-snapshot-id squad_... `
+  --model-run GW4=model_gw4_asof_gw4_deadline `
+  --model-run GW5=model_gw5_asof_gw4_deadline `
+  --model-run GW6=model_gw6_asof_gw4_deadline `
+  --output data/processed/recommendations/gw4_to_gw6.json
+```
+
+For each Gameweek the planner considers rolling or making at most one transfer, advances free
+transfers up to the five-transfer cap, applies a four-point hit when required, and recomputes the
+legal XI, bench, captain, and vice-captain. It optimizes cumulative net mean xPts across the three
+Gameweeks and reports terminal bank/free transfers, uncertainty, coverage, and alternative plans.
+
+The search uses a documented candidate cap per position and beam width, so it is approximate even
+though every retained state's squad, budget, club limit, transfer, lineup, and hit calculations are
+exact. Scheduled review occurs after the third Gameweek. Confirmed injury, suspension/red card,
+real-world transfer/registration change, or material starting-role change are emergency reasons to
+replan earlier.
+
+The existing frozen appearance-calibration protocol remains unchanged. It tests an upstream xPts
+policy. A rolling-planner evaluation protocol should be frozen separately only after walk-forward
+planner backtesting defines a justified search configuration and comparison baseline.
+
+Operational limitation: `materialize_preseason_baseline()` currently supports GW1 only. The
+planner engine and input validation exist, but a real plan cannot run until deadline-safe future-GW
+projection runs are materialized. Chips, multiple transfers within one GW, price forecasts, and a
+risk-adjusted objective also remain outside the current planner.
+
 ## Storage and inspection
 
 The relevant DuckDB tables are:

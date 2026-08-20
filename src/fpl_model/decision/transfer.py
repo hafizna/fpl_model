@@ -48,13 +48,14 @@ class TransferRecommendation:
     candidates_rejected_constraints: int
 
 
-def _replacement_squad(
+def apply_single_transfer(
     squad: ValidatedSquad,
     *,
     outgoing: SquadPlayer,
     incoming: SquadPlayer,
     bank_after_tenths: int,
 ) -> ValidatedSquad:
+    """Return a strictly legal post-transfer squad with unchanged FT state."""
     replacement = replace(
         incoming,
         purchase_price_tenths=incoming.current_price_tenths,
@@ -141,7 +142,7 @@ def recommend_single_transfers(
                 rejected_budget += 1
                 continue
             try:
-                candidate_squad = _replacement_squad(
+                candidate_squad = apply_single_transfer(
                     squad,
                     outgoing=outgoing,
                     incoming=incoming,

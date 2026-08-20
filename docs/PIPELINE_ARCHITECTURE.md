@@ -554,10 +554,28 @@ immediate hit when no free transfer exists, aggregates DGWs, excludes untransact
 targets with explicit counts, and preserves all quality flags. This is a transparent single-GW
 benchmark, not yet the multi-GW planner described above.
 
+The rolling three-GW engine is now also implemented, but is not yet operationally validated. It
+loads exactly three consecutive `model_run` records completed by the first deadline and sharing the same official source snapshot,
+model version, and frozen pre-first-deadline `as_of`. It searches roll/single-transfer paths,
+advances free-transfer and bank state, applies hits, and optimizes lineup/captaincy independently in
+each GW. Candidate-per-position pruning and a bounded beam keep the search tractable; therefore the
+recommended plan is the best retained path, not a certified global optimum.
+
+This engine implements a planned GW N..N+2 decision cadence. The plan is normally reviewed after
+the third GW, while a confirmed injury, suspension/red card, real-world transfer/registration
+change, or material evidence-backed role change may trigger an earlier replan. The existing frozen
+appearance-calibration policy is upstream and is deliberately untouched. A planner protocol, if
+needed, will be frozen separately after planner backtesting.
+
+The binding upstream gap is future-GW projection generation: the production preseason materializer
+currently supports GW1 only. The rolling planner refuses to fabricate GW+1/GW+2 values, so real
+execution waits for three deadline-safe runs produced from the same snapshot.
+
 Implementation order remains deliberately simple and auditable:
 
 1. validate and version the exact 15-player manager state;
 2. enumerate a legal starting XI, bench order, captain, and vice-captain from that fixed squad;
 3. enumerate no-transfer and single-transfer alternatives using exact sale value and bank;
-4. add multi-Gameweek scoring and uncertainty;
-5. introduce a solver only when multi-transfer/chip planning makes enumeration insufficient.
+4. add rolling three-Gameweek scoring, FT state, and uncertainty (implemented as bounded beam
+   search; awaiting future-GW projections and backtesting);
+5. add multi-transfer/chip state and introduce a solver only when the expanded search requires it.
