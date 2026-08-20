@@ -208,11 +208,17 @@ Build a rolling three-Gameweek plan from three explicit, frozen model runs:
 python scripts/plan_three_gameweeks.py --help
 ```
 
+Create the anchor GW plus GW+1/GW+2 fixture projections from one frozen preseason baseline:
+
+```bash
+python scripts/project_frozen_horizon.py --anchor-model-run-id baseline_...
+```
+
 The planner follows the intended three-GW review cadence, with injury, suspension, real-world
 transfer, or material role change documented as emergency replan triggers. The search is a
-candidate-pruned beam search rather than a claim of a global optimum. Current preseason projection
-materialisation only supports GW1, so a real three-GW plan remains blocked until the projection
-pipeline can create GW+1 and GW+2 runs from the same pre-deadline snapshot.
+candidate-pruned beam search rather than a claim of a global optimum. Horizon projection rescoring
+uses each future GW's own fixture/opponent/venue while freezing appearance, player-rate, and team-
+strength inputs to the anchor `as_of`; these assumptions are flagged on every future row.
 
 Fetch and persist a timestamped official FPL player/fixture snapshot:
 
@@ -328,7 +334,8 @@ See `THIRD_PARTY_NOTICES.md`.
 - [x] Immutable manager-squad snapshot foundation
 - [x] Exhaustive single-Gameweek lineup and single-transfer recommender
 - [x] Rolling three-Gameweek planning engine and frozen-run input contract
-- [ ] Deadline-safe GW+1/GW+2 projection materialisation
+- [x] Frozen preseason GW+1/GW+2 fixture projection materialisation
+- [ ] Deadline-safe in-season horizon projection refresh
 - [ ] Walk-forward evaluation of the rolling planner before operational use
 - [ ] Multi-transfer and chip-aware optimizer
 

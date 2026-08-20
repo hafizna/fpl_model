@@ -394,6 +394,20 @@ financial state transitions are exact for every retained path, but the output is
 global optimum. The planner currently considers at most one transfer per GW and no active chips.
 It records a scheduled replan after the third GW plus explicit emergency triggers.
 
+`materialize_frozen_projection_horizon()` creates the three required model runs from one completed
+baseline anchor. The anchor run is reused unchanged. GW+1/GW+2 query their own fixtures and deadline
+from the same official ingestion, then rerun the eleven-component baseline against the new
+opponent and venue. They reuse the anchor's appearance, player-rate, team-strength, and minutes
+scenario inputs, retain its `as_of`, and add `FROZEN_PRESEASON_INPUTS_FROM_GW{N}` to every projected
+future row and applicable gap. The future model-run identity includes fixture GW and frozen input
+GW, making repeated materialization idempotent without colliding with the anchor.
+The identity also includes `frozen_preseason_fixture_horizon_v1`, so a future horizon-policy
+change creates new immutable runs without changing the canonical GW1 baseline identity.
+
+This is a preseason horizon assumption, not an in-season forecast update. It must not be described
+as new availability or role evidence for GW+1/GW+2. A later in-season horizon pipeline needs causal
+current-season rates and an explicit availability-decay/return policy.
+
 ### Walk-forward backtest fact
 
 One `BacktestObservation` represents one historical player-fixture prediction and records:

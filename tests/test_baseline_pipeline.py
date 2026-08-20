@@ -6,7 +6,10 @@ import duckdb
 import pandas as pd
 import pytest
 
-from fpl_model.model.baseline_pipeline import materialize_preseason_baseline
+from fpl_model.model.baseline_pipeline import (
+    materialize_frozen_projection_horizon,
+    materialize_preseason_baseline,
+)
 from fpl_model.storage import initialize_database
 from fpl_model.validation.gap_triage import (
     export_preseason_rate_gap_triage,
@@ -180,6 +183,128 @@ def test_preseason_baseline_rejects_in_season_gameweeks(tmp_path):
         materialize_preseason_baseline(
             target_gameweek=2,
             database_path=tmp_path / "baseline.duckdb",
+        )
+
+
+def test_materializes_three_fixture_gameweeks_from_one_frozen_preseason_input(tmp_path):
+    database_path = tmp_path / "baseline.duckdb"
+    _seed_baseline_inputs(database_path)
+    with duckdb.connect(str(database_path)) as connection:
+        connection.execute(
+            """
+            INSERT INTO gameweek_snapshot VALUES
+                ('snapshot', 2, 'Gameweek 2', '2026-08-29T00:30:00+07:00',
+                 NULL, FALSE, FALSE, FALSE, FALSE, TRUE),
+                ('snapshot', 3, 'Gameweek 3', '2026-09-12T00:30:00+07:00',
+                 NULL, FALSE, FALSE, FALSE, FALSE, TRUE);
+            INSERT INTO fixture_snapshot VALUES
+                ('snapshot', 101, 2, '2026-08-29T15:00:00+01:00',
+                 2, 1, FALSE, FALSE),
+                ('snapshot', 102, 3, '2026-09-12T15:00:00+01:00',
+                 1, 2, FALSE, FALSE);
+            """
+        )
+    anchor = materialize_preseason_baseline(
+        appearance_projection_run_id="appearance",
+        player_rate_run_id="rates",
+        team_strength_run_id="strength",
+        database_path=database_path,
+    )
+
+    horizon = materialize_frozen_projection_horizon(
+        anchor_model_run_id=anchor.model_run_id,
+        database_path=database_path,
+    )
+    repeated = materialize_frozen_projection_horizon(
+        anchor_model_run_id=anchor.model_run_id,
+        database_path=database_path,
+    )
+
+    assert repeated == horizon
+    assert horizon.model_run_ids[0] == anchor.model_run_id
+    assert [run.projected_fixture_rows for run in horizon.runs] == [1, 1, 1]
+    with duckdb.connect(str(database_path), read_only=True) as connection:
+        metadata = connection.execute(
+            """
+            SELECT target_gameweek, as_of, deadline, model_version,
+                   source_ingestion_run_id
+            FROM model_run
+            WHERE model_run_id IN (?, ?, ?)
+            ORDER BY target_gameweek
+            """,
+            list(horizon.model_run_ids),
+        ).fetchall()
+        projections = connection.execute(
+            """
+            SELECT m.target_gameweek, p.final_xpts, p.data_quality_flags
+            FROM player_fixture_projection AS p
+            JOIN model_run AS m USING (model_run_id)
+            WHERE p.player_code = 519634
+              AND p.model_run_id IN (?, ?, ?)
+            ORDER BY m.target_gameweek
+            """,
+            list(horizon.model_run_ids),
+        ).fetchall()
+
+    assert [row[0] for row in metadata] == [1, 2, 3]
+    assert len({row[1] for row in metadata}) == 1
+    assert [row[2].date().isoformat() for row in metadata] == [
+        "2026-08-22",
+        "2026-08-29",
+        "2026-09-12",
+    ]
+    assert len({row[3] for row in metadata}) == 1
+    assert {row[4] for row in metadata} == {"snapshot"}
+    assert projections[0][1] != pytest.approx(projections[1][1])
+    assert "FROZEN_PRESEASON_INPUTS_FROM_GW1" not in json.loads(projections[0][2])
+    assert "FROZEN_PRESEASON_INPUTS_FROM_GW1" in json.loads(projections[1][2])
+    assert "FROZEN_PRESEASON_INPUTS_FROM_GW1" in json.loads(projections[2][2])
+
+
+def test_frozen_horizon_requires_future_deadline_metadata(tmp_path):
+    database_path = tmp_path / "baseline.duckdb"
+    _seed_baseline_inputs(database_path)
+    anchor = materialize_preseason_baseline(
+        appearance_projection_run_id="appearance",
+        player_rate_run_id="rates",
+        team_strength_run_id="strength",
+        database_path=database_path,
+    )
+
+    with pytest.raises(ValueError, match="no deadline for horizon GW2"):
+        materialize_frozen_projection_horizon(
+            anchor_model_run_id=anchor.model_run_id,
+            database_path=database_path,
+        )
+
+
+def test_frozen_horizon_rejects_nonbaseline_or_old_policy_anchor_before_writing(tmp_path):
+    database_path = tmp_path / "baseline.duckdb"
+    _seed_baseline_inputs(database_path)
+    anchor = materialize_preseason_baseline(
+        appearance_projection_run_id="appearance",
+        player_rate_run_id="rates",
+        team_strength_run_id="strength",
+        database_path=database_path,
+    )
+    with duckdb.connect(str(database_path)) as connection:
+        connection.execute(
+            "UPDATE model_run SET model_version = 'old' WHERE model_run_id = ?",
+            [anchor.model_run_id],
+        )
+
+    with pytest.raises(ValueError, match="current baseline policy"):
+        materialize_frozen_projection_horizon(
+            anchor_model_run_id=anchor.model_run_id,
+            database_path=database_path,
+        )
+    with duckdb.connect(str(database_path), read_only=True) as connection:
+        assert connection.execute("SELECT count(*) FROM model_run").fetchone()[0] == 1
+
+    with pytest.raises(ValueError, match="not a baseline model run"):
+        materialize_frozen_projection_horizon(
+            anchor_model_run_id="missing",
+            database_path=database_path,
         )
 
 

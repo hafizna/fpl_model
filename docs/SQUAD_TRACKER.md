@@ -140,10 +140,12 @@ The existing frozen appearance-calibration protocol remains unchanged. It tests 
 policy. A rolling-planner evaluation protocol should be frozen separately only after walk-forward
 planner backtesting defines a justified search configuration and comparison baseline.
 
-Operational limitation: `materialize_preseason_baseline()` currently supports GW1 only. The
-planner engine and input validation exist, but a real plan cannot run until deadline-safe future-GW
-projection runs are materialized. Chips, multiple transfers within one GW, price forecasts, and a
-risk-adjusted objective also remain outside the current planner.
+`materialize_preseason_baseline()` remains the canonical GW1 baseline. The separate
+`scripts/project_frozen_horizon.py` command now rescored GW2/GW3 fixtures from that anchor without
+copying GW1 totals: opponent, venue, fixture ID, and deadline change per GW, while appearance,
+player-rate, and team-strength inputs remain frozen and explicitly flagged. In-season horizon
+refresh, chips, multiple transfers within one GW, price forecasts, and a risk-adjusted objective
+remain outside the current planner.
 
 ## Storage and inspection
 

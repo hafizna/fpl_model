@@ -24,9 +24,18 @@ The command requires exactly three consecutive model runs. They must:
 - share one frozen `as_of` timestamp no later than the GW N deadline; and
 - contain a projection for every player retained or acquired along a plan path.
 
-The current preseason materializer supports GW1 only. The planner therefore cannot yet produce a
-real horizon plan from the local database. It fails on a missing run or projection rather than
-copying GW1 values forward.
+The canonical preseason baseline materializer still produces GW1 only. A separate frozen-horizon
+materializer now produces GW+1/GW+2 by rerunning all components against those GWs' own fixtures,
+opponents, and venues. It freezes appearance, player-rate, team-strength, and minutes inputs to the
+anchor and flags that assumption on every future row. It fails on missing fixture/deadline metadata
+rather than copying GW1 xPts forward.
+The horizon identity is versioned independently as `frozen_preseason_fixture_horizon_v1` while the
+underlying model runs retain the anchor baseline model version for compatibility checks.
+
+```powershell
+.venv\Scripts\python.exe scripts/project_frozen_horizon.py `
+  --anchor-model-run-id baseline_...
+```
 
 ## Objective and state transitions
 

@@ -41,6 +41,7 @@ from fpl_model.model.secondary import (
 from fpl_model.storage import DEFAULT_DATABASE_PATH, initialize_database
 
 POLICY_VERSION = "coherent_benchwarmers_preseason_baseline_v6"
+HORIZON_POLICY_VERSION = "frozen_preseason_fixture_horizon_v1"
 REGULATION_MINUTES = 90.0
 AVERAGE_BPS_PER_START = 14.862318964622457
 AVERAGE_BONUS_PER_START = 0.29431670795024134
@@ -59,6 +60,16 @@ class BaselineRunResult:
     projected_fixture_rows: int
     gap_players: int
     status: str
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectionHorizonResult:
+    anchor_model_run_id: str
+    horizon_policy_version: str
+    start_gameweek: int
+    end_gameweek: int
+    model_run_ids: tuple[str, ...]
+    runs: tuple[BaselineRunResult, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -254,17 +265,16 @@ def _component_rows(model_run_id: str, player_code: int, fixture_id: int, result
     ]
 
 
-def materialize_preseason_baseline(
+def _materialize_frozen_fixture_projection(
     *,
-    target_gameweek: int = 1,
+    target_gameweek: int,
+    input_gameweek: int,
     appearance_projection_run_id: str | None = None,
     player_rate_run_id: str | None = None,
     team_strength_run_id: str | None = None,
     database_path: str | Path = DEFAULT_DATABASE_PATH,
 ) -> BaselineRunResult:
-    """Compose all implemented Benchwarmers components for GW1 fixtures."""
-    if target_gameweek != 1:
-        raise ValueError("preseason baseline materialisation currently supports GW1 only")
+    """Compose one fixture GW from a frozen set of baseline input runs."""
     initialize_database(database_path)
     with duckdb.connect(str(database_path)) as connection:
         (
@@ -277,14 +287,35 @@ def materialize_preseason_baseline(
             deadline,
         ) = _choose_input_runs(
             connection,
-            target_gameweek=target_gameweek,
+            target_gameweek=input_gameweek,
             appearance_projection_run_id=appearance_projection_run_id,
             player_rate_run_id=player_rate_run_id,
             team_strength_run_id=team_strength_run_id,
         )
-        identity = (
-            f"{appearance_run}|{rate_run}|{strength_run}|{POLICY_VERSION}"
-        ).encode()
+        target_deadline = deadline
+        if target_gameweek != input_gameweek:
+            deadline_row = connection.execute(
+                """
+                SELECT deadline_time
+                FROM gameweek_snapshot
+                WHERE ingestion_run_id = ? AND gameweek = ?
+                """,
+                [source_ingestion_run, target_gameweek],
+            ).fetchone()
+            if deadline_row is None:
+                raise ValueError(
+                    f"source snapshot has no deadline for horizon GW{target_gameweek}"
+                )
+            target_deadline = deadline_row[0]
+            if as_of > target_deadline:
+                raise ValueError("frozen input as_of is after the target fixture deadline")
+        identity_text = f"{appearance_run}|{rate_run}|{strength_run}|{POLICY_VERSION}"
+        if target_gameweek != input_gameweek:
+            identity_text += (
+                f"|fixture_gameweek={target_gameweek}|frozen_input_gameweek={input_gameweek}"
+                f"|{HORIZON_POLICY_VERSION}"
+            )
+        identity = identity_text.encode()
         model_run_id = f"baseline_{hashlib.sha256(identity).hexdigest()[:16]}"
         existing = connection.execute(
             """
@@ -343,7 +374,7 @@ def materialize_preseason_baseline(
                 SELECT override_id, minutes_per_start, minutes_per_substitute
                 FROM appearance_scenario_override WHERE target_gameweek = ?
                 """,
-                [target_gameweek],
+                [input_gameweek],
             ).fetchall()
         }
         rates = {
@@ -398,6 +429,8 @@ def materialize_preseason_baseline(
             player_fixtures = fixtures.get(team_id, ())
             candidate_fixture_rows += len(player_fixtures)
             flags: set[str] = set()
+            if target_gameweek != input_gameweek:
+                flags.add(f"FROZEN_PRESEASON_INPUTS_FROM_GW{input_gameweek}")
             raw_appearance = appearance_rows.get(fpl_id)
             appearance = None
             minutes = None
@@ -676,7 +709,7 @@ def materialize_preseason_baseline(
                     model_run_id,
                     target_gameweek,
                     as_of,
-                    deadline,
+                    target_deadline,
                     POLICY_VERSION,
                     source_ingestion_run,
                 ],
@@ -731,4 +764,86 @@ def materialize_preseason_baseline(
         len(projection_rows),
         len(gap_rows),
         status,
+    )
+
+
+def materialize_preseason_baseline(
+    *,
+    target_gameweek: int = 1,
+    appearance_projection_run_id: str | None = None,
+    player_rate_run_id: str | None = None,
+    team_strength_run_id: str | None = None,
+    database_path: str | Path = DEFAULT_DATABASE_PATH,
+) -> BaselineRunResult:
+    """Compose the canonical preseason Benchwarmers baseline for GW1."""
+    if target_gameweek != 1:
+        raise ValueError("preseason baseline materialisation currently supports GW1 only")
+    return _materialize_frozen_fixture_projection(
+        target_gameweek=target_gameweek,
+        input_gameweek=target_gameweek,
+        appearance_projection_run_id=appearance_projection_run_id,
+        player_rate_run_id=player_rate_run_id,
+        team_strength_run_id=team_strength_run_id,
+        database_path=database_path,
+    )
+
+
+def materialize_frozen_projection_horizon(
+    *,
+    anchor_model_run_id: str,
+    database_path: str | Path = DEFAULT_DATABASE_PATH,
+) -> ProjectionHorizonResult:
+    """Score the anchor GW and next two fixture GWs from one frozen input set."""
+    initialize_database(database_path)
+    with duckdb.connect(str(database_path), read_only=True) as connection:
+        anchor = connection.execute(
+            """
+            SELECT m.target_gameweek, m.status, m.model_version, b.policy_version,
+                   b.appearance_projection_run_id,
+                   b.player_rate_run_id, b.team_strength_run_id
+            FROM model_run AS m
+            JOIN baseline_projection_run AS b USING (model_run_id)
+            WHERE m.model_run_id = ?
+            """,
+            [anchor_model_run_id],
+        ).fetchone()
+    if anchor is None:
+        raise ValueError(f"anchor is not a baseline model run: {anchor_model_run_id}")
+    (
+        anchor_gameweek,
+        anchor_status,
+        anchor_model_version,
+        anchor_policy_version,
+        appearance_run,
+        rate_run,
+        strength_run,
+    ) = anchor
+    if anchor_status != "completed":
+        raise ValueError("anchor model run must be completed")
+    if anchor_model_version != POLICY_VERSION or anchor_policy_version != POLICY_VERSION:
+        raise ValueError("anchor must use the current baseline policy version")
+    anchor_gameweek = int(anchor_gameweek)
+    if anchor_gameweek > 36:
+        raise ValueError("three-Gameweek horizon cannot start after GW36")
+
+    runs = tuple(
+        _materialize_frozen_fixture_projection(
+            target_gameweek=gameweek,
+            input_gameweek=anchor_gameweek,
+            appearance_projection_run_id=str(appearance_run),
+            player_rate_run_id=str(rate_run),
+            team_strength_run_id=str(strength_run),
+            database_path=database_path,
+        )
+        for gameweek in range(anchor_gameweek, anchor_gameweek + 3)
+    )
+    if runs[0].model_run_id != anchor_model_run_id:
+        raise ValueError("anchor model run does not match the current baseline identity")
+    return ProjectionHorizonResult(
+        anchor_model_run_id=anchor_model_run_id,
+        horizon_policy_version=HORIZON_POLICY_VERSION,
+        start_gameweek=anchor_gameweek,
+        end_gameweek=anchor_gameweek + 2,
+        model_run_ids=tuple(run.model_run_id for run in runs),
+        runs=runs,
     )

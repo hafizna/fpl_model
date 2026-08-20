@@ -567,9 +567,13 @@ change, or material evidence-backed role change may trigger an earlier replan. T
 appearance-calibration policy is upstream and is deliberately untouched. A planner protocol, if
 needed, will be frozen separately after planner backtesting.
 
-The binding upstream gap is future-GW projection generation: the production preseason materializer
-currently supports GW1 only. The rolling planner refuses to fabricate GW+1/GW+2 values, so real
-execution waits for three deadline-safe runs produced from the same snapshot.
+The preseason future-GW boundary is now implemented separately from the canonical GW1 materializer.
+`scripts/project_frozen_horizon.py` reuses a completed baseline anchor, queries GW+1/GW+2 fixtures
+and deadlines from the same official ingestion, and reruns all eleven components against each new
+opponent and venue. Appearance, player rates, team strength, and minutes inputs remain frozen to
+the anchor `as_of`; every future projection row carries an explicit frozen-input flag. This is not
+a substitute for the future in-season horizon refresh, which still needs causal current-season
+inputs and an availability-decay/return policy.
 
 Implementation order remains deliberately simple and auditable:
 

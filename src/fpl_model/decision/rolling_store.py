@@ -103,14 +103,14 @@ def load_rolling_inputs(
         row = connection.execute(
             """
             SELECT target_gameweek, as_of, deadline, model_version,
-                   source_ingestion_run_id, status, completed_at, created_at
+                   source_ingestion_run_id, status, completed_at
             FROM model_run WHERE model_run_id = ?
             """,
             [model_run_id],
         ).fetchone()
         if row is None:
             raise ValueError(f"unknown model_run_id: {model_run_id}")
-        target, as_of, deadline, version, source_run, status, completed_at, created_at = row
+        target, as_of, deadline, version, source_run, status, completed_at = row
         if int(target) != gameweek:
             raise ValueError(
                 f"model run {model_run_id} targets GW{target}, not requested GW{gameweek}"
@@ -126,7 +126,6 @@ def load_rolling_inputs(
                 version,
                 source_run,
                 completed_at,
-                created_at,
             )
         )
 
@@ -146,7 +145,6 @@ def load_rolling_inputs(
     if any(
         row[6] is None
         or row[6] > first_deadline
-        or row[7] > first_deadline
         for row in metadata
     ):
         raise ValueError("all horizon model runs must be completed by the first deadline")
