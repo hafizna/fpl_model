@@ -22,6 +22,11 @@ Planned contextual layers include:
 3. **Context changes causal inputs, not xPts directly.** For example, World Cup readiness should first affect start probability / expected minutes rather than applying an arbitrary points multiplier.
 4. **Every extension must beat the baseline in backtesting.**
 5. **Raw scraped/downloaded data is not committed.** Pipelines should make it reproducible.
+6. **A recommender must beat common structural counterfactuals.** At minimum, compare against a
+   set-and-forget goalkeeper plus a cheap backup, cheap-bench reinvestment, and premium-captain
+   scenarios before calling a squad optimal.
+7. **Implemented does not mean operationally ready.** Coverage, calibration, uncertainty, search
+   correctness, and squad-economics sanity gates must pass separately.
 
 ## Current scope: baseline integration and validation
 
@@ -41,8 +46,25 @@ This repository currently includes:
 - a genuine walk-forward backtest of the replicated 11-component model against in-season Vaastav
   history (Vaastav-only team strength, no workbook)
 
-The next milestone is using the walk-forward backtest results to determine shrinkage and
-uncertainty before any context layer or ML is enabled.
+The next milestone is closing projection-coverage and context gaps, then hardening the decision
+layer against dominated or economically implausible squads. Calibration and uncertainty must be
+applied before the recommender is used operationally.
+
+## Recommender status: research prototype only
+
+The lineup, transfer, rolling-planner, and initial-squad code paths are implemented, but the
+initial-squad output is **not operationally approved**. A deadline-time diagnostic run on 22 August
+2026 exposed three concrete failures:
+
+- only 404 of 600 snapshot players had complete GW1--GW3 projections; missing/new/cheap
+  players were therefore underrepresented in the optimizer's choice set;
+- the approximate beam search returned a 188.68 xPts squad with two GBP 5.0m goalkeepers and an
+  GBP 8.0m Watkins benched in GW1 and GW2;
+- a manually locked Raya/Dubravka structure scored 189.09 xPts at the same GBP 100.0m budget, so
+  the published search result was dominated by a legal counterfactual.
+
+Until the Sprint 5 gates below pass, generated squads must be labelled `RESEARCH_ONLY`, include
+coverage diagnostics, and show the best common counterfactuals alongside the nominal result.
 
 ## Repository layout
 
@@ -176,6 +198,15 @@ Initialise the gitignored local snapshot database:
 ```bash
 python scripts/init_local_db.py
 ```
+
+Build an immutable official-FPL/Vaastav player identity bridge from a pinned `players_raw.csv`:
+
+```bash
+python scripts/import_player_identity_bridge.py --help
+```
+
+The bridge uses the shared stable `player_code`; names are audit signals and never join keys. See
+`docs/PLAYER_IDENTITY_BRIDGE.md`.
 
 Import an immutable current-manager squad snapshot after refreshing official FPL data:
 
@@ -322,16 +353,18 @@ See `THIRD_PARTY_NOTICES.md`.
 
 ## Roadmap
 
-### Sprint 1 — Data foundation
+### Sprint 1 — Data foundation (complete)
+
 - [x] Repository/package structure
 - [x] Official FPL API adapter
 - [x] Vaastav adapter
 - [x] Canonical schemas
 - [x] Spatial fingerprint primitive
-- [ ] Test structured preseason heatmap availability on Chelsea
-- [ ] Canonical player ID bridge across providers
+- [x] Chelsea structured-preseason heatmap feasibility test (provider unavailable; no bypass)
+- [x] Canonical player ID bridge across official FPL and Vaastav
 
-### Sprint 2 — Benchwarmers baseline
+### Sprint 2 — Benchwarmers baseline replication (complete)
+
 - [x] Reproduce appearance/start/minutes logic
 - [x] Goal / assist components
 - [x] Clean sheet / goals-conceded components
@@ -339,38 +372,62 @@ See `THIRD_PARTY_NOTICES.md`.
 - [x] Fixture and home-away adjustments
 - [x] Golden tests against spreadsheet outputs
 
-### Sprint 3 — Context engine
-- [ ] Promotion priors
-- [ ] Manager regime features
-- [ ] World Cup and preseason readiness
-- [ ] Congestion / rest-day features
-- [ ] Tactical role priors
+### Sprint 3 — Projection coverage and context
 
-### Sprint 4 — Validation and decisions
-- [x] Walk-forward fold/metric primitives (smoke-tested)
+- [ ] Reach an explicit coverage gate for selectable players (target: at least 95%, plus 100% of
+      every optimizer shortlist and selected squad)
+- [ ] Add explicit promoted-team, new-signing, returning-player, and cheap-enabler priors instead
+      of treating missing previous-PL history as near-zero ability or excluding it silently
+- [ ] Manager regime features
+- [ ] World Cup and preseason readiness, including current playing-time evidence
+- [ ] Congestion / rest-day features
+- [ ] Tactical-role and position-change priors
+- [ ] Deadline-safe in-season refresh of appearance, role, and horizon inputs
+- [ ] Ablation tests proving the incremental value of every context layer
+
+### Sprint 4 — Validation, calibration, and uncertainty
+
+- [x] Walk-forward fold/metric primitives
 - [x] Genuine 11-component walk-forward backtest (2025-26, in-season)
 - [x] Segment diagnostics (position/gameweek/minutes/start-probability/xPts bands)
-- [x] Paired gameweek-cluster bootstrap uncertainty of the model-vs-naive MAE/RMSE advantage
-- [x] Walk-forward xPts calibration assessment (measurement only; see below)
-- [ ] Apply xPts calibration to production projections
-- [x] Walk-forward appearance-model (start-probability/expected-minutes) calibration assessment
-      (measurement only; see below)
-- [x] Appearance-model bias segment diagnostic (where the miscalibration concentrates)
-- [x] Causal, exploratory same-season head-to-head appearance calibration policy backtest (raw /
-      global / high-end shrinkage; measurement only; see below)
-- [ ] Independent-season or prospectively frozen 2026-27 confirmatory evaluation of the
-      better-supported policy from the exploratory backtest above
-- [ ] Apply appearance-model calibration to production projections, if the confirmatory
-      evaluation above supports it
-- [ ] Per-player/per-fixture xPts uncertainty
-- [ ] Ablation tests for each contextual layer
+- [x] Paired gameweek-cluster bootstrap uncertainty of model-vs-naive MAE/RMSE advantage
+- [x] Walk-forward xPts calibration assessment (measurement only)
+- [x] Walk-forward appearance-model calibration assessment (measurement only)
+- [x] Appearance-model bias segment diagnostic
+- [x] Exploratory same-season appearance-calibration policy backtest
+- [ ] Independent-season or prospectively frozen 2026-27 confirmatory evaluation
+- [ ] Apply supported appearance calibration to production projections
+- [ ] Apply supported xPts calibration to production projections
+- [ ] Per-player/per-fixture xPts uncertainty and risk bands
+- [ ] Validate calibration and uncertainty separately for premiums, cheap enablers, promoted-team
+      players, new signings, and position changes
+
+### Sprint 5 — Decision engine hardening and operational safety
+
 - [x] Immutable manager-squad snapshot foundation
-- [x] Exhaustive single-Gameweek lineup and single-transfer recommender
-- [x] Rolling three-Gameweek planning engine and frozen-run input contract
-- [x] Frozen preseason GW+1/GW+2 fixture projection materialisation
-- [ ] Deadline-safe in-season horizon projection refresh
-- [ ] Walk-forward evaluation of the rolling planner before operational use
-- [ ] Multi-transfer and chip-aware optimizer
+- [x] Exhaustive legal single-Gameweek lineup recommender
+- [x] Explainable single-transfer comparison
+- [x] Rolling three-Gameweek planner and frozen-run contract
+- [x] Frozen preseason GW+1/GW+2 fixture rescoring
+- [x] Approximate initial-squad beam-search prototype (`RESEARCH_ONLY`)
+- [ ] Add locked, required, excluded, and scenario player constraints (for example Haaland/no-
+      Haaland and set-and-forget/rotating goalkeeper comparisons)
+- [ ] Replace or audit the beam search with an exact/dominance-checked optimizer
+- [ ] Add counterfactual bench economics: cheapest legal bench plus optimal reinvestment must be
+      compared against every expensive-bench recommendation
+- [ ] Add goalkeeper sanity: a rotating pair must beat set-and-forget plus cheap backup after the
+      saved funds are optimally reinvested
+- [ ] Add premium sanity: an expensive player who is rarely started or captained must prove higher
+      marginal horizon value than the best cheaper structure
+- [ ] Model expected autosub value rather than treating bench players as either perfect future
+      rotation pieces or zero-value reserves
+- [ ] Integrate planned transfers into the initial-squad horizon instead of freezing all 15 players
+- [ ] Add multi-transfer and chip-aware optimization
+- [ ] Add optional ownership/EO and risk-adjusted objectives separately from mean xPts
+- [ ] Fail closed when coverage, freshness, calibration, uncertainty, or counterfactual gates fail
+- [ ] Walk-forward evaluate the full planner and decision policy before operational use
+- [ ] Operational sign-off: no dominated squad, all sanity checks pass, and every recommendation
+      includes marginal-value explanations
 
 ## License
 

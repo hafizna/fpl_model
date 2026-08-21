@@ -8,7 +8,7 @@ from pathlib import Path
 import duckdb
 
 DEFAULT_DATABASE_PATH = Path("data/processed/fpl_model.duckdb")
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -47,6 +47,51 @@ CREATE TABLE IF NOT EXISTS player_snapshot (
     PRIMARY KEY (ingestion_run_id, fpl_id),
     CHECK (chance_of_playing_this_round BETWEEN 0 AND 100),
     CHECK (chance_of_playing_next_round BETWEEN 0 AND 100)
+);
+
+CREATE TABLE IF NOT EXISTS player_identity_bridge_run (
+    bridge_run_id VARCHAR PRIMARY KEY,
+    source_ingestion_run_id VARCHAR NOT NULL REFERENCES ingestion_run(ingestion_run_id),
+    target_season VARCHAR NOT NULL,
+    vaastav_season VARCHAR NOT NULL,
+    source_revision VARCHAR NOT NULL,
+    source_path VARCHAR NOT NULL,
+    source_sha256 VARCHAR NOT NULL,
+    policy_version VARCHAR NOT NULL,
+    official_players INTEGER NOT NULL,
+    vaastav_players INTEGER NOT NULL,
+    matched_players INTEGER NOT NULL,
+    official_only_players INTEGER NOT NULL,
+    vaastav_only_players INTEGER NOT NULL,
+    name_mismatch_players INTEGER NOT NULL,
+    status VARCHAR NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
+    CHECK (official_players > 0),
+    CHECK (vaastav_players > 0),
+    CHECK (matched_players >= 0),
+    CHECK (official_only_players >= 0),
+    CHECK (vaastav_only_players >= 0),
+    CHECK (name_mismatch_players >= 0),
+    CHECK (matched_players + official_only_players = official_players),
+    CHECK (matched_players + vaastav_only_players = vaastav_players),
+    CHECK (name_mismatch_players <= matched_players),
+    CHECK (status IN ('completed', 'completed_with_gaps'))
+);
+
+CREATE TABLE IF NOT EXISTS player_identity_bridge (
+    bridge_run_id VARCHAR NOT NULL
+        REFERENCES player_identity_bridge_run(bridge_run_id),
+    canonical_player_id BIGINT NOT NULL,
+    provider VARCHAR NOT NULL,
+    provider_player_id VARCHAR NOT NULL,
+    player_name VARCHAR NOT NULL,
+    match_method VARCHAR NOT NULL,
+    data_quality_flags VARCHAR NOT NULL,
+    PRIMARY KEY (bridge_run_id, provider, provider_player_id),
+    UNIQUE (bridge_run_id, canonical_player_id, provider),
+    CHECK (canonical_player_id > 0),
+    CHECK (provider IN ('official_fpl', 'vaastav')),
+    CHECK (match_method IN ('shared_player_code', 'provider_code_only'))
 );
 
 CREATE TABLE IF NOT EXISTS player_status_snapshot (

@@ -15,7 +15,11 @@ Stable-ish provider-independent fields:
 - `fpl_position`
 - `season`
 
-Provider IDs (Understat, spatial provider, etc.) will live in an explicit bridge table rather than being inferred from names during modelling.
+Provider IDs live in an explicit bridge rather than being inferred from names during modelling.
+The first implemented bridge maps official FPL and Vaastav season-local IDs through their shared
+stable `player_code`. Names are diagnostic only: mismatches and provider-only players are retained
+as data-quality flags. Each bridge run pins the official snapshot, Vaastav revision, source hash,
+seasons, and mapping-policy version. See `PLAYER_IDENTITY_BRIDGE.md`.
 
 ### Match identity
 

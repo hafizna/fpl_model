@@ -74,18 +74,26 @@ A one-off GitHub Actions probe was run on 16 August 2026 against both:
 
 using browser-like headers and a deliberately low request rate. Both hosts returned HTTP `403` for scheduled-event requests from GitHub-hosted runner IPs.
 
-This does **not** prove that the endpoint pattern is invalid: current community clients document the same endpoints, and SofaScore is known to apply bot/rate-limit controls. It does mean that cloud CI is not a suitable live ingestion environment for this source. The next acceptance test should run from the user's local machine/network. Do not attempt to bypass provider access controls.
+This does **not** prove that the endpoint pattern is invalid: current community clients document the same endpoints, and SofaScore is known to apply bot/rate-limit controls. It does mean that cloud CI is not a suitable live ingestion environment for this source. Do not attempt to bypass provider access controls.
 
 A dated local follow-up is recorded in
 [`research/SOFASCORE_LOCAL_PROBE_2026-08-16.md`](research/SOFASCORE_LOCAL_PROBE_2026-08-16.md).
 After an Indonesian network filter was removed with a VPN, both direct hosts returned HTTP `403`;
 the same structured URL returned a Cloudflare challenge response in a normal browser. A
 browser-backed adapter is therefore not currently recommended, and coordinate orientation remains
-unresolved.
+unresolved. This local follow-up completes the Sprint 1 feasibility test with a **provider
+unavailable** result; structured Chelsea heatmap ingestion is not a production dependency or an
+open Sprint 1 gate.
 
-## Chelsea proof-of-concept
+## Chelsea feasibility result
 
-SofaScore's public pages show coverage for several Chelsea 2026 preseason friendlies. The first local smoke test should discover those match IDs through the daily schedule rather than hard-code IDs copied from a webpage.
+SofaScore's public pages showed Chelsea preseason match coverage, but neither the cloud runner nor
+the local/browser follow-up could retrieve a structured schedule payload. Consequently the spike
+did not claim that lineups, average positions, or player heatmaps were available. The responsible
+decision is to keep the adapter isolated and stop, rather than automate the provider challenge.
+
+If the provider later offers an authorized structured route, a fresh local smoke test should
+discover match IDs through the daily schedule rather than hard-code IDs copied from a webpage.
 
 SofaScore's Chelsea team ID is currently represented as `38` on its public team page. Treat provider IDs as external identifiers, not canonical FPL IDs.
 
