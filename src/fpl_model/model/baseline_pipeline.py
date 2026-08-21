@@ -7,6 +7,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from statistics import median
 
 import duckdb
 
@@ -14,6 +15,8 @@ from fpl_model.model.appearance import (
     DEFAULT_START_MINUTES,
     DEFAULT_SUBSTITUTE_MINUTES,
     AppearanceProjection,
+    ConditionalAppearanceScenario,
+    project_conditional_appearance,
 )
 from fpl_model.model.attacking import (
     AttackingWindow,
@@ -40,13 +43,18 @@ from fpl_model.model.secondary import (
 )
 from fpl_model.storage import DEFAULT_DATABASE_PATH, initialize_database
 
-POLICY_VERSION = "coherent_benchwarmers_preseason_baseline_v6"
+POLICY_VERSION = "coherent_benchwarmers_preseason_baseline_v7"
 HORIZON_POLICY_VERSION = "frozen_preseason_fixture_horizon_v1"
 REGULATION_MINUTES = 90.0
 AVERAGE_BPS_PER_START = 14.862318964622457
 AVERAGE_BONUS_PER_START = 0.29431670795024134
 AVERAGE_BONUS_PER_BPS = 0.019802879257995912
 SPARSE_APPEARANCE_THRESHOLD = 5
+MIN_RATE_PRIOR_COHORT = 10
+MIN_APPEARANCE_PRIOR_COHORT = 5
+PRIOR_REFERENCE_MINUTES = 900.0
+PRIOR_REFERENCE_STARTS = 10
+CHEAP_ENABLER_MAX_PRICE = {"GK": 4.5, "DEF": 4.5, "MID": 5.5, "FWD": 5.5}
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,6 +98,109 @@ class _TeamStrength:
     defensive_bonus_multiplier: float
     defensive_weakness_ratio: float
     is_promoted_prior: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _EmpiricalRatePrior:
+    rate: tuple[object, ...]
+    sample_size: int
+
+
+@dataclass(frozen=True, slots=True)
+class _EmpiricalAppearancePrior:
+    scenario: ConditionalAppearanceScenario
+    sample_size: int
+    scope: str
+
+
+def _price_band(position: str, price: float) -> str:
+    return "cheap" if price <= CHEAP_ENABLER_MAX_PRICE[position] else "regular"
+
+
+def _prior_kind(
+    rate: tuple[object, ...] | None,
+    own_strength: _TeamStrength | None,
+) -> str:
+    if rate is None:
+        return (
+            "promoted_no_previous_pl_rate"
+            if own_strength is not None and own_strength.is_promoted_prior
+            else "current_only_no_previous_pl_rate"
+        )
+    if not _has_usable_rate_history(rate):
+        return "returning_or_unproven"
+    return "usable_previous_pl_rate"
+
+
+def _rate_per_90(total: float, minutes: float) -> float:
+    return total / minutes * REGULATION_MINUTES if minutes > 0.0 else 0.0
+
+
+def _derive_rate_priors(
+    players: list[tuple[object, ...]],
+    rates: dict[int, tuple[object, ...]],
+) -> dict[tuple[str, str], _EmpiricalRatePrior]:
+    pools: dict[tuple[str, str], list[tuple[object, ...]]] = {}
+    for _, player_code, _, position, price in players:
+        rate = rates.get(player_code)
+        if rate is None or not _has_usable_rate_history(rate):
+            continue
+        pools.setdefault((position, _price_band(position, float(price))), []).append(
+            rate
+        )
+
+    priors: dict[tuple[str, str], _EmpiricalRatePrior] = {}
+    for key, rows in pools.items():
+        if len(rows) < MIN_RATE_PRIOR_COHORT:
+            continue
+
+        def per_90(total_index: int, minutes_index: int, sample_rows=rows) -> float:
+            return float(
+                median(
+                    _rate_per_90(float(row[total_index]), float(row[minutes_index]))
+                    for row in sample_rows
+                )
+            )
+
+        def per_start(total_index: int, starts_index: int, sample_rows=rows) -> float:
+            return float(
+                median(
+                    float(row[total_index]) / float(row[starts_index])
+                    if float(row[starts_index]) > 0.0
+                    else 0.0
+                    for row in sample_rows
+                )
+            )
+
+        position = key[0]
+        season_minutes = PRIOR_REFERENCE_MINUTES
+        long_minutes = PRIOR_REFERENCE_MINUTES
+        short_minutes = PRIOR_REFERENCE_MINUTES
+        long_defcon_minutes = PRIOR_REFERENCE_MINUTES
+        short_defcon_minutes = PRIOR_REFERENCE_MINUTES
+        rate = (
+            position,
+            season_minutes,
+            PRIOR_REFERENCE_STARTS,
+            per_90(3, 1) * season_minutes / REGULATION_MINUTES,
+            per_90(4, 1) * season_minutes / REGULATION_MINUTES,
+            per_90(5, 1) * season_minutes / REGULATION_MINUTES,
+            per_start(6, 2) * PRIOR_REFERENCE_STARTS,
+            per_start(7, 2) * PRIOR_REFERENCE_STARTS,
+            long_minutes,
+            per_90(9, 8) * long_minutes / REGULATION_MINUTES,
+            per_90(10, 8) * long_minutes / REGULATION_MINUTES,
+            short_minutes,
+            per_90(12, 11) * short_minutes / REGULATION_MINUTES,
+            per_90(13, 11) * short_minutes / REGULATION_MINUTES,
+            long_defcon_minutes,
+            per_90(15, 14) * long_defcon_minutes / REGULATION_MINUTES,
+            short_defcon_minutes,
+            per_90(17, 16) * short_defcon_minutes / REGULATION_MINUTES,
+            "[]",
+        )
+        priors[key] = _EmpiricalRatePrior(rate=rate, sample_size=len(rows))
+    return priors
 
 
 def _choose_input_runs(
@@ -171,7 +282,7 @@ def _choose_input_runs(
 
 
 def _appearance_projection(row: tuple[object, ...]) -> AppearanceProjection | None:
-    values = row[1:9]
+    values = row[2:10]
     if any(value is None for value in values):
         return None
     return AppearanceProjection(*map(float, values))
@@ -216,6 +327,101 @@ def _minutes_inputs(
         starts + substitutes,
         minutes_per_start == 0.0,
     )
+
+
+def _derive_appearance_priors(
+    *,
+    players: list[tuple[object, ...]],
+    appearance_rows: dict[int, tuple[object, ...]],
+    rates: dict[int, tuple[object, ...]],
+    strengths: dict[int, _TeamStrength],
+    histories: dict[int, tuple[int, int, float, float]],
+    overrides: dict[str, tuple[float, float]],
+) -> dict[tuple[str, str, str], _EmpiricalAppearancePrior]:
+    pools: dict[tuple[str, str, str], list[tuple[float, ...]]] = {}
+    broad_pools: dict[tuple[str, str, str], list[tuple[float, ...]]] = {}
+    for fpl_id, player_code, team_id, position, price in players:
+        raw = appearance_rows.get(fpl_id)
+        if raw is None or player_code is None:
+            continue
+        raw_flags = set(json.loads(raw[-1]))
+        if "FPL_ROSTER_BLOCKED" in raw_flags:
+            continue
+        availability = raw[1]
+        appearance = _appearance_projection(raw)
+        minutes = _minutes_inputs(
+            player_code=player_code,
+            flags=raw_flags,
+            history=histories,
+            overrides=overrides,
+        )
+        if (
+            availability is None
+            or float(availability) <= 0.0
+            or appearance is None
+            or minutes is None
+        ):
+            continue
+        availability = float(availability)
+        start_if_available = appearance.start_probability / availability
+        substitute_if_available = (
+            appearance.substitute_appearance_probability / availability
+        )
+        sixty_given_start = (
+            appearance.sixty_minute_probability / appearance.start_probability
+            if appearance.start_probability > 0.0
+            else 0.0
+        )
+        sample = (
+            start_if_available,
+            substitute_if_available,
+            sixty_given_start,
+            minutes.minutes_per_start,
+            minutes.minutes_per_substitute,
+        )
+        band = _price_band(position, float(price))
+        kind = _prior_kind(rates.get(player_code), strengths.get(team_id))
+        pools.setdefault((position, band, kind), []).append(sample)
+        broad_pools.setdefault((position, band, "all"), []).append(sample)
+
+    def build(
+        samples: list[tuple[float, ...]], scope: str
+    ) -> _EmpiricalAppearancePrior:
+        values = [float(median(row[index] for row in samples)) for index in range(5)]
+        start, substitute, sixty_given_start, start_minutes, substitute_minutes = values
+        total = start + substitute
+        if total > 1.0:
+            start /= total
+            substitute /= total
+        if start == 0.0:
+            sixty_given_start = 0.0
+        return _EmpiricalAppearancePrior(
+            scenario=ConditionalAppearanceScenario(
+                start_probability_if_available=start,
+                substitute_probability_if_available=substitute,
+                sixty_probability_given_start=sixty_given_start,
+                minutes_per_start=start_minutes or DEFAULT_START_MINUTES,
+                minutes_per_substitute=(
+                    substitute_minutes or DEFAULT_SUBSTITUTE_MINUTES
+                ),
+            ),
+            sample_size=len(samples),
+            scope=scope,
+        )
+
+    priors = {
+        key: build(samples, "exact_cohort")
+        for key, samples in pools.items()
+        if len(samples) >= MIN_APPEARANCE_PRIOR_COHORT
+    }
+    priors.update(
+        {
+            key: build(samples, "position_price_band")
+            for key, samples in broad_pools.items()
+            if len(samples) >= MIN_APPEARANCE_PRIOR_COHORT
+        }
+    )
+    return priors
 
 
 def _fixture_contexts(
@@ -337,7 +543,7 @@ def _materialize_frozen_fixture_projection(
 
         players = connection.execute(
             """
-            SELECT fpl_id, player_code, team_id, fpl_position
+            SELECT fpl_id, player_code, team_id, fpl_position, price
             FROM player_snapshot WHERE ingestion_run_id = ? ORDER BY fpl_id
             """,
             [source_ingestion_run],
@@ -346,7 +552,8 @@ def _materialize_frozen_fixture_projection(
             row[0]: row[1:]
             for row in connection.execute(
                 """
-                SELECT fpl_id, player_code, start_probability,
+                SELECT fpl_id, player_code, availability_probability,
+                       start_probability,
                        substitute_appearance_probability, appearance_probability,
                        sixty_minute_probability, expected_minutes,
                        appearance_xpts, sixty_minute_xpts, total_xpts,
@@ -420,12 +627,21 @@ def _materialize_frozen_fixture_projection(
             [source_ingestion_run, target_gameweek],
         ).fetchall()
         fixtures = _fixture_contexts(fixture_rows)
+        rate_priors = _derive_rate_priors(players, rates)
+        appearance_priors = _derive_appearance_priors(
+            players=players,
+            appearance_rows=appearance_rows,
+            rates=rates,
+            strengths=strengths,
+            histories=histories,
+            overrides=overrides,
+        )
 
         projection_rows = []
         component_rows = []
         gap_rows = []
         candidate_fixture_rows = 0
-        for fpl_id, player_code, team_id, position in players:
+        for fpl_id, player_code, team_id, position, price in players:
             player_fixtures = fixtures.get(team_id, ())
             candidate_fixture_rows += len(player_fixtures)
             flags: set[str] = set()
@@ -466,6 +682,43 @@ def _materialize_frozen_fixture_projection(
                 flags.add("OWN_TEAM_PROMOTED_PRIOR")
             if not player_fixtures:
                 flags.add("NO_GAMEWEEK_FIXTURE")
+            roster_blocked = "FPL_ROSTER_BLOCKED" in flags
+            prior_kind = _prior_kind(rate, own_strength)
+            band = _price_band(position, float(price))
+            if (
+                not roster_blocked
+                and appearance is None
+                and raw_appearance is not None
+                and raw_appearance[1] is not None
+            ):
+                appearance_prior = appearance_priors.get(
+                    (position, band, prior_kind)
+                ) or appearance_priors.get((position, band, "all"))
+                if appearance_prior is not None:
+                    appearance = project_conditional_appearance(
+                        appearance_prior.scenario,
+                        availability_probability=float(raw_appearance[1]),
+                    )
+                    minutes = _MinutesInputs(
+                        appearance_prior.scenario.minutes_per_start,
+                        appearance_prior.scenario.minutes_per_substitute,
+                        sample_appearances=None,
+                        used_default_start_minutes=False,
+                    )
+                    flags.add("EMPIRICAL_APPEARANCE_PRIOR")
+                    flags.add(f"APPEARANCE_PRIOR_COHORT={prior_kind}|{position}|{band}")
+                    flags.add(f"APPEARANCE_PRIOR_SCOPE={appearance_prior.scope}")
+                    flags.add(
+                        f"APPEARANCE_PRIOR_SAMPLE_SIZE={appearance_prior.sample_size}"
+                    )
+            if not roster_blocked and not rate_is_usable:
+                rate_prior = rate_priors.get((position, band))
+                if rate_prior is not None:
+                    rate = rate_prior.rate
+                    rate_is_usable = True
+                    flags.add("EMPIRICAL_PLAYER_RATE_PRIOR")
+                    flags.add(f"PLAYER_RATE_PRIOR_COHORT={prior_kind}|{position}|{band}")
+                    flags.add(f"PLAYER_RATE_PRIOR_SAMPLE_SIZE={rate_prior.sample_size}")
             if (
                 appearance is None
                 or minutes is None

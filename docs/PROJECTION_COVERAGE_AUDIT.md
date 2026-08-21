@@ -31,3 +31,8 @@ This avoids treating "cheap", "promoted", or "new" as mutually exclusive root ca
 The Sprint 3 gate is at least 95% coverage among selectable players and 100% coverage for every
 optimizer shortlist and selected squad. Until both conditions hold, the recommender remains
 `RESEARCH_ONLY`.
+
+The original v6 audit found 404 projections, 196 gaps, and 68.1% selectable coverage. After the
+auditable empirical priors in baseline policy v7, the same frozen inputs produce 583 projections
+and 17 gaps. All remaining gaps are roster-blocked, so selectable coverage is 100% and the coverage
+gate passes. This does not waive calibration, uncertainty, or squad-economics gates.

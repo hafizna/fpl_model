@@ -46,9 +46,9 @@ This repository currently includes:
 - a genuine walk-forward backtest of the replicated 11-component model against in-season Vaastav
   history (Vaastav-only team strength, no workbook)
 
-The next milestone is closing projection-coverage and context gaps, then hardening the decision
-layer against dominated or economically implausible squads. Calibration and uncertainty must be
-applied before the recommender is used operationally.
+Selectable-player projection coverage now passes its explicit gate. The next milestone is deeper
+context calibration and hardening the decision layer against dominated or economically implausible
+squads. Calibration and uncertainty must be applied before the recommender is used operationally.
 
 ## Recommender status: research prototype only
 
@@ -62,6 +62,11 @@ initial-squad output is **not operationally approved**. A deadline-time diagnost
   GBP 8.0m Watkins benched in GW1 and GW2;
 - a manually locked Raya/Dubravka structure scored 189.09 xPts at the same GBP 100.0m budget, so
   the published search result was dominated by a legal counterfactual.
+
+Baseline policy v7 closes the first failure with empirical, flagged position/price/cohort priors:
+583 of 600 players are projected and selectable-player coverage is 100%; the remaining 17 are all
+roster-blocked. A retrospective sanity simulation still selected Watkins on the bench in GW1 and
+GW2, so the coverage fix does **not** remove the decision-layer warning.
 
 Until the Sprint 5 gates below pass, generated squads must be labelled `RESEARCH_ONLY`, include
 coverage diagnostics, and show the best common counterfactuals alongside the nominal result.
@@ -216,6 +221,11 @@ python scripts/audit_projection_coverage.py --model-run baseline_...
 
 The report separates root cause from promoted/current-only/cheap-enabler cohorts and enforces the
 Sprint 3 coverage gate without inventing fallback xPts. See `docs/PROJECTION_COVERAGE_AUDIT.md`.
+
+Baseline policy v7 resolves supported gaps with empirical priors derived from players in the same
+position and price band. Missing-appearance priors prefer promoted/new-signing/returning cohorts
+when at least five comparable rows exist. Every fallback records its cohort, scope, and sample size;
+roster-blocked players remain gaps. See `docs/EMPIRICAL_PROJECTION_PRIORS.md`.
 
 Import an immutable current-manager squad snapshot after refreshing official FPL data:
 
@@ -383,9 +393,9 @@ See `THIRD_PARTY_NOTICES.md`.
 
 ### Sprint 3 — Projection coverage and context
 
-- [ ] Reach an explicit coverage gate for selectable players (target: at least 95%, plus 100% of
+- [x] Reach an explicit coverage gate for selectable players (target: at least 95%, plus 100% of
       every optimizer shortlist and selected squad)
-- [ ] Add explicit promoted-team, new-signing, returning-player, and cheap-enabler priors instead
+- [x] Add explicit promoted-team, new-signing, returning-player, and cheap-enabler priors instead
       of treating missing previous-PL history as near-zero ability or excluding it silently
 - [ ] Manager regime features
 - [ ] World Cup and preseason readiness, including current playing-time evidence
