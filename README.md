@@ -208,6 +208,15 @@ python scripts/import_player_identity_bridge.py --help
 The bridge uses the shared stable `player_code`; names are audit signals and never join keys. See
 `docs/PLAYER_IDENTITY_BRIDGE.md`.
 
+Audit and classify every player withheld from one immutable baseline run:
+
+```bash
+python scripts/audit_projection_coverage.py --model-run baseline_...
+```
+
+The report separates root cause from promoted/current-only/cheap-enabler cohorts and enforces the
+Sprint 3 coverage gate without inventing fallback xPts. See `docs/PROJECTION_COVERAGE_AUDIT.md`.
+
 Import an immutable current-manager squad snapshot after refreshing official FPL data:
 
 ```bash
