@@ -16,6 +16,13 @@ python scripts/resolve_availability.py --gameweek 2
 python scripts/refresh_fpl_event_live.py \
   --gameweek 1 \
   --source-ingestion-run fpl_...
+# After a sourced complete match review; a header-only CSV asserts no penalties.
+python scripts/add_penalty_review.py \
+  --live-run-id fpl_live_... \
+  --csv data/raw/reviews/gw1_penalties.csv \
+  --observed-at 2026-08-25T04:00:00+07:00 \
+  --source-reference "reviewed match report" \
+  --rationale "complete GW1 penalty ledger"
 python scripts/project_inseason_appearance.py \
   --gameweek 2 \
   --current-season 2026-27 \
@@ -42,6 +49,11 @@ python scripts/project_frozen_horizon.py --anchor-model-run-id baseline_...
 `finished` and `data_checked`. `project_inseason_appearance.py` also requires one completed final
 event-live run for every earlier Gameweek. For GW3, for example, both GW1 and GW2 must exist. Do not
 use `--allow-provisional` for a production recommendation.
+
+The penalty review is a separate fail-closed boundary: official total xG is retained, but npxG is
+withheld until the complete event penalty ledger has been reviewed. The current early-season
+baseline still uses frozen previous-season player rates, so this decomposition is stored for the
+future attacking-rate refresh rather than applied as an immediate multiplier.
 
 The refreshed appearance projection shrinks current-season starts, cameos, and minutes toward the
 reviewed previous-season appearance history. With the default five effective prior fixtures, one

@@ -1,0 +1,55 @@
+{
+  "$schema_note": "Strictly prior-outcome walk-forward validation of residual-based xPts intervals. The resulting artifact remains shadow-only.",
+  "artifact_id": "uncertainty_af9c5d86211f8d8f",
+  "artifact_status": "shadow",
+  "candidate_residual_rows": 16496,
+  "cohorts": {
+    "all": {
+      "empirical_coverage": 0.7847041054510504,
+      "mean_interval_width": 4.59504968265855,
+      "mean_predictive_rmse": 2.4240825899699248,
+      "observations": 14566
+    },
+    "position_DEF": {
+      "empirical_coverage": 0.786067682564813,
+      "mean_interval_width": 4.818212041278154,
+      "mean_predictive_rmse": 2.617191318531337,
+      "observations": 5053
+    },
+    "position_FWD": {
+      "empirical_coverage": 0.7522935779816514,
+      "mean_interval_width": 4.378448024935876,
+      "mean_predictive_rmse": 2.364691504045517,
+      "observations": 1744
+    },
+    "position_GK": {
+      "empirical_coverage": 0.7878787878787878,
+      "mean_interval_width": 4.649035678742838,
+      "mean_predictive_rmse": 2.2810693658805823,
+      "observations": 957
+    },
+    "position_MID": {
+      "empirical_coverage": 0.7915443335290664,
+      "mean_interval_width": 4.4773822273900254,
+      "mean_predictive_rmse": 2.3161353356958285,
+      "observations": 6812
+    }
+  },
+  "interval_mass": 0.8,
+  "limitations": [
+    "Intervals quantify historical residual dispersion, not parameter or model-selection uncertainty.",
+    "Residual dependence between players and fixtures is not used by the existing lineup variance sum.",
+    "Premium, cheap-enabler, promoted-team, new-signing, and role-change cohorts require prospectively captured production metadata and remain unvalidated.",
+    "No shadow or active artifact changes mean xPts; only an explicitly approved artifact may populate the scalar uncertainty field."
+  ],
+  "minimum_segment_gameweeks": 5,
+  "minimum_segment_rows": 100,
+  "reproduce": ".venv\\Scripts\\python.exe scripts/build_uncertainty_artifact.py --season 2025-26",
+  "risk_rmse_thresholds": {
+    "low_max": 2.4164400005123885,
+    "medium_max": 3.0888524466735996
+  },
+  "season": "2025-26",
+  "source_model_version": "benchwarmers_replica_walk_forward_backtest_v1",
+  "walk_forward_rows": 14566
+}

@@ -8,7 +8,7 @@ from pathlib import Path
 import duckdb
 
 DEFAULT_DATABASE_PATH = Path("data/processed/fpl_model.duckdb")
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -242,6 +242,54 @@ CREATE TABLE IF NOT EXISTS player_gameweek_stat (
     CHECK (expected_goals >= 0.0),
     CHECK (expected_assists >= 0.0),
     CHECK (expected_goals_conceded >= 0.0)
+);
+
+CREATE TABLE IF NOT EXISTS event_penalty_review (
+    review_id VARCHAR PRIMARY KEY,
+    live_run_id VARCHAR NOT NULL UNIQUE REFERENCES fpl_event_live_run(live_run_id),
+    observed_at TIMESTAMPTZ NOT NULL,
+    source_reference VARCHAR NOT NULL,
+    rationale VARCHAR NOT NULL,
+    status VARCHAR NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
+    CHECK (status = 'completed')
+);
+
+CREATE TABLE IF NOT EXISTS player_penalty_event (
+    review_id VARCHAR NOT NULL REFERENCES event_penalty_review(review_id),
+    fpl_id INTEGER NOT NULL,
+    attempts INTEGER NOT NULL,
+    goals INTEGER NOT NULL,
+    penalty_xg DOUBLE NOT NULL,
+    PRIMARY KEY (review_id, fpl_id),
+    CHECK (attempts > 0),
+    CHECK (goals BETWEEN 0 AND attempts),
+    CHECK (penalty_xg >= 0.0)
+);
+
+CREATE TABLE IF NOT EXISTS player_gameweek_attacking_decomposition (
+    live_run_id VARCHAR NOT NULL REFERENCES fpl_event_live_run(live_run_id),
+    fpl_id INTEGER NOT NULL,
+    review_id VARCHAR NOT NULL REFERENCES event_penalty_review(review_id),
+    total_expected_goals DOUBLE NOT NULL,
+    penalty_expected_goals DOUBLE NOT NULL,
+    non_penalty_expected_goals DOUBLE NOT NULL,
+    penalty_attempts INTEGER NOT NULL,
+    penalty_goals INTEGER NOT NULL,
+    data_quality_flags VARCHAR NOT NULL,
+    PRIMARY KEY (live_run_id, fpl_id),
+    CHECK (total_expected_goals >= 0.0),
+    CHECK (penalty_expected_goals >= 0.0),
+    CHECK (non_penalty_expected_goals >= 0.0),
+    CHECK (penalty_attempts >= 0),
+    CHECK (penalty_goals BETWEEN 0 AND penalty_attempts),
+    CHECK (
+        abs(
+            total_expected_goals
+            - penalty_expected_goals
+            - non_penalty_expected_goals
+        ) <= 0.000001
+    )
 );
 
 CREATE TABLE IF NOT EXISTS availability_signal (
@@ -755,6 +803,70 @@ CREATE TABLE IF NOT EXISTS context_feature_run (
     CHECK (status IN ('completed', 'completed_with_gaps'))
 );
 
+CREATE TABLE IF NOT EXISTS uncertainty_artifact (
+    artifact_id VARCHAR PRIMARY KEY,
+    source_season VARCHAR NOT NULL,
+    source_model_version VARCHAR NOT NULL,
+    source_reference VARCHAR NOT NULL,
+    policy_version VARCHAR NOT NULL,
+    interval_mass DOUBLE NOT NULL,
+    minimum_segment_rows INTEGER NOT NULL,
+    minimum_segment_gameweeks INTEGER NOT NULL,
+    low_risk_rmse_threshold DOUBLE NOT NULL,
+    high_risk_rmse_threshold DOUBLE NOT NULL,
+    segment_rows INTEGER NOT NULL,
+    status VARCHAR NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
+    CHECK (interval_mass > 0.0 AND interval_mass < 1.0),
+    CHECK (minimum_segment_rows > 0),
+    CHECK (minimum_segment_gameweeks > 0),
+    CHECK (low_risk_rmse_threshold >= 0.0),
+    CHECK (high_risk_rmse_threshold >= low_risk_rmse_threshold),
+    CHECK (segment_rows > 0),
+    CHECK (status IN ('shadow', 'approved', 'rejected'))
+);
+
+CREATE TABLE IF NOT EXISTS uncertainty_segment (
+    artifact_id VARCHAR NOT NULL REFERENCES uncertainty_artifact(artifact_id),
+    scope VARCHAR NOT NULL,
+    position VARCHAR NOT NULL,
+    xpts_band VARCHAR NOT NULL,
+    start_band VARCHAR NOT NULL,
+    sample_rows INTEGER NOT NULL,
+    sample_gameweeks INTEGER NOT NULL,
+    mean_error DOUBLE NOT NULL,
+    predictive_rmse DOUBLE NOT NULL,
+    residual_lower DOUBLE NOT NULL,
+    residual_upper DOUBLE NOT NULL,
+    PRIMARY KEY (artifact_id, scope, position, xpts_band, start_band),
+    CHECK (scope IN ('overall', 'position', 'position_xpts', 'position_xpts_start')),
+    CHECK (position IN ('ALL', 'GK', 'DEF', 'MID', 'FWD')),
+    CHECK (sample_rows > 0),
+    CHECK (sample_gameweeks > 0),
+    CHECK (predictive_rmse >= 0.0),
+    CHECK (residual_upper >= residual_lower)
+);
+
+CREATE TABLE IF NOT EXISTS shadow_calibration_artifact (
+    artifact_id VARCHAR PRIMARY KEY,
+    calibration_type VARCHAR NOT NULL,
+    source_season VARCHAR NOT NULL,
+    source_model_version VARCHAR NOT NULL,
+    source_reference VARCHAR NOT NULL,
+    training_rows INTEGER NOT NULL,
+    training_gameweeks INTEGER NOT NULL,
+    slope DOUBLE NOT NULL,
+    intercept DOUBLE NOT NULL,
+    policy_version VARCHAR NOT NULL,
+    status VARCHAR NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
+    CHECK (calibration_type IN ('xpts')),
+    CHECK (training_rows > 0),
+    CHECK (training_gameweeks > 0),
+    CHECK (slope >= 0.0),
+    CHECK (status IN ('shadow', 'approved', 'rejected'))
+);
+
 CREATE TABLE IF NOT EXISTS player_context_feature (
     context_run_id VARCHAR NOT NULL REFERENCES context_feature_run(context_run_id),
     fpl_id INTEGER NOT NULL,
@@ -807,6 +919,18 @@ CREATE TABLE IF NOT EXISTS baseline_context_lineage (
     context_run_id VARCHAR NOT NULL REFERENCES context_feature_run(context_run_id)
 );
 
+CREATE TABLE IF NOT EXISTS model_uncertainty_lineage (
+    model_run_id VARCHAR PRIMARY KEY REFERENCES model_run(model_run_id),
+    artifact_id VARCHAR NOT NULL REFERENCES uncertainty_artifact(artifact_id),
+    application_mode VARCHAR NOT NULL,
+    CHECK (application_mode IN ('shadow', 'active'))
+);
+
+CREATE TABLE IF NOT EXISTS model_shadow_calibration_lineage (
+    model_run_id VARCHAR PRIMARY KEY REFERENCES model_run(model_run_id),
+    artifact_id VARCHAR NOT NULL REFERENCES shadow_calibration_artifact(artifact_id)
+);
+
 CREATE TABLE IF NOT EXISTS player_fixture_projection (
     model_run_id VARCHAR NOT NULL REFERENCES model_run(model_run_id),
     player_code BIGINT NOT NULL,
@@ -827,6 +951,44 @@ CREATE TABLE IF NOT EXISTS player_fixture_projection (
     CHECK (substitute_appearance_probability BETWEEN 0.0 AND 1.0),
     CHECK (start_probability + substitute_appearance_probability <= 1.0),
     CHECK (expected_minutes BETWEEN 0.0 AND 130.0)
+);
+
+CREATE TABLE IF NOT EXISTS player_fixture_uncertainty (
+    model_run_id VARCHAR NOT NULL,
+    player_code BIGINT NOT NULL,
+    fixture_id INTEGER NOT NULL,
+    artifact_id VARCHAR NOT NULL REFERENCES uncertainty_artifact(artifact_id),
+    lower_xpts DOUBLE NOT NULL,
+    upper_xpts DOUBLE NOT NULL,
+    predictive_rmse DOUBLE NOT NULL,
+    relative_uncertainty DOUBLE NOT NULL,
+    risk_band VARCHAR NOT NULL,
+    segment_scope VARCHAR NOT NULL,
+    segment_sample_rows INTEGER NOT NULL,
+    data_quality_flags VARCHAR NOT NULL,
+    PRIMARY KEY (model_run_id, player_code, fixture_id),
+    FOREIGN KEY (model_run_id, player_code, fixture_id)
+        REFERENCES player_fixture_projection(model_run_id, player_code, fixture_id),
+    CHECK (lower_xpts >= 0.0),
+    CHECK (upper_xpts >= lower_xpts),
+    CHECK (predictive_rmse >= 0.0),
+    CHECK (relative_uncertainty >= 0.0),
+    CHECK (risk_band IN ('low', 'medium', 'high')),
+    CHECK (segment_sample_rows > 0)
+);
+
+CREATE TABLE IF NOT EXISTS player_fixture_shadow_projection (
+    model_run_id VARCHAR NOT NULL,
+    player_code BIGINT NOT NULL,
+    fixture_id INTEGER NOT NULL,
+    artifact_id VARCHAR NOT NULL REFERENCES shadow_calibration_artifact(artifact_id),
+    raw_xpts DOUBLE NOT NULL,
+    shadow_calibrated_xpts DOUBLE NOT NULL,
+    clipped_at_zero BOOLEAN NOT NULL,
+    PRIMARY KEY (model_run_id, player_code, fixture_id),
+    FOREIGN KEY (model_run_id, player_code, fixture_id)
+        REFERENCES player_fixture_projection(model_run_id, player_code, fixture_id),
+    CHECK (shadow_calibrated_xpts >= 0.0)
 );
 
 CREATE TABLE IF NOT EXISTS projection_component (
