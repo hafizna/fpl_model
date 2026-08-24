@@ -214,6 +214,10 @@ def test_renders_one_dependency_free_interactive_html_document(tmp_path):
 
     assert text.startswith("<!doctype html>")
     assert "const DATA =" in text
+    assert "Your squad, on the pitch" in text
+    assert 'class="pitch"' in text
+    assert 'id="gw-tabs"' in text
+    assert 'id="player-dialog"' in text
     assert "A <\\/script> scenario" in text
     assert "fetch(" not in text
     assert json.loads(json.dumps(data))["scenarios"][0]["label"] in text.replace(

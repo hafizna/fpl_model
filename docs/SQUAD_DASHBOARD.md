@@ -32,12 +32,23 @@ availability are joined from the explicitly pinned official FPL snapshot.
 ## What it shows
 
 - tabs for comparing alternate 15-player scenarios;
+- an FPL-style pitch that groups the selected XI by formation, with a separate ordered bench;
+- Gameweek tabs that keep one relevant xPts value in focus instead of showing three competing
+  numbers on every player card;
+- an XI xPts total for the selected Gameweek, including the captain multiplier, only when all 11
+  starters are covered;
 - current budget, official-snapshot legality, and three-GW projection coverage;
 - transfers in/out relative to the first scenario;
-- per-player GW1–GW3 xPts and explicit gap flags;
+- compact captain, vice-captain, and projection-risk markers on the pitch;
+- per-player GW1–GW3 xPts and explicit gap flags in an on-demand player detail dialog;
 - research-evidence status for gaps, without treating that evidence as a production projection;
 - the covered-player xPts delta between scenarios;
 - an optimized XI/captain recommendation only when all 15 players are projected.
+
+The main view is intentionally optimized for football scanning: formation first, active Gameweek
+second, and data diagnostics on demand. The complete 15-player projection table remains available
+under **Projection audit**. Team shirts are lightweight local CSS markers rather than copied FPL or
+third-party artwork.
 
 The dashboard deliberately withholds a supposedly optimal lineup when projection coverage is
 incomplete. Covered-player xPts is a diagnostic sum across every covered owned player, not the
