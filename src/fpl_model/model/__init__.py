@@ -24,6 +24,7 @@ from fpl_model.model.baseline import (
 )
 from fpl_model.model.baseline_pipeline import (
     BaselineRunResult,
+    materialize_inseason_baseline,
     materialize_preseason_baseline,
 )
 from fpl_model.model.defence import (
@@ -99,6 +100,7 @@ __all__ = [
     "fixture_contexts_for_team",
     "home_away_multiplier",
     "materialize_preseason_baseline",
+    "materialize_inseason_baseline",
     "poisson_tail_probability",
     "project_appearance",
     "project_benchwarmers_appearance",

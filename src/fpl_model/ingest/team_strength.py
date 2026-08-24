@@ -271,9 +271,9 @@ def materialize_preseason_team_strength(
     source_ingestion_run_id: str | None = None,
     database_path: str | Path = DEFAULT_DATABASE_PATH,
 ) -> TeamStrengthRunResult:
-    """Map reviewed rates to current teams and derive fixture multipliers."""
-    if target_gameweek != 1:
-        raise ValueError("preseason team-strength materialisation currently supports GW1 only")
+    """Map the frozen reviewed team prior onto a causal current-team snapshot."""
+    if not 1 <= target_gameweek <= 38:
+        raise ValueError("target_gameweek must be between 1 and 38")
     initialize_database(database_path)
     with duckdb.connect(str(database_path)) as connection:
         imported = connection.execute(
@@ -374,6 +374,8 @@ def materialize_preseason_team_strength(
             )
             promoted = prior_type == "promoted_team_prior"
             flags = ["PROMOTED_TEAM_PRIOR"] if promoted else []
+            if target_gameweek > 1:
+                flags.append("FROZEN_PRESEASON_TEAM_STRENGTH_PRIOR")
             output_rows.append(
                 (
                     strength_run_id,

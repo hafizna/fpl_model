@@ -8,7 +8,7 @@ from pathlib import Path
 import duckdb
 
 DEFAULT_DATABASE_PATH = Path("data/processed/fpl_model.duckdb")
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -187,6 +187,61 @@ CREATE TABLE IF NOT EXISTS fixture_snapshot (
     started BOOLEAN NOT NULL,
     finished BOOLEAN NOT NULL,
     PRIMARY KEY (ingestion_run_id, fixture_id)
+);
+
+CREATE TABLE IF NOT EXISTS fpl_event_live_run (
+    live_run_id VARCHAR PRIMARY KEY,
+    source_ingestion_run_id VARCHAR NOT NULL REFERENCES ingestion_run(ingestion_run_id),
+    season VARCHAR NOT NULL,
+    gameweek INTEGER NOT NULL,
+    captured_at TIMESTAMPTZ NOT NULL,
+    source_path VARCHAR NOT NULL,
+    source_sha256 VARCHAR NOT NULL,
+    event_finished BOOLEAN NOT NULL,
+    data_checked BOOLEAN NOT NULL,
+    player_rows INTEGER NOT NULL,
+    status VARCHAR NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
+    UNIQUE (source_ingestion_run_id, gameweek, source_sha256),
+    CHECK (gameweek BETWEEN 1 AND 38),
+    CHECK (player_rows > 0),
+    CHECK (status IN ('completed', 'provisional'))
+);
+
+CREATE TABLE IF NOT EXISTS player_gameweek_stat (
+    live_run_id VARCHAR NOT NULL REFERENCES fpl_event_live_run(live_run_id),
+    fpl_id INTEGER NOT NULL,
+    player_code BIGINT,
+    played BOOLEAN NOT NULL,
+    minutes INTEGER NOT NULL,
+    starts INTEGER NOT NULL,
+    goals_scored INTEGER NOT NULL,
+    assists INTEGER NOT NULL,
+    saves INTEGER NOT NULL,
+    yellow_cards INTEGER NOT NULL,
+    red_cards INTEGER NOT NULL,
+    bonus INTEGER NOT NULL,
+    bps INTEGER NOT NULL,
+    defensive_contribution INTEGER NOT NULL,
+    expected_goals DOUBLE NOT NULL,
+    expected_assists DOUBLE NOT NULL,
+    expected_goals_conceded DOUBLE NOT NULL,
+    total_points INTEGER NOT NULL,
+    modified BOOLEAN NOT NULL,
+    data_quality_flags VARCHAR NOT NULL,
+    PRIMARY KEY (live_run_id, fpl_id),
+    CHECK (minutes BETWEEN 0 AND 260),
+    CHECK (starts BETWEEN 0 AND 2),
+    CHECK (goals_scored >= 0),
+    CHECK (assists >= 0),
+    CHECK (saves >= 0),
+    CHECK (yellow_cards >= 0),
+    CHECK (red_cards >= 0),
+    CHECK (bonus >= 0),
+    CHECK (defensive_contribution >= 0),
+    CHECK (expected_goals >= 0.0),
+    CHECK (expected_assists >= 0.0),
+    CHECK (expected_goals_conceded >= 0.0)
 );
 
 CREATE TABLE IF NOT EXISTS availability_signal (
@@ -622,6 +677,117 @@ CREATE TABLE IF NOT EXISTS player_appearance_projection (
     CHECK (expected_minutes BETWEEN 0.0 AND 90.0)
 );
 
+CREATE TABLE IF NOT EXISTS inseason_appearance_run (
+    projection_run_id VARCHAR PRIMARY KEY
+        REFERENCES appearance_projection_run(projection_run_id),
+    current_season VARCHAR NOT NULL,
+    previous_season VARCHAR NOT NULL,
+    first_history_gameweek INTEGER NOT NULL,
+    last_history_gameweek INTEGER NOT NULL,
+    live_run_ids VARCHAR NOT NULL,
+    previous_effective_fixtures DOUBLE NOT NULL,
+    as_of TIMESTAMPTZ NOT NULL,
+    policy_version VARCHAR NOT NULL,
+    CHECK (first_history_gameweek BETWEEN 1 AND 38),
+    CHECK (last_history_gameweek BETWEEN first_history_gameweek AND 38),
+    CHECK (previous_effective_fixtures > 0.0)
+);
+
+CREATE TABLE IF NOT EXISTS inseason_player_appearance_context (
+    projection_run_id VARCHAR NOT NULL
+        REFERENCES inseason_appearance_run(projection_run_id),
+    fpl_id INTEGER NOT NULL,
+    current_fixture_rows INTEGER NOT NULL,
+    previous_weight DOUBLE NOT NULL,
+    current_weight DOUBLE NOT NULL,
+    minutes_per_start DOUBLE NOT NULL,
+    minutes_per_substitute DOUBLE NOT NULL,
+    data_quality_flags VARCHAR NOT NULL,
+    PRIMARY KEY (projection_run_id, fpl_id),
+    CHECK (current_fixture_rows >= 0),
+    CHECK (previous_weight BETWEEN 0.0 AND 1.0),
+    CHECK (current_weight BETWEEN 0.0 AND 1.0),
+    CHECK (abs(previous_weight + current_weight - 1.0) <= 0.000001),
+    CHECK (minutes_per_start BETWEEN 0.0 AND 90.0),
+    CHECK (minutes_per_substitute BETWEEN 0.0 AND 90.0)
+);
+
+CREATE TABLE IF NOT EXISTS reviewed_context_annotation (
+    annotation_id VARCHAR PRIMARY KEY,
+    subject_type VARCHAR NOT NULL,
+    player_code BIGINT,
+    team_id INTEGER,
+    context_type VARCHAR NOT NULL,
+    observed_at TIMESTAMPTZ NOT NULL,
+    effective_from TIMESTAMPTZ NOT NULL,
+    effective_until TIMESTAMPTZ,
+    payload VARCHAR NOT NULL,
+    source_reference VARCHAR NOT NULL,
+    rationale VARCHAR NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
+    CHECK (subject_type IN ('player', 'team')),
+    CHECK (context_type IN ('manager_regime', 'readiness', 'tactical_role')),
+    CHECK (
+        (subject_type = 'player' AND player_code IS NOT NULL AND team_id IS NULL)
+        OR
+        (subject_type = 'team' AND team_id IS NOT NULL AND player_code IS NULL)
+    ),
+    CHECK (effective_until IS NULL OR effective_until >= effective_from)
+);
+
+CREATE TABLE IF NOT EXISTS context_feature_run (
+    context_run_id VARCHAR PRIMARY KEY,
+    source_ingestion_run_id VARCHAR NOT NULL REFERENCES ingestion_run(ingestion_run_id),
+    appearance_projection_run_id VARCHAR NOT NULL
+        REFERENCES inseason_appearance_run(projection_run_id),
+    target_gameweek INTEGER NOT NULL,
+    as_of TIMESTAMPTZ NOT NULL,
+    deadline TIMESTAMPTZ NOT NULL,
+    policy_version VARCHAR NOT NULL,
+    player_rows INTEGER NOT NULL,
+    fully_observed_rows INTEGER NOT NULL,
+    status VARCHAR NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
+    CHECK (target_gameweek BETWEEN 2 AND 38),
+    CHECK (as_of <= deadline),
+    CHECK (player_rows > 0),
+    CHECK (fully_observed_rows BETWEEN 0 AND player_rows),
+    CHECK (status IN ('completed', 'completed_with_gaps'))
+);
+
+CREATE TABLE IF NOT EXISTS player_context_feature (
+    context_run_id VARCHAR NOT NULL REFERENCES context_feature_run(context_run_id),
+    fpl_id INTEGER NOT NULL,
+    player_code BIGINT,
+    manager_name VARCHAR,
+    manager_tenure_days INTEGER,
+    manager_changed_since_previous_deadline BOOLEAN,
+    tournament_minutes DOUBLE,
+    days_since_last_tournament_match INTEGER,
+    training_days INTEGER,
+    preseason_minutes DOUBLE,
+    rest_days DOUBLE,
+    minutes_last_7d DOUBLE NOT NULL,
+    minutes_last_14d DOUBLE NOT NULL,
+    matches_last_7d INTEGER NOT NULL,
+    matches_last_14d INTEGER NOT NULL,
+    tactical_role_label VARCHAR,
+    tactical_role_distance DOUBLE,
+    nominal_position_changed BOOLEAN,
+    data_quality_flags VARCHAR NOT NULL,
+    PRIMARY KEY (context_run_id, fpl_id),
+    CHECK (manager_tenure_days IS NULL OR manager_tenure_days >= 0),
+    CHECK (tournament_minutes IS NULL OR tournament_minutes >= 0.0),
+    CHECK (training_days IS NULL OR training_days >= 0),
+    CHECK (preseason_minutes IS NULL OR preseason_minutes >= 0.0),
+    CHECK (rest_days IS NULL OR rest_days >= 0.0),
+    CHECK (minutes_last_7d >= 0.0),
+    CHECK (minutes_last_14d >= minutes_last_7d),
+    CHECK (matches_last_7d >= 0),
+    CHECK (matches_last_14d >= matches_last_7d),
+    CHECK (tactical_role_distance IS NULL OR tactical_role_distance >= 0.0)
+);
+
 CREATE TABLE IF NOT EXISTS model_run (
     model_run_id VARCHAR PRIMARY KEY,
     target_gameweek INTEGER NOT NULL,
@@ -634,6 +800,11 @@ CREATE TABLE IF NOT EXISTS model_run (
     completed_at TIMESTAMPTZ,
     CHECK (as_of <= deadline),
     CHECK (status IN ('running', 'completed', 'failed'))
+);
+
+CREATE TABLE IF NOT EXISTS baseline_context_lineage (
+    model_run_id VARCHAR PRIMARY KEY REFERENCES model_run(model_run_id),
+    context_run_id VARCHAR NOT NULL REFERENCES context_feature_run(context_run_id)
 );
 
 CREATE TABLE IF NOT EXISTS player_fixture_projection (

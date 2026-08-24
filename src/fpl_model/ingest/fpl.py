@@ -43,6 +43,15 @@ class FPLClient:
             raise ValueError("FPL API snapshot payload changed shape")
         return bootstrap, fixtures, datetime.now(UTC)
 
+    def event_live(self, gameweek: int) -> dict[str, Any]:
+        """Fetch official per-player statistics for one gameweek."""
+        if not 1 <= gameweek <= 38:
+            raise ValueError("gameweek must be between 1 and 38")
+        payload = self._get_json(f"event/{gameweek}/live/")
+        if not isinstance(payload, dict) or not isinstance(payload.get("elements"), list):
+            raise ValueError("FPL event-live payload changed shape")
+        return payload
+
     def raw_players(self) -> pd.DataFrame:
         return pd.DataFrame(self.bootstrap()["elements"])
 

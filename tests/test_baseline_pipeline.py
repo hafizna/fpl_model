@@ -8,6 +8,7 @@ import pytest
 
 from fpl_model.model.baseline_pipeline import (
     materialize_frozen_projection_horizon,
+    materialize_inseason_baseline,
     materialize_preseason_baseline,
 )
 from fpl_model.storage import initialize_database
@@ -185,6 +186,130 @@ def test_preseason_baseline_rejects_in_season_gameweeks(tmp_path):
             target_gameweek=2,
             database_path=tmp_path / "baseline.duckdb",
         )
+
+
+def test_inseason_baseline_uses_refreshed_minutes_and_keeps_frozen_priors_visible(
+    tmp_path,
+):
+    database_path = tmp_path / "baseline.duckdb"
+    _seed_baseline_inputs(database_path)
+    with duckdb.connect(str(database_path)) as connection:
+        connection.execute(
+            """
+            INSERT INTO gameweek_snapshot VALUES (
+                'snapshot', 2, 'Gameweek 2', '2026-08-29T00:30:00+07:00',
+                NULL, FALSE, FALSE, FALSE, FALSE, TRUE
+            );
+            INSERT INTO fixture_snapshot VALUES (
+                'snapshot', 101, 2, '2026-08-29T15:00:00+01:00',
+                2, 1, FALSE, FALSE
+            );
+            INSERT INTO availability_resolution_run (
+                resolution_run_id, source_ingestion_run_id, target_gameweek,
+                as_of, deadline, policy_version, status
+            ) VALUES (
+                'availability2', 'snapshot', 2, '2026-08-20T09:00:00+07:00',
+                '2026-08-29T00:30:00+07:00', 'test', 'completed'
+            );
+            INSERT INTO appearance_projection_run (
+                projection_run_id, availability_resolution_run_id,
+                appearance_history_import_run_id, target_gameweek,
+                policy_version, status
+            ) VALUES (
+                'appearance2', 'availability2', 'appearance_history', 2,
+                'benchwarmers_inseason_appearance_v1', 'completed'
+            );
+            INSERT INTO player_appearance_projection VALUES
+                ('appearance2', 1, 519634, 1.0, 0.8, 0.1, 0.9, 0.7,
+                 71.2, 0.9, 0.7, 1.6, '["SHRUNK_CURRENT_SEASON_APPEARANCE"]'),
+                ('appearance2', 2, 999999, 1.0, 0.5, 0.25, 0.75, 0.3,
+                 35.0, 0.75, 0.3, 1.05, '[]');
+            INSERT INTO inseason_appearance_run VALUES (
+                'appearance2', '2026-27', '2025-26', 1, 1, '["live-gw1"]',
+                5.0, '2026-08-21T09:00:00+07:00',
+                'benchwarmers_inseason_appearance_v1'
+            );
+            INSERT INTO inseason_player_appearance_context VALUES
+                ('appearance2', 1, 1, 0.8333333333, 0.1666666667,
+                 88.0, 12.0, '["SHRUNK_CURRENT_SEASON_APPEARANCE"]'),
+                ('appearance2', 2, 1, 0.0, 1.0, 70.0, 15.0, '[]');
+            INSERT INTO context_feature_run VALUES (
+                'context2', 'snapshot', 'appearance2', 2,
+                '2026-08-21T09:00:00+07:00', '2026-08-29T00:30:00+07:00',
+                'deadline_safe_context_features_v1', 2, 0,
+                'completed_with_gaps', current_timestamp
+            );
+            INSERT INTO player_context_feature (
+                context_run_id, fpl_id, player_code, minutes_last_7d,
+                minutes_last_14d, matches_last_7d, matches_last_14d,
+                data_quality_flags
+            ) VALUES
+                ('context2', 1, 519634, 90.0, 90.0, 1, 1,
+                 '["CONTEXT_FEATURES_DIAGNOSTIC_ONLY"]'),
+                ('context2', 2, 999999, 20.0, 20.0, 1, 1,
+                 '["CONTEXT_FEATURES_DIAGNOSTIC_ONLY"]');
+            INSERT INTO team_strength_run (
+                strength_run_id, source_import_run_id, source_ingestion_run_id,
+                target_gameweek, policy_version, team_rows, status
+            ) VALUES (
+                'strength2', 'strength_import', 'snapshot', 2, 'test', 20,
+                'completed'
+            );
+            INSERT INTO team_strength_projection
+            SELECT 'strength2', team_id, team_code, team_abbreviation, team_name,
+                   is_promoted_prior, long_form_xg_per_match,
+                   short_form_xg_per_match, blended_xg_per_match,
+                   long_form_xgc_per_match, short_form_xgc_per_match,
+                   blended_xgc_per_match, corrected_xgc_per_match,
+                   league_average_xg_per_match, league_average_xgc_per_match,
+                   attack_ratio, defensive_weakness_ratio,
+                   workbook_defensive_bonus_multiplier,
+                   defensive_bonus_multiplier,
+                   '["FROZEN_PRESEASON_TEAM_STRENGTH_PRIOR"]'
+            FROM team_strength_projection WHERE strength_run_id = 'strength';
+            """
+        )
+
+    result = materialize_inseason_baseline(
+        target_gameweek=2,
+        appearance_projection_run_id="appearance2",
+        player_rate_run_id="rates",
+        team_strength_run_id="strength2",
+        context_feature_run_id="context2",
+        database_path=database_path,
+    )
+
+    with duckdb.connect(str(database_path), read_only=True) as connection:
+        model = connection.execute(
+            """
+            SELECT as_of, model_version FROM model_run WHERE model_run_id = ?
+            """,
+            [result.model_run_id],
+        ).fetchone()
+        projection = connection.execute(
+            """
+            SELECT expected_minutes, data_quality_flags
+            FROM player_fixture_projection
+            WHERE model_run_id = ? AND player_code = 519634
+            """,
+            [result.model_run_id],
+        ).fetchone()
+        context_lineage = connection.execute(
+            "SELECT context_run_id FROM baseline_context_lineage WHERE model_run_id = ?",
+            [result.model_run_id],
+        ).fetchone()
+
+    assert result.projected_fixture_rows == 1
+    assert model[0].isoformat() == "2026-08-21T09:00:00+07:00"
+    assert model[1] == "coherent_benchwarmers_inseason_baseline_v1"
+    assert projection[0] == pytest.approx(71.2)
+    assert context_lineage == ("context2",)
+    assert {
+        "CONTEXT_FEATURES_DIAGNOSTIC_ONLY",
+        "FROZEN_PRESEASON_TEAM_STRENGTH_PRIOR",
+        "FROZEN_PREVIOUS_SEASON_PLAYER_RATES",
+        "SHRUNK_CURRENT_SEASON_APPEARANCE",
+    }.issubset(json.loads(projection[1]))
 
 
 def test_materializes_three_fixture_gameweeks_from_one_frozen_preseason_input(tmp_path):

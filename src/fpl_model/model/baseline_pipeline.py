@@ -44,6 +44,7 @@ from fpl_model.model.secondary import (
 from fpl_model.storage import DEFAULT_DATABASE_PATH, initialize_database
 
 POLICY_VERSION = "coherent_benchwarmers_preseason_baseline_v7"
+INSEASON_POLICY_VERSION = "coherent_benchwarmers_inseason_baseline_v1"
 HORIZON_POLICY_VERSION = "frozen_preseason_fixture_horizon_v1"
 REGULATION_MINUTES = 90.0
 AVERAGE_BPS_PER_START = 14.862318964622457
@@ -98,6 +99,7 @@ class _TeamStrength:
     defensive_bonus_multiplier: float
     defensive_weakness_ratio: float
     is_promoted_prior: bool
+    data_quality_flags: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -240,10 +242,12 @@ def _choose_input_runs(
     appearance = connection.execute(
         f"""
         SELECT apr.projection_run_id, apr.appearance_history_import_run_id,
-               ar.as_of, ar.deadline
+               greatest(ar.as_of, coalesce(iar.as_of, ar.as_of)), ar.deadline
         FROM appearance_projection_run AS apr
         JOIN availability_resolution_run AS ar
           ON ar.resolution_run_id = apr.availability_resolution_run_id
+        LEFT JOIN inseason_appearance_run AS iar
+          ON iar.projection_run_id = apr.projection_run_id
         WHERE apr.target_gameweek = ?
           AND ar.source_ingestion_run_id = ?
           {appearance_filter}
@@ -478,6 +482,8 @@ def _materialize_frozen_fixture_projection(
     appearance_projection_run_id: str | None = None,
     player_rate_run_id: str | None = None,
     team_strength_run_id: str | None = None,
+    context_feature_run_id: str | None = None,
+    policy_version: str = POLICY_VERSION,
     database_path: str | Path = DEFAULT_DATABASE_PATH,
 ) -> BaselineRunResult:
     """Compose one fixture GW from a frozen set of baseline input runs."""
@@ -498,6 +504,38 @@ def _materialize_frozen_fixture_projection(
             player_rate_run_id=player_rate_run_id,
             team_strength_run_id=team_strength_run_id,
         )
+        context_run = None
+        context_flags: dict[int, tuple[str, ...]] = {}
+        if policy_version == INSEASON_POLICY_VERSION:
+            context_parameters: list[object] = [appearance_run, input_gameweek]
+            context_filter = ""
+            if context_feature_run_id is not None:
+                context_filter = "AND context_run_id = ?"
+                context_parameters.append(context_feature_run_id)
+            context = connection.execute(
+                f"""
+                SELECT context_run_id, as_of FROM context_feature_run
+                WHERE appearance_projection_run_id = ? AND target_gameweek = ?
+                  {context_filter}
+                ORDER BY as_of DESC, created_at DESC, context_run_id DESC LIMIT 1
+                """,
+                context_parameters,
+            ).fetchone()
+            if context_feature_run_id is not None and context is None:
+                raise ValueError("context run is not compatible with the appearance run")
+            if context is not None:
+                context_run = str(context[0])
+                as_of = max(as_of, context[1])
+                context_flags = {
+                    int(row[0]): tuple(json.loads(row[1]))
+                    for row in connection.execute(
+                        """
+                        SELECT fpl_id, data_quality_flags FROM player_context_feature
+                        WHERE context_run_id = ?
+                        """,
+                        [context_run],
+                    ).fetchall()
+                }
         target_deadline = deadline
         if target_gameweek != input_gameweek:
             deadline_row = connection.execute(
@@ -515,7 +553,9 @@ def _materialize_frozen_fixture_projection(
             target_deadline = deadline_row[0]
             if as_of > target_deadline:
                 raise ValueError("frozen input as_of is after the target fixture deadline")
-        identity_text = f"{appearance_run}|{rate_run}|{strength_run}|{POLICY_VERSION}"
+        identity_text = f"{appearance_run}|{rate_run}|{strength_run}|{policy_version}"
+        if policy_version == INSEASON_POLICY_VERSION:
+            identity_text += f"|context={context_run or 'none'}"
         if target_gameweek != input_gameweek:
             identity_text += (
                 f"|fixture_gameweek={target_gameweek}|frozen_input_gameweek={input_gameweek}"
@@ -584,6 +624,23 @@ def _materialize_frozen_fixture_projection(
                 [input_gameweek],
             ).fetchall()
         }
+        inseason_minutes = {
+            int(row[0]): _MinutesInputs(
+                float(row[1]),
+                float(row[2]),
+                sample_appearances=int(row[3]),
+                used_default_start_minutes=False,
+            )
+            for row in connection.execute(
+                """
+                SELECT fpl_id, minutes_per_start, minutes_per_substitute,
+                       current_fixture_rows
+                FROM inseason_player_appearance_context
+                WHERE projection_run_id = ?
+                """,
+                [appearance_run],
+            ).fetchall()
+        }
         rates = {
             row[0]: row[1:]
             for row in connection.execute(
@@ -602,20 +659,21 @@ def _materialize_frozen_fixture_projection(
                 [rate_run],
             ).fetchall()
         }
-        strengths = {
-            row[0]: _TeamStrength(*row[1:])
-            for row in connection.execute(
+        strength_rows = connection.execute(
                 """
                 SELECT team_id, corrected_xgc_per_match,
                        blended_xg_per_match, blended_xgc_per_match,
                        league_average_xg_per_match,
                        league_average_xgc_per_match,
                        defensive_bonus_multiplier, defensive_weakness_ratio,
-                       is_promoted_prior
+                       is_promoted_prior, data_quality_flags
                 FROM team_strength_projection WHERE strength_run_id = ?
                 """,
                 [strength_run],
             ).fetchall()
+        strengths = {
+            int(row[0]): _TeamStrength(*row[1:9], tuple(json.loads(row[9])))
+            for row in strength_rows
         }
         fixture_rows = connection.execute(
             """
@@ -645,8 +703,20 @@ def _materialize_frozen_fixture_projection(
             player_fixtures = fixtures.get(team_id, ())
             candidate_fixture_rows += len(player_fixtures)
             flags: set[str] = set()
+            if policy_version == INSEASON_POLICY_VERSION:
+                if context_run is None:
+                    flags.add("NO_CONTEXT_FEATURE_RUN")
+                else:
+                    flags.update(context_flags.get(int(fpl_id), ("MISSING_CONTEXT_ROW",)))
             if target_gameweek != input_gameweek:
-                flags.add(f"FROZEN_PRESEASON_INPUTS_FROM_GW{input_gameweek}")
+                prefix = (
+                    "FROZEN_PRESEASON_INPUTS_FROM_GW"
+                    if policy_version == POLICY_VERSION
+                    else "FROZEN_INSEASON_INPUTS_FROM_GW"
+                )
+                flags.add(f"{prefix}{input_gameweek}")
+            if input_gameweek > 1:
+                flags.add("FROZEN_PREVIOUS_SEASON_PLAYER_RATES")
             raw_appearance = appearance_rows.get(fpl_id)
             appearance = None
             minutes = None
@@ -662,7 +732,7 @@ def _materialize_frozen_fixture_projection(
                 if appearance is None:
                     flags.add("MISSING_APPEARANCE_PROJECTION")
                 elif player_code is not None:
-                    minutes = _minutes_inputs(
+                    minutes = inseason_minutes.get(fpl_id) or _minutes_inputs(
                         player_code=player_code,
                         flags=flags,
                         history=histories,
@@ -678,8 +748,10 @@ def _materialize_frozen_fixture_projection(
                 flags.add("NO_USABLE_PLAYER_RATE_HISTORY")
             if own_strength is None:
                 flags.add("MISSING_TEAM_STRENGTH")
-            elif own_strength.is_promoted_prior:
-                flags.add("OWN_TEAM_PROMOTED_PRIOR")
+            else:
+                flags.update(own_strength.data_quality_flags)
+                if own_strength.is_promoted_prior:
+                    flags.add("OWN_TEAM_PROMOTED_PRIOR")
             if not player_fixtures:
                 flags.add("NO_GAMEWEEK_FIXTURE")
             roster_blocked = "FPL_ROSTER_BLOCKED" in flags
@@ -827,6 +899,7 @@ def _materialize_frozen_fixture_projection(
             for fixture in player_fixtures:
                 opponent_strength = strengths[fixture.opponent_id]
                 fixture_flags = set(flags)
+                fixture_flags.update(opponent_strength.data_quality_flags)
                 if opponent_strength.is_promoted_prior:
                     fixture_flags.add("OPPONENT_PROMOTED_PRIOR")
                 attacking = weight_attacking_rates(
@@ -963,10 +1036,15 @@ def _materialize_frozen_fixture_projection(
                     target_gameweek,
                     as_of,
                     target_deadline,
-                    POLICY_VERSION,
+                    policy_version,
                     source_ingestion_run,
                 ],
             )
+            if context_run is not None:
+                connection.execute(
+                    "INSERT INTO baseline_context_lineage VALUES (?, ?)",
+                    [model_run_id, context_run],
+                )
             connection.execute(
                 """
                 INSERT INTO baseline_projection_run VALUES (
@@ -978,7 +1056,7 @@ def _materialize_frozen_fixture_projection(
                     appearance_run,
                     rate_run,
                     strength_run,
-                    POLICY_VERSION,
+                    policy_version,
                     len(players),
                     candidate_fixture_rows,
                     len(projection_rows),
@@ -1041,6 +1119,30 @@ def materialize_preseason_baseline(
     )
 
 
+def materialize_inseason_baseline(
+    *,
+    target_gameweek: int,
+    appearance_projection_run_id: str | None = None,
+    player_rate_run_id: str | None = None,
+    team_strength_run_id: str | None = None,
+    context_feature_run_id: str | None = None,
+    database_path: str | Path = DEFAULT_DATABASE_PATH,
+) -> BaselineRunResult:
+    """Compose an early-season baseline from refreshed appearance/context inputs."""
+    if not 2 <= target_gameweek <= 38:
+        raise ValueError("in-season baseline target_gameweek must be between 2 and 38")
+    return _materialize_frozen_fixture_projection(
+        target_gameweek=target_gameweek,
+        input_gameweek=target_gameweek,
+        appearance_projection_run_id=appearance_projection_run_id,
+        player_rate_run_id=player_rate_run_id,
+        team_strength_run_id=team_strength_run_id,
+        context_feature_run_id=context_feature_run_id,
+        policy_version=INSEASON_POLICY_VERSION,
+        database_path=database_path,
+    )
+
+
 def materialize_frozen_projection_horizon(
     *,
     anchor_model_run_id: str,
@@ -1053,9 +1155,10 @@ def materialize_frozen_projection_horizon(
             """
             SELECT m.target_gameweek, m.status, m.model_version, b.policy_version,
                    b.appearance_projection_run_id,
-                   b.player_rate_run_id, b.team_strength_run_id
+                   b.player_rate_run_id, b.team_strength_run_id, l.context_run_id
             FROM model_run AS m
             JOIN baseline_projection_run AS b USING (model_run_id)
+            LEFT JOIN baseline_context_lineage AS l USING (model_run_id)
             WHERE m.model_run_id = ?
             """,
             [anchor_model_run_id],
@@ -1070,10 +1173,15 @@ def materialize_frozen_projection_horizon(
         appearance_run,
         rate_run,
         strength_run,
+        context_run,
     ) = anchor
     if anchor_status != "completed":
         raise ValueError("anchor model run must be completed")
-    if anchor_model_version != POLICY_VERSION or anchor_policy_version != POLICY_VERSION:
+    supported_policies = {POLICY_VERSION, INSEASON_POLICY_VERSION}
+    if (
+        anchor_model_version != anchor_policy_version
+        or anchor_policy_version not in supported_policies
+    ):
         raise ValueError("anchor must use the current baseline policy version")
     anchor_gameweek = int(anchor_gameweek)
     if anchor_gameweek > 36:
@@ -1086,6 +1194,8 @@ def materialize_frozen_projection_horizon(
             appearance_projection_run_id=str(appearance_run),
             player_rate_run_id=str(rate_run),
             team_strength_run_id=str(strength_run),
+            context_feature_run_id=str(context_run) if context_run is not None else None,
+            policy_version=str(anchor_policy_version),
             database_path=database_path,
         )
         for gameweek in range(anchor_gameweek, anchor_gameweek + 3)

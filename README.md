@@ -308,6 +308,20 @@ Reviewed injury/eligibility corrections can be appended with
 `scripts/add_availability_override.py`. The command requires a timestamped source and rationale;
 run a new FPL refresh afterwards when instructed so the override enters a new immutable resolution.
 
+For GW2 and later, archive only final, checked official event data, shrink current-season
+appearance evidence toward the previous-season prior, materialise descriptive context, and rebuild
+the three-GW horizon with:
+
+```bash
+python scripts/refresh_fpl_event_live.py --help
+python scripts/project_inseason_appearance.py --help
+python scripts/materialize_context_features.py --help
+python scripts/project_inseason_baseline.py --help
+```
+
+The exact command order, fail-closed finality gate, context annotation contract, and frozen-prior
+limitations are documented in `docs/INSEASON_REFRESH.md`.
+
 After exporting the workbook's resolved previous-season appearance fields, import and materialise
 the GW1 appearance projection with:
 
@@ -391,18 +405,20 @@ See `THIRD_PARTY_NOTICES.md`.
 - [x] Fixture and home-away adjustments
 - [x] Golden tests against spreadsheet outputs
 
-### Sprint 3 — Projection coverage and context
+### Sprint 3 — Projection coverage and context (engineering complete; evidence activation gated)
 
 - [x] Reach an explicit coverage gate for selectable players (target: at least 95%, plus 100% of
       every optimizer shortlist and selected squad)
 - [x] Add explicit promoted-team, new-signing, returning-player, and cheap-enabler priors instead
       of treating missing previous-PL history as near-zero ability or excluding it silently
-- [ ] Manager regime features
-- [ ] World Cup and preseason readiness, including current playing-time evidence
-- [ ] Congestion / rest-day features
-- [ ] Tactical-role and position-change priors
-- [ ] Deadline-safe in-season refresh of appearance, role, and horizon inputs
-- [ ] Ablation tests proving the incremental value of every context layer
+- [x] Deadline-safe manager-regime feature store with reviewed source lineage
+- [x] World Cup/preseason readiness features plus final current-season playing-time evidence
+- [x] Domestic congestion / rest-day features, with unsupported DGW allocation withheld
+- [x] Tactical-role fingerprints and position-change diagnostics
+- [x] Deadline-safe GW2+ refresh of official event history, appearance, context, and horizon inputs
+- [x] Paired, gameweek-clustered ablation acceptance harness for every context layer
+- [ ] Populate complete reviewed annotations and non-PL workload evidence
+- [ ] Prove incremental out-of-sample value, then activate only the supported causal adjustments
 
 ### Sprint 4 — Validation, calibration, and uncertainty
 
