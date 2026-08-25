@@ -420,7 +420,7 @@ See `THIRD_PARTY_NOTICES.md`.
 - [ ] Populate complete reviewed annotations and non-PL workload evidence
 - [ ] Prove incremental out-of-sample value, then activate only the supported causal adjustments
 
-### Sprint 4 — Validation, calibration, and uncertainty
+### Sprint 4 — Validation, calibration, and uncertainty (shadow engineering active)
 
 - [x] Walk-forward fold/metric primitives
 - [x] Genuine 11-component walk-forward backtest (2025-26, in-season)
@@ -433,9 +433,14 @@ See `THIRD_PARTY_NOTICES.md`.
 - [ ] Independent-season or prospectively frozen 2026-27 confirmatory evaluation
 - [ ] Apply supported appearance calibration to production projections
 - [ ] Apply supported xPts calibration to production projections
-- [ ] Per-player/per-fixture xPts uncertainty and risk bands
-- [ ] Validate calibration and uncertainty separately for premiums, cheap enablers, promoted-team
-      players, new signings, and position changes
+- [x] Per-player/per-fixture residual intervals and empirical risk bands in shadow mode
+- [x] Immutable xPts calibration artifacts and counterfactual shadow projections
+- [x] Reviewed penalty/non-penalty xG decomposition that withholds unverified splits
+- [x] Strictly prior-outcome walk-forward interval coverage by position
+- [x] Prospective cohort plumbing for premiums, cheap enablers, promoted-team players, new/current-
+      only players, and position changes
+- [ ] Validate calibration and uncertainty on final 2026/27 outcomes for every prospective cohort
+- [ ] Approve and activate scalar uncertainty only after overall and weakest-segment gates pass
 
 ### Sprint 5 — Decision engine hardening and operational safety
 

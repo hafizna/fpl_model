@@ -17,6 +17,13 @@ python scripts/refresh_fpl_event_live.py \
   --gameweek 1 \
   --source-ingestion-run fpl_... \
   --allow-analytically-complete
+# Only when the event-live command prints status=completed (officially final):
+python scripts/add_penalty_review.py \
+  --live-run-id fpl_live_... \
+  --csv data/raw/reviews/gw1_penalties.csv \
+  --observed-at 2026-08-25T04:00:00+07:00 \
+  --source-reference "reviewed match report" \
+  --rationale "complete GW1 penalty ledger"
 python scripts/project_inseason_appearance.py \
   --gameweek 2 \
   --current-season 2026-27 \
@@ -52,6 +59,12 @@ Gameweek. For GW3, for example, both GW1 and GW2 must exist. The broader `--allo
 option has no fixture-completion gate and remains research-only; do not use it for a production
 recommendation.
 
+The penalty review is a separate final-only boundary and cannot be attached to an analytically
+complete provisional run. Official total xG is retained, but npxG is withheld until FPL finalises
+the event and the complete penalty ledger has been reviewed. The current early-season baseline
+still uses frozen previous-season player rates, so this decomposition is stored for the future
+attacking-rate refresh rather than applied as an immediate multiplier.
+
 The refreshed appearance projection shrinks current-season starts, cameos, and minutes toward the
 reviewed previous-season appearance history. With the default five effective prior fixtures, one
 completed current-season fixture receives weight `1 / (1 + 5)`. This avoids overreacting to one match
@@ -65,7 +78,7 @@ while still allowing a new/current-only player to acquire an evidence-based role
 - player tournament/preseason readiness;
 - continuous tactical-role fingerprints and nominal-position changes.
 
-`player_context_feature` combines those annotations with final official playing-time history to
+`player_context_feature` combines those annotations with official playing-time history to
 store rest days and minutes/matches over seven- and fourteen-day windows. Analytically complete
 non-final evidence retains the explicit provisional quality flag. The official endpoint
 does not cover European or other non-PL minutes, so every row carries

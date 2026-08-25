@@ -64,6 +64,10 @@ from fpl_model.model.secondary import (
     weight_linear_component,
     weight_saves,
 )
+from fpl_model.model.shadow_calibration import (
+    materialize_shadow_calibration,
+    store_shadow_calibration_artifact,
+)
 
 __all__ = [
     "AppearanceProjection",
@@ -101,6 +105,7 @@ __all__ = [
     "home_away_multiplier",
     "materialize_preseason_baseline",
     "materialize_inseason_baseline",
+    "materialize_shadow_calibration",
     "poisson_tail_probability",
     "project_appearance",
     "project_benchwarmers_appearance",
@@ -111,6 +116,7 @@ __all__ = [
     "project_benchwarmers_saves",
     "project_discipline",
     "project_workbook_fixture_totals",
+    "store_shadow_calibration_artifact",
     "weight_attacking_rates",
     "weight_defcon",
     "weight_defensive_rates",
