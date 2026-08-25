@@ -28,7 +28,7 @@ Planned contextual layers include:
 7. **Implemented does not mean operationally ready.** Coverage, calibration, uncertainty, search
    correctness, and squad-economics sanity gates must pass separately.
 
-## Current scope: baseline integration and validation
+## Current scope: projection release and decision validation
 
 This repository currently includes:
 
@@ -45,10 +45,15 @@ This repository currently includes:
 - deadline-safe walk-forward fold and metric primitives
 - a genuine walk-forward backtest of the replicated 11-component model against in-season Vaastav
   history (Vaastav-only team strength, no workbook)
+- a deadline-safe GW2+ refresh that separates analytically complete official playing-time evidence
+  from FPL's later whole-Gameweek finalisation
+- a frozen three-Gameweek projection horizon plus lineup, transfer, and squad-scenario prototypes
 
-Selectable-player projection coverage now passes its explicit gate. The next milestone is deeper
-context calibration and hardening the decision layer against dominated or economically implausible
-squads. Calibration and uncertainty must be applied before the recommender is used operationally.
+Selectable-player projection coverage now passes its explicit gate. The next milestone is a
+versioned production projection release: freshness, finality, coverage, calibration, uncertainty,
+and drift checks must produce one auditable release manifest before any downstream surface calls a
+result "best". Decision hardening, a stable squad-rating contract, and the three application menus
+then consume that approved release in dependency order.
 
 ## Recommender status: research prototype only
 
@@ -68,8 +73,9 @@ Baseline policy v7 closes the first failure with empirical, flagged position/pri
 roster-blocked. A retrospective sanity simulation still selected Watkins on the bench in GW1 and
 GW2, so the coverage fix does **not** remove the decision-layer warning.
 
-Until the Sprint 5 gates below pass, generated squads must be labelled `RESEARCH_ONLY`, include
-coverage diagnostics, and show the best common counterfactuals alongside the nominal result.
+Until the model-release, decision-policy, and rating gates below pass, generated squads must be
+labelled `RESEARCH_ONLY`, include coverage diagnostics, and show the best common counterfactuals
+alongside the nominal result.
 
 ## Repository layout
 
@@ -405,7 +411,9 @@ See `THIRD_PARTY_NOTICES.md`.
 - [x] Fixture and home-away adjustments
 - [x] Golden tests against spreadsheet outputs
 
-### Sprint 3 — Projection coverage and context (engineering complete; evidence activation gated)
+### Sprint 3 — In-season projection inputs and evidence foundation
+
+**Status:** engineering complete; context activation remains evidence-gated.
 
 - [x] Reach an explicit coverage gate for selectable players (target: at least 95%, plus 100% of
       every optimizer shortlist and selected squad)
@@ -416,11 +424,15 @@ See `THIRD_PARTY_NOTICES.md`.
 - [x] Domestic congestion / rest-day features, with unsupported DGW allocation withheld
 - [x] Tactical-role fingerprints and position-change diagnostics
 - [x] Deadline-safe GW2+ refresh of official event history, appearance, context, and horizon inputs
+- [x] Separate `analytically complete` fixture evidence from whole-Gameweek FPL finalisation;
+      preserve an explicit provisional quality flag and immutable final rerun path
 - [x] Paired, gameweek-clustered ablation acceptance harness for every context layer
 - [ ] Populate complete reviewed annotations and non-PL workload evidence
 - [ ] Prove incremental out-of-sample value, then activate only the supported causal adjustments
 
-### Sprint 4 — Validation, calibration, and uncertainty (shadow engineering active)
+### Sprint 4 — Model validation, calibration, and uncertainty
+
+**Status:** shadow engineering active; production activation gated.
 
 - [x] Walk-forward fold/metric primitives
 - [x] Genuine 11-component walk-forward backtest (2025-26, in-season)
@@ -442,7 +454,33 @@ See `THIRD_PARTY_NOTICES.md`.
 - [ ] Validate calibration and uncertainty on final 2026/27 outcomes for every prospective cohort
 - [ ] Approve and activate scalar uncertainty only after overall and weakest-segment gates pass
 
-### Sprint 5 — Decision engine hardening and operational safety
+### Sprint 5 — Production projection release gate
+
+This sprint turns upstream model artifacts into one approved, auditable release. It must complete
+before decision outputs can lose the `RESEARCH_ONLY` label.
+
+- [ ] Create one immutable release manifest linking official snapshot, event-live evidence,
+      availability, appearance, player rates, team strength, context, model runs, and horizon runs
+- [ ] Record freshness, fixture-completion, FPL-finality, and provisional-to-final drift checks
+- [ ] Require 100% coverage for the owned squad, optimizer shortlist, and every retained decision
+      path; retain the global selectable-player coverage gate
+- [ ] Attach approved calibration and uncertainty lineage to every released player-fixture
+      projection; fail closed when required artifacts are absent or stale
+- [ ] Keep raw mean xPts, calibrated xPts, uncertainty, and data-quality flags separately visible
+      rather than hiding them inside one opaque score
+- [ ] Add a deterministic pre-deadline orchestration command that materialises and validates the
+      complete GW, GW+1, and GW+2 release
+- [ ] Rebuild an analytically complete provisional release after official finalisation and report
+      whether any material player, lineup, rating, or transfer decision changed
+- [ ] Add release-level smoke tests, machine-readable health output, and explicit
+      `research`/`shadow`/`production` approval states
+- [ ] Production projection sign-off: no unresolved freshness, coverage, calibration, uncertainty,
+      or lineage gate
+
+### Sprint 6 — Decision engine hardening and operational safety
+
+The objective remains transparent expected FPL points. A branded application score must not replace
+or silently change the decision objective.
 
 - [x] Immutable manager-squad snapshot foundation
 - [x] Exhaustive legal single-Gameweek lineup recommender
@@ -464,10 +502,80 @@ See `THIRD_PARTY_NOTICES.md`.
 - [ ] Integrate planned transfers into the initial-squad horizon instead of freezing all 15 players
 - [ ] Add multi-transfer and chip-aware optimization
 - [ ] Add optional ownership/EO and risk-adjusted objectives separately from mean xPts
-- [ ] Fail closed when coverage, freshness, calibration, uncertainty, or counterfactual gates fail
+- [ ] Consume only an approved Sprint 5 projection release and fail closed when its gates fail
 - [ ] Walk-forward evaluate the full planner and decision policy before operational use
 - [ ] Operational sign-off: no dominated squad, all sanity checks pass, and every recommendation
       includes marginal-value explanations
+
+### Sprint 7 — Squad rating and application score contract
+
+This sprint defines the shared scoring language used by all application menus. Until it passes,
+the UI should say `Model Preview` or `Model Score`, not `AI Score`.
+
+- [ ] Show raw optimized-XI-plus-captain xPts separately for GW, GW+1, and GW+2
+- [ ] Define one fixed, reproducible benchmark population of legal same-budget squads for each
+      frozen release; do not min-max against whichever scenarios happen to be open in the UI
+- [ ] Define a per-Gameweek squad rating as a percentile against that release's benchmark
+      population
+- [ ] Define the overall three-Gameweek rating from cumulative optimized lineup xPts, not from the
+      arithmetic mean of three rounded display ratings
+- [ ] Keep model strength, data confidence, projection uncertainty, and squad-rule health as
+      separate fields and badges
+- [ ] Version the rating formula and persist benchmark identity, inputs, raw xPts, percentile, and
+      explanation for reproducibility
+- [ ] Validate monotonicity, stability across reruns, provisional-to-final drift, and sensitivity
+      to captaincy, bench structure, injuries, and fixture changes
+- [ ] Rating sign-off: values are comparable across all three menus and never conceal a failed
+      projection-release or decision-policy gate
+
+### Sprint 8 — Application experience: three primary menus
+
+The application layer consumes approved projection releases, decision outputs, and the versioned
+rating contract. It does not recompute modelling logic in the browser.
+
+#### 8A — Shared application data contract
+
+- [ ] Provide one application-facing release API/schema for projections, ratings, lineups,
+      transfers, explanations, and quality gates
+- [ ] Pin every response to one approved release ID and expose research/shadow/production status
+- [ ] Keep all modelling, rating, and optimization calculations server-side; the browser only
+      selects scenarios and presents persisted results
+- [ ] Define consistent loading, stale-data, partial-coverage, provisional, and fail-closed states
+      before building feature-specific screens
+
+#### 8B — Weekly squad scenarios
+
+- [ ] Compare the current squad with named alternative scenarios on an FPL-style pitch
+- [ ] Show the model's legal best XI, captain, vice-captain, and ordered bench for the selected GW
+- [ ] Show marginal xPts versus the current setup and transparent reasons for every change
+- [ ] Surface coverage, freshness, provisional evidence, and uncertainty before any `Best option`
+      label
+
+#### 8C — Three-Gameweek squad rating
+
+- [ ] Show GW, GW+1, and GW+2 rating cards plus raw expected lineup points for each Gameweek
+- [ ] Show one overall three-Gameweek rating derived from cumulative expected points
+- [ ] Let users inspect player-level contribution, fixture horizon, captaincy, bench depth, and
+      risk without collapsing them into the rating
+- [ ] Compare named squad scenarios against the same frozen release and benchmark population
+
+#### 8D — Transfer recommendations
+
+- [ ] Rank hold and transfer alternatives by the approved decision objective and three-Gameweek
+      horizon, not by the cosmetic squad rating
+- [ ] Show transfer cost, bank, free-transfer state, expected gain by GW, cumulative gain, and
+      uncertainty
+- [ ] Explain outgoing/incoming marginal value and show the best no-transfer and structural
+      counterfactuals alongside the nominal recommendation
+- [ ] Support only the transfer/chip scope that has passed Sprint 6 validation; label unsupported
+      multi-transfer or chip paths explicitly
+
+#### 8E — Application release hardening
+
+- [ ] Add responsive/mobile interaction, accessibility, deterministic fixture snapshots, and
+      end-to-end tests for all three menus
+- [ ] Application sign-off: research/beta/production labels match the underlying release approval,
+      and no menu can display a production recommendation from a failed or stale release
 
 ## License
 
