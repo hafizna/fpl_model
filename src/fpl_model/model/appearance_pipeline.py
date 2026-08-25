@@ -362,14 +362,30 @@ def materialize_inseason_appearance(
 
         live_runs = connection.execute(
             """
-            SELECT live_run_id, gameweek, captured_at
-            FROM fpl_event_live_run
-            WHERE season = ? AND gameweek < ? AND status = 'completed'
-              AND event_finished AND data_checked AND captured_at <= ?
+            SELECT r.live_run_id, r.gameweek, r.captured_at, r.status
+            FROM fpl_event_live_run AS r
+            WHERE r.season = ? AND r.gameweek < ? AND r.captured_at <= ?
+              AND (
+                (r.status = 'completed' AND r.event_finished AND r.data_checked)
+                OR (
+                  r.status = 'provisional'
+                  AND EXISTS (
+                    SELECT 1 FROM fixture_snapshot AS f
+                    WHERE f.ingestion_run_id = r.source_ingestion_run_id
+                      AND f.gameweek = r.gameweek
+                  )
+                  AND NOT EXISTS (
+                    SELECT 1 FROM fixture_snapshot AS f
+                    WHERE f.ingestion_run_id = r.source_ingestion_run_id
+                      AND f.gameweek = r.gameweek AND NOT f.finished
+                  )
+                )
+              )
             QUALIFY row_number() OVER (
-                PARTITION BY gameweek ORDER BY captured_at DESC, live_run_id DESC
+                PARTITION BY r.gameweek
+                ORDER BY r.captured_at DESC, r.live_run_id DESC
             ) = 1
-            ORDER BY gameweek
+            ORDER BY r.gameweek
             """,
             [current_season, target_gameweek, deadline],
         ).fetchall()
@@ -378,10 +394,16 @@ def materialize_inseason_appearance(
         if actual_gameweeks != expected_gameweeks:
             missing = sorted(set(expected_gameweeks) - set(actual_gameweeks))
             raise ValueError(
-                f"final event-live history is incomplete before GW{target_gameweek}: "
+                f"analytically complete event-live history is incomplete before "
+                f"GW{target_gameweek}: "
                 f"missing={missing}"
             )
         live_run_ids = [str(row[0]) for row in live_runs]
+        live_quality_flags = {
+            "OFFICIAL_EVENT_ANALYTICALLY_COMPLETE_NOT_FINAL"
+            for row in live_runs
+            if str(row[3]) == "provisional"
+        }
         as_of = max([availability_as_of, *(row[2] for row in live_runs)])
         if as_of > deadline:
             raise ValueError("in-season appearance evidence was captured after the deadline")
@@ -496,6 +518,7 @@ def materialize_inseason_appearance(
         missing = 0
         for fpl_id, player_code, availability, raw_flags in availability_rows:
             flags = set(json.loads(raw_flags))
+            flags.update(live_quality_flags)
             projection = None
             previous_weight = 0.0
             current_weight = 1.0
@@ -543,7 +566,7 @@ def materialize_inseason_appearance(
                             probability=probability,
                             minutes=float(minutes),
                             started=bool(starts),
-                            label="current_season_final_event",
+                            label="current_season_official_event",
                         )
                         for minutes, starts in samples
                     )
