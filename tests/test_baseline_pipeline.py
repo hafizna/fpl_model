@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC
 
 import duckdb
 import pandas as pd
@@ -300,7 +301,7 @@ def test_inseason_baseline_uses_refreshed_minutes_and_keeps_frozen_priors_visibl
         ).fetchone()
 
     assert result.projected_fixture_rows == 1
-    assert model[0].isoformat() == "2026-08-21T09:00:00+07:00"
+    assert model[0].astimezone(UTC).isoformat() == "2026-08-21T02:00:00+00:00"
     assert model[1] == "coherent_benchwarmers_inseason_baseline_v1"
     assert projection[0] == pytest.approx(71.2)
     assert context_lineage == ("context2",)
@@ -374,10 +375,10 @@ def test_materializes_three_fixture_gameweeks_from_one_frozen_preseason_input(tm
 
     assert [row[0] for row in metadata] == [1, 2, 3]
     assert len({row[1] for row in metadata}) == 1
-    assert [row[2].date().isoformat() for row in metadata] == [
-        "2026-08-22",
-        "2026-08-29",
-        "2026-09-12",
+    assert [row[2].astimezone(UTC).isoformat() for row in metadata] == [
+        "2026-08-21T17:30:00+00:00",
+        "2026-08-28T17:30:00+00:00",
+        "2026-09-11T17:30:00+00:00",
     ]
     assert len({row[3] for row in metadata}) == 1
     assert {row[4] for row in metadata} == {"snapshot"}

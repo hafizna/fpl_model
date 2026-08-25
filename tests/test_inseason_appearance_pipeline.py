@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 
 import duckdb
 import pytest
@@ -121,7 +121,7 @@ def test_inseason_appearance_blends_final_history_and_preserves_lineage(tmp_path
 
     assert prior[3:6] == pytest.approx((1, 5 / 6, 1 / 6))
     assert prior[6] == '["live-gw1"]'
-    assert prior[7].isoformat() == "2026-08-24T10:00:00+07:00"
+    assert prior[7].astimezone(UTC).isoformat() == "2026-08-24T03:00:00+00:00"
     assert prior[0] <= 0.5
     assert prior[1] <= 45.0
     assert "SHRUNK_CURRENT_SEASON_APPEARANCE" in json.loads(prior[2])
