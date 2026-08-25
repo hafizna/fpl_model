@@ -16,7 +16,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gameweek", type=int, required=True)
     parser.add_argument("--source-ingestion-run", required=True)
     parser.add_argument("--season", default="2026-27")
-    parser.add_argument("--allow-provisional", action="store_true")
+    completion = parser.add_mutually_exclusive_group()
+    completion.add_argument("--allow-analytically-complete", action="store_true")
+    completion.add_argument("--allow-provisional", action="store_true")
     parser.add_argument("--database", type=Path, default=DEFAULT_DATABASE_PATH)
     parser.add_argument("--raw-root", type=Path, default=DEFAULT_RAW_ROOT)
     return parser.parse_args()
@@ -31,7 +33,10 @@ def main() -> None:
         gameweek=args.gameweek,
         captured_at=captured_at,
         season=args.season,
-        require_final=not args.allow_provisional,
+        require_final=not (
+            args.allow_analytically_complete or args.allow_provisional
+        ),
+        require_all_fixtures_finished=args.allow_analytically_complete,
         database_path=args.database,
         raw_root=args.raw_root,
     )
