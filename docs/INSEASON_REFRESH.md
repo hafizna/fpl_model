@@ -15,7 +15,8 @@ python scripts/refresh_fpl_snapshot.py --season 2026-27
 python scripts/resolve_availability.py --gameweek 2
 python scripts/refresh_fpl_event_live.py \
   --gameweek 1 \
-  --source-ingestion-run fpl_...
+  --source-ingestion-run fpl_... \
+  --allow-analytically-complete
 python scripts/project_inseason_appearance.py \
   --gameweek 2 \
   --current-season 2026-27 \
@@ -38,14 +39,22 @@ python scripts/project_inseason_baseline.py \
 python scripts/project_frozen_horizon.py --anchor-model-run-id baseline_...
 ```
 
-`refresh_fpl_event_live.py` fails closed unless the source snapshot says the prior Gameweek is both
-`finished` and `data_checked`. `project_inseason_appearance.py` also requires one completed final
-event-live run for every earlier Gameweek. For GW3, for example, both GW1 and GW2 must exist. Do not
-use `--allow-provisional` for a production recommendation.
+By default, `refresh_fpl_event_live.py` fails closed unless the source snapshot says the prior
+Gameweek is both `finished` and `data_checked`. For the narrower appearance/context refresh,
+`--allow-analytically-complete` admits a non-final event only when every fixture assigned to that
+Gameweek is finished in the same immutable official snapshot. The stored run remains `provisional`,
+and every downstream appearance/context row carries
+`OFFICIAL_EVENT_ANALYTICALLY_COMPLETE_NOT_FINAL`. Re-ingest and rebuild after FPL sets
+`data_checked`; immutable run IDs preserve both versions.
+
+`project_inseason_appearance.py` requires an analytically complete event-live run for every earlier
+Gameweek. For GW3, for example, both GW1 and GW2 must exist. The broader `--allow-provisional`
+option has no fixture-completion gate and remains research-only; do not use it for a production
+recommendation.
 
 The refreshed appearance projection shrinks current-season starts, cameos, and minutes toward the
 reviewed previous-season appearance history. With the default five effective prior fixtures, one
-final current-season fixture receives weight `1 / (1 + 5)`. This avoids overreacting to one match
+completed current-season fixture receives weight `1 / (1 + 5)`. This avoids overreacting to one match
 while still allowing a new/current-only player to acquire an evidence-based role.
 
 ## Context contract
@@ -57,7 +66,8 @@ while still allowing a new/current-only player to acquire an evidence-based role
 - continuous tactical-role fingerprints and nominal-position changes.
 
 `player_context_feature` combines those annotations with final official playing-time history to
-store rest days and minutes/matches over seven- and fourteen-day windows. The official endpoint
+store rest days and minutes/matches over seven- and fourteen-day windows. Analytically complete
+non-final evidence retains the explicit provisional quality flag. The official endpoint
 does not cover European or other non-PL minutes, so every row carries
 `NON_PL_WORKLOAD_NOT_INGESTED` until that evidence is supplied. Aggregated DGW minutes are not
 guessed onto individual fixtures.
@@ -72,7 +82,9 @@ payload contract. Store the source URL/reference and a concise review rationale 
 
 ## Operational interpretation
 
-Before the prior Gameweek is final, the last valid recommendation is the frozen earlier horizon.
-Once the final event data is checked, rerun the full sequence and generate a new GW anchor. Frozen
-previous-season player rates and team strength remain visible as quality flags; they are not
-presented as current-season estimates.
+Before every prior fixture is finished, the last valid recommendation is the frozen earlier
+horizon. Once all fixtures are finished, the appearance/context refresh may produce a flagged
+analytical anchor without waiting for mini-league processing. After FPL marks the event final and
+data-checked, rerun the full sequence to replace that provisional evidence with a final immutable
+run. Frozen previous-season player rates and team strength remain visible as quality flags; they
+are not presented as current-season estimates.

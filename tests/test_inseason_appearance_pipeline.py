@@ -129,7 +129,65 @@ def test_inseason_appearance_blends_final_history_and_preserves_lineage(tmp_path
     assert "CURRENT_SEASON_APPEARANCE_ONLY" in json.loads(current_only[3])
 
 
-def test_inseason_appearance_requires_every_prior_final_gameweek(tmp_path):
+def test_inseason_appearance_accepts_finished_fixture_provisional_run(tmp_path):
+    database_path = tmp_path / "model.duckdb"
+    _seed_inputs(database_path)
+    with duckdb.connect(str(database_path)) as connection:
+        connection.execute(
+            """
+            UPDATE gameweek_snapshot
+            SET finished = FALSE, data_checked = FALSE
+            WHERE ingestion_run_id = 'snapshot' AND gameweek = 1;
+            UPDATE fpl_event_live_run
+            SET event_finished = FALSE, data_checked = FALSE, status = 'provisional'
+            WHERE live_run_id = 'live-gw1';
+            INSERT INTO fixture_snapshot VALUES (
+                'snapshot', 100, 1, '2026-08-22T15:00:00+01:00',
+                1, 2, TRUE, TRUE
+            );
+            """
+        )
+
+    appearance = materialize_inseason_appearance(
+        target_gameweek=2,
+        current_season="2026-27",
+        previous_season="2025-26",
+        database_path=database_path,
+    )
+    context = materialize_context_features(
+        target_gameweek=2,
+        appearance_projection_run_id=appearance.projection_run_id,
+        database_path=database_path,
+    )
+
+    with duckdb.connect(str(database_path), read_only=True) as connection:
+        appearance_flags = json.loads(
+            connection.execute(
+                """
+                SELECT data_quality_flags FROM player_appearance_projection
+                WHERE projection_run_id = ? AND fpl_id = 1
+                """,
+                [appearance.projection_run_id],
+            ).fetchone()[0]
+        )
+        context_flags = json.loads(
+            connection.execute(
+                """
+                SELECT data_quality_flags FROM player_context_feature
+                WHERE context_run_id = ? AND fpl_id = 1
+                """,
+                [context.context_run_id],
+            ).fetchone()[0]
+        )
+
+    expected_flag = "OFFICIAL_EVENT_ANALYTICALLY_COMPLETE_NOT_FINAL"
+    assert expected_flag in appearance_flags
+    assert expected_flag in context_flags
+
+
+def test_inseason_appearance_requires_every_prior_analytically_complete_gameweek(
+    tmp_path,
+):
     database_path = tmp_path / "model.duckdb"
     _seed_inputs(database_path)
     with duckdb.connect(str(database_path)) as connection:

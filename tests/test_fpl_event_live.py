@@ -9,7 +9,12 @@ from fpl_model.ingest.fpl_event_live import persist_fpl_event_live
 from fpl_model.storage import initialize_database
 
 
-def _seed_source(database_path, *, final: bool) -> None:
+def _seed_source(
+    database_path,
+    *,
+    final: bool,
+    fixture_finished: bool | None = None,
+) -> None:
     initialize_database(database_path)
     with duckdb.connect(str(database_path)) as connection:
         connection.execute(
@@ -30,6 +35,16 @@ def _seed_source(database_path, *, final: bool) -> None:
             """,
             [final, final],
         )
+        if fixture_finished is not None:
+            connection.execute(
+                """
+                INSERT INTO fixture_snapshot VALUES (
+                    'snapshot', 1, 1, '2026-08-22T15:00:00+01:00',
+                    1, 2, TRUE, ?
+                )
+                """,
+                [fixture_finished],
+            )
 
 
 def _payload() -> dict[str, object]:
@@ -72,6 +87,47 @@ def test_event_live_requires_final_checked_gameweek_by_default(tmp_path):
             gameweek=1,
             captured_at=datetime(2026, 8, 24, 3, 0, tzinfo=UTC),
             season="2026-27",
+            database_path=database_path,
+            raw_root=tmp_path / "raw",
+        )
+
+    assert not (tmp_path / "raw").exists()
+
+
+def test_event_live_accepts_only_finished_fixtures_for_analytical_use(tmp_path):
+    database_path = tmp_path / "model.duckdb"
+    _seed_source(database_path, final=False, fixture_finished=True)
+
+    result = persist_fpl_event_live(
+        payload=_payload(),
+        source_ingestion_run_id="snapshot",
+        gameweek=1,
+        captured_at=datetime(2026, 8, 24, 3, 0, tzinfo=UTC),
+        season="2026-27",
+        require_final=False,
+        require_all_fixtures_finished=True,
+        database_path=database_path,
+        raw_root=tmp_path / "raw",
+    )
+
+    assert result.status == "provisional"
+    assert result.event_finished is False
+    assert result.data_checked is False
+
+
+def test_event_live_rejects_unfinished_fixture_for_analytical_use(tmp_path):
+    database_path = tmp_path / "model.duckdb"
+    _seed_source(database_path, final=False, fixture_finished=False)
+
+    with pytest.raises(ValueError, match="not analytically complete"):
+        persist_fpl_event_live(
+            payload=_payload(),
+            source_ingestion_run_id="snapshot",
+            gameweek=1,
+            captured_at=datetime(2026, 8, 24, 3, 0, tzinfo=UTC),
+            season="2026-27",
+            require_final=False,
+            require_all_fixtures_finished=True,
             database_path=database_path,
             raw_root=tmp_path / "raw",
         )

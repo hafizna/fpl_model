@@ -214,6 +214,19 @@ def materialize_context_features(
             raise ValueError(f"no in-season appearance run found for GW{target_gameweek}")
         appearance_run, source_run, appearance_as_of, deadline, live_ids_text = appearance
         live_run_ids = list(json.loads(live_ids_text))
+        live_quality_flags: set[str] = set()
+        if live_run_ids:
+            placeholders = ", ".join("?" for _ in live_run_ids)
+            if connection.execute(
+                f"""
+                SELECT count(*) FROM fpl_event_live_run
+                WHERE live_run_id IN ({placeholders}) AND status = 'provisional'
+                """,
+                live_run_ids,
+            ).fetchone()[0]:
+                live_quality_flags.add(
+                    "OFFICIAL_EVENT_ANALYTICALLY_COMPLETE_NOT_FINAL"
+                )
 
         annotations = connection.execute(
             """
@@ -298,7 +311,11 @@ def materialize_context_features(
         output_rows = []
         fully_observed = 0
         for fpl_id, player_code, team_id, current_position in players:
-            flags = {"CONTEXT_FEATURES_DIAGNOSTIC_ONLY", "NON_PL_WORKLOAD_NOT_INGESTED"}
+            flags = {
+                "CONTEXT_FEATURES_DIAGNOSTIC_ONLY",
+                "NON_PL_WORKLOAD_NOT_INGESTED",
+                *live_quality_flags,
+            }
             manager_name = None
             manager_tenure = None
             manager_changed = None

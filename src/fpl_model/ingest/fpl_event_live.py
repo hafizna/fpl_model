@@ -64,6 +64,7 @@ def persist_fpl_event_live(
     captured_at: datetime,
     season: str,
     require_final: bool = True,
+    require_all_fixtures_finished: bool = False,
     database_path: str | Path = DEFAULT_DATABASE_PATH,
     raw_root: str | Path = DEFAULT_RAW_ROOT,
 ) -> FPLEventLiveResult:
@@ -98,10 +99,26 @@ def persist_fpl_event_live(
         event_finished, data_checked, snapshot_at = event
         if captured_at < snapshot_at:
             raise ValueError("event-live capture predates its source snapshot")
+        fixture_counts = connection.execute(
+            """
+            SELECT count(*), count(*) FILTER (WHERE finished)
+            FROM fixture_snapshot
+            WHERE ingestion_run_id = ? AND gameweek = ?
+            """,
+            [source_ingestion_run_id, gameweek],
+        ).fetchone()
+        all_fixtures_finished = bool(
+            fixture_counts[0] > 0 and fixture_counts[0] == fixture_counts[1]
+        )
         if require_final and not (event_finished and data_checked):
             raise ValueError(
                 f"GW{gameweek} is not final in source snapshot; "
                 "finished and data_checked are required"
+            )
+        if require_all_fixtures_finished and not all_fixtures_finished:
+            raise ValueError(
+                f"GW{gameweek} is not analytically complete in source snapshot; "
+                "all assigned fixtures must be finished"
             )
 
         players = {
