@@ -671,10 +671,12 @@ here -- it evaluates one specific decision command's own owned-squad/shortlist
 pools, which do not exist until that command runs, and stays attached to each
 command's own output instead.
 
-A command that also MATERIALISES a release automatically (running
-`refresh_fpl_snapshot.py` through `project_frozen_horizon.py` end to end) is a
-separate, larger, not-yet-built Sprint 5 item; this orchestrator only validates
-runs a caller already produced through the ordinary pipeline commands.
+`scripts/materialize_release.py` is the materialising counterpart. It runs the
+official snapshot, player-identity bridge, availability, final prior-GW event-live,
+appearance, team-strength, context, baseline, frozen-horizon, shadow-calibration,
+uncertainty, and combined validation stages in one deterministic command. It exits
+non-zero when manifest or freshness validation fails. `scripts/validate_release.py`
+remains useful as the read-only validator for already named runs.
 
 ## Sprint 5: explicit research/shadow/production release state
 

@@ -12,6 +12,12 @@ immutable lineage of the recommendation.
 
 ```bash
 python scripts/refresh_fpl_snapshot.py --season 2026-27
+python scripts/import_player_identity_bridge.py \
+  --vaastav-players-csv data/raw/vaastav/2025-26/<pinned-revision>/players_raw.csv \
+  --source-ingestion-run-id fpl_... \
+  --target-season 2026-27 \
+  --vaastav-season 2025-26 \
+  --source-revision <pinned-revision>
 python scripts/resolve_availability.py --gameweek 2
 python scripts/refresh_fpl_event_live.py \
   --gameweek 1 \
@@ -45,6 +51,17 @@ python scripts/project_inseason_baseline.py \
   --context-run context_run_...
 python scripts/project_frozen_horizon.py --anchor-model-run-id baseline_...
 ```
+
+The production-shaped manual sequence above is also available as one fail-closed command:
+
+```bash
+python scripts/materialize_release.py --help
+```
+
+It additionally attaches the named calibration and uncertainty artifacts and runs manifest,
+freshness, approval, and health validation over the resulting three model runs. The command exits
+non-zero when manifest or freshness validation fails; a healthy release can still remain
+`shadow` until the artifacts pass confirmatory evaluation and are approved.
 
 By default, `refresh_fpl_event_live.py` fails closed unless the source snapshot says the prior
 Gameweek is both `finished` and `data_checked`. For the narrower appearance/context refresh,

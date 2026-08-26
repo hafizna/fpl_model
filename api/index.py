@@ -27,6 +27,12 @@ def _database_path() -> Path:
     return DEFAULT_DATABASE_PATH if configured is None else Path(configured)
 
 
+def _release_path() -> Path | None:
+    configured = os.environ.get("FPL_WEB_RELEASE_PATH")
+    candidate = WEB_ROOT / "release.json" if configured is None else Path(configured)
+    return candidate if candidate.is_file() else None
+
+
 class SquadRequest(BaseModel):
     fpl_ids: list[int] = Field(min_length=15, max_length=15)
     bank_tenths: int = Field(default=0, ge=0)
@@ -50,16 +56,18 @@ app.add_middleware(
 
 @lru_cache(maxsize=1)
 def _bootstrap() -> dict[str, object]:
-    return load_web_bootstrap(_database_path())
+    return load_web_bootstrap(_database_path(), release_path=_release_path())
 
 
 @app.get("/api/health")
 def health() -> dict[str, object]:
     database_path = _database_path()
+    release_path = _release_path()
     return {
-        "ok": database_path.exists(),
+        "ok": release_path is not None or database_path.exists(),
         "database_path": str(database_path),
-        "mode": "research",
+        "release_path": None if release_path is None else str(release_path),
+        "mode": "compact_release" if release_path is not None else "database",
     }
 
 
@@ -80,6 +88,7 @@ def lineups(request: SquadRequest) -> dict[str, object]:
             free_transfers=request.free_transfers,
             selling_prices=request.selling_prices,
             database_path=_database_path(),
+            release_path=_release_path(),
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -95,6 +104,7 @@ def transfers(request: SquadRequest, top_n: int = 8) -> dict[str, object]:
             selling_prices=request.selling_prices,
             top_n=max(1, min(top_n, 20)),
             database_path=_database_path(),
+            release_path=_release_path(),
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

@@ -7,6 +7,7 @@ model runs and then passed to the same Python rules used by the CLI tools.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from decimal import Decimal
@@ -93,10 +94,11 @@ def resolve_research_horizon(connection: duckdb.DuckDBPyConnection) -> ResearchH
     )
 
 
-def _catalog_rows(
+def load_horizon_catalog(
     connection: duckdb.DuckDBPyConnection,
     horizon: ResearchHorizon,
 ) -> tuple[dict[int, dict[str, Any]], dict[int, dict[int, PlayerGameweekProjection]]]:
+    """Load one explicit horizon into application-facing player/projection maps."""
     run_by_gameweek = dict(horizon.model_runs)
     run_ids = tuple(run_by_gameweek.values())
     placeholders = ",".join("?" for _ in run_ids)
@@ -192,16 +194,136 @@ def _catalog_rows(
     return catalog, projections
 
 
-def load_web_bootstrap(
-    database_path: Path = DEFAULT_DATABASE_PATH,
-) -> dict[str, Any]:
+def load_release_catalog(
+    release_path: str | Path,
+) -> tuple[
+    ResearchHorizon,
+    dict[int, dict[str, Any]],
+    dict[int, dict[int, PlayerGameweekProjection]],
+    str,
+    str | None,
+]:
+    """Load the compact, validated release used by stateless deployments."""
+
+    payload = json.loads(Path(release_path).read_text(encoding="utf-8"))
+    if payload.get("schema_version") != "fpl_web_release_v1":
+        raise ValueError("unsupported or missing web release schema_version")
+    release = payload.get("release")
+    players = payload.get("players")
+    if not isinstance(release, dict) or not isinstance(players, list):
+        raise ValueError("web release must contain release metadata and players")
+    stored_digest = release.get("content_sha256")
+    release_id = release.get("release_id")
+    if stored_digest is not None:
+        unsigned_release = dict(release)
+        unsigned_release.pop("content_sha256", None)
+        unsigned_release.pop("release_id", None)
+        unsigned_payload = {
+            "schema_version": payload["schema_version"],
+            "release": unsigned_release,
+            "players": players,
+        }
+        calculated_digest = hashlib.sha256(
+            json.dumps(
+                unsigned_payload,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest()
+        if calculated_digest != str(stored_digest):
+            raise ValueError("web release content_sha256 does not match its payload")
+        expected_id = f"web_release_{calculated_digest[:16]}"
+        if release_id != expected_id:
+            raise ValueError("web release release_id does not match its payload")
+    model_runs = tuple(
+        (int(row["gameweek"]), str(row["model_run_id"]))
+        for row in release.get("model_runs", [])
+    )
+    if len(model_runs) != 3 or tuple(row[0] for row in model_runs) != tuple(
+        range(model_runs[0][0], model_runs[0][0] + 3)
+    ):
+        raise ValueError("web release must contain three consecutive Gameweeks")
+    horizon = ResearchHorizon(
+        source_ingestion_run_id=str(release["source_ingestion_run_id"]),
+        model_version=str(release["model_version"]),
+        planning_as_of=str(release["planning_as_of"]),
+        model_runs=model_runs,
+    )
+    catalog: dict[int, dict[str, Any]] = {}
+    projections: dict[int, dict[int, PlayerGameweekProjection]] = {
+        gameweek: {} for gameweek, _ in model_runs
+    }
+    for player in players:
+        row = dict(player)
+        fpl_id = int(row["fpl_id"])
+        if fpl_id in catalog:
+            raise ValueError(f"duplicate player in web release: {fpl_id}")
+        gameweek_rows = row.get("gameweeks")
+        if not isinstance(gameweek_rows, dict):
+            raise ValueError(f"player {fpl_id} has no Gameweek projections")
+        for gameweek, _ in model_runs:
+            projection_row = gameweek_rows.get(str(gameweek))
+            if not isinstance(projection_row, dict):
+                raise ValueError(f"player {fpl_id} lacks GW{gameweek} projection")
+            projections[gameweek][fpl_id] = PlayerGameweekProjection(
+                fpl_id=fpl_id,
+                expected_points=float(projection_row["xpts"]),
+                uncertainty=(
+                    None
+                    if projection_row.get("uncertainty") is None
+                    else float(projection_row["uncertainty"])
+                ),
+                data_quality_flags=tuple(
+                    str(flag) for flag in projection_row.get("quality_flags", [])
+                ),
+                appearance_probability=float(projection_row["appearance_probability"]),
+            )
+        catalog[fpl_id] = row
+    if not catalog:
+        raise ValueError("web release contains no players")
+    return (
+        horizon,
+        catalog,
+        projections,
+        str(release.get("health", "research")),
+        None if release_id is None else str(release_id),
+    )
+
+
+def _load_web_inputs(
+    *,
+    database_path: str | Path,
+    release_path: str | Path | None,
+) -> tuple[
+    ResearchHorizon,
+    dict[int, dict[str, Any]],
+    dict[int, dict[int, PlayerGameweekProjection]],
+    str,
+    str | None,
+]:
+    if release_path is not None:
+        return load_release_catalog(release_path)
     with duckdb.connect(str(database_path), read_only=True) as connection:
         horizon = resolve_research_horizon(connection)
-        catalog, _ = _catalog_rows(connection, horizon)
+        catalog, projections = load_horizon_catalog(connection, horizon)
+    return horizon, catalog, projections, "research", None
+
+
+def load_web_bootstrap(
+    database_path: str | Path = DEFAULT_DATABASE_PATH,
+    *,
+    release_path: str | Path | None = None,
+) -> dict[str, Any]:
+    horizon, catalog, _, health, release_id = _load_web_inputs(
+        database_path=database_path,
+        release_path=release_path,
+    )
     return {
         "release": {
-            "health": "research",
-            "label": "RESEARCH",
+            "health": health,
+            "label": "RESEARCH_ONLY" if health == "research" else health.upper(),
+            "release_id": release_id,
             "source_ingestion_run_id": horizon.source_ingestion_run_id,
             "model_version": horizon.model_version,
             "planning_as_of": horizon.planning_as_of,
@@ -328,11 +450,13 @@ def recommend_web_lineups(
     bank_tenths: int = 0,
     free_transfers: int = 1,
     selling_prices: dict[int, int] | None = None,
-    database_path: Path = DEFAULT_DATABASE_PATH,
+    database_path: str | Path = DEFAULT_DATABASE_PATH,
+    release_path: str | Path | None = None,
 ) -> dict[str, Any]:
-    with duckdb.connect(str(database_path), read_only=True) as connection:
-        horizon = resolve_research_horizon(connection)
-        catalog, projections = _catalog_rows(connection, horizon)
+    horizon, catalog, projections, health, release_id = _load_web_inputs(
+        database_path=database_path,
+        release_path=release_path,
+    )
     squad = _validated_web_squad(
         catalog,
         fpl_ids,
@@ -345,7 +469,8 @@ def recommend_web_lineups(
         for gameweek, _ in horizon.model_runs
     ]
     return {
-        "health": "research",
+        "health": health,
+        "release_id": release_id,
         "horizon": [gameweek for gameweek, _ in horizon.model_runs],
         "lineups": lineups,
         "cumulative_xpts": sum(row["total_xpts"] for row in lineups),
@@ -360,12 +485,14 @@ def recommend_web_transfers(
     free_transfers: int = 1,
     selling_prices: dict[int, int] | None = None,
     top_n: int = 8,
-    database_path: Path = DEFAULT_DATABASE_PATH,
+    database_path: str | Path = DEFAULT_DATABASE_PATH,
+    release_path: str | Path | None = None,
 ) -> dict[str, Any]:
     selling_prices = {} if selling_prices is None else selling_prices
-    with duckdb.connect(str(database_path), read_only=True) as connection:
-        horizon = resolve_research_horizon(connection)
-        catalog, projections = _catalog_rows(connection, horizon)
+    horizon, catalog, projections, health, release_id = _load_web_inputs(
+        database_path=database_path,
+        release_path=release_path,
+    )
     baseline_squad = _validated_web_squad(
         catalog,
         fpl_ids,
@@ -424,7 +551,8 @@ def recommend_web_transfers(
         key=lambda row: (-row["net_xpts_gain"], -row["gross_xpts_gain"], row["in"]["name"])
     )
     return {
-        "health": "research",
+        "health": health,
+        "release_id": release_id,
         "baseline_cumulative_xpts": baseline_xpts,
         "recommendation": "hold"
         if not suggestions or suggestions[0]["net_xpts_gain"] <= 0

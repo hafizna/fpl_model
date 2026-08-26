@@ -109,9 +109,8 @@ def determine_release_health(
             "elsewhere; it runs no query and performs no new check of its own.",
             "Omitting coverage_gates does not count as passing coverage -- it means coverage "
             "was not part of this particular state determination at all.",
-            "'production' additionally requires everything else in the Sprint 5 checklist that "
-            "is not yet implemented (drift rebuild-and-compare, full materialise+validate "
-            "orchestration, production sign-off) before it should be trusted operationally.",
+            "'production' additionally requires the remaining Sprint 4 confirmatory calibration/"
+            "uncertainty work and explicit production sign-off before operational trust.",
         ],
     }
     return ReleaseHealth(report=payload)

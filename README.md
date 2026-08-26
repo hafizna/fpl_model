@@ -407,12 +407,28 @@ python scripts/check_release_approval.py \
   --model-run baseline_... --model-run baseline_... --model-run baseline_...
 ```
 
-Run the manifest, freshness, and approval gates together against one named release. This is
-validate-only -- it materialises nothing and every named run must already exist:
+Run the manifest, freshness, and approval gates together against one named release:
 
 ```bash
 python scripts/validate_release.py \
   --model-run baseline_... --model-run baseline_... --model-run baseline_...
+```
+
+For the normal GW2+ refresh, the deterministic end-to-end command now fetches the official
+snapshot and final prior-GW event data, builds identity/availability/appearance/team-strength/
+context lineage, freezes GW/GW+1/GW+2, attaches shadow or approved artifacts, and runs the same
+release gates:
+
+```bash
+python scripts/materialize_release.py --help
+```
+
+Export a passing release for the stateless web app and compare it with an earlier provisional
+release (optionally rescoring an owned squad) with:
+
+```bash
+python scripts/export_web_release.py --help
+python scripts/compare_release_drift.py --help
 ```
 
 See `docs/PIPELINE_ARCHITECTURE.md` for the weekly refresh, injury/eligibility snapshot, and Excel
@@ -510,12 +526,13 @@ before decision outputs can lose the `RESEARCH_ONLY` label.
       `shadow` yet -- see Sprint 4's own unchecked confirmatory-evaluation item)
 - [x] Keep raw mean xPts, calibrated xPts, uncertainty, and data-quality flags separately visible
       rather than hiding them inside one opaque score
-- [ ] Add a deterministic pre-deadline orchestration command that materialises and validates the
-      complete GW, GW+1, and GW+2 release (the validate half is done --
-      `scripts/validate_release.py` runs the manifest/freshness/approval gates together against an
-      already-materialised release; automatic end-to-end materialisation is not yet built)
-- [ ] Rebuild an analytically complete provisional release after official finalisation and report
-      whether any material player, lineup, rating, or transfer decision changed
+- [x] Add a deterministic pre-deadline orchestration command that materialises and validates the
+      complete GW, GW+1, and GW+2 release (`scripts/materialize_release.py`, including snapshot,
+      identity bridge, final event-live evidence, appearance, strength, context, horizon,
+      calibration/uncertainty attachment, manifest, freshness, approval, and health output)
+- [x] Rebuild an analytically complete provisional release after official finalisation and report
+      whether any material player, lineup, cumulative squad outlook, or single-transfer decision
+      changed (`scripts/compare_release_drift.py`; percentile rating remains Sprint 7 scope)
 - [x] Add release-level smoke tests, machine-readable health output, and explicit
       `research`/`shadow`/`production` approval states (`validation/release_health.py` plus
       `scripts/validate_release.py`'s `health` output; "smoke tests" are the deterministic

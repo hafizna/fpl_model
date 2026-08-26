@@ -23,32 +23,44 @@ Implemented surfaces:
 - a frozen three-Gameweek raw-xPts outlook;
 - expected autosub value as a separate diagnostic;
 - every legal, affordable same-position single transfer rescored over the same horizon;
-- explicit `RESEARCH` release status and pinned model-run metadata.
+- explicit `RESEARCH_ONLY`/`SHADOW`/`PRODUCTION` release status and pinned model-run metadata.
 
 The three-Gameweek screen deliberately says `outlook`, not `rating`. A benchmark-relative rating
 and percentile do not exist until the Sprint 7 score contract is implemented.
 
 ## Vercel boundary
 
-Vercel can host the frontend and its Python runtime can host FastAPI. The local DuckDB file is
-generated and gitignored, however, and must not be treated as durable serverless state. Before a
-real deployment, export an approved compact projection release to durable object storage or a
-serverless analytical database, and store private manager state in an external transactional
-database such as Neon Postgres.
+Vercel can host this FastAPI entrypoint. The app now prefers the packaged, immutable
+`web/release.json` compact release, so recommendation requests do not need the generated and
+gitignored DuckDB file. Generate or replace it only from a release that passes manifest and
+freshness validation:
+
+```powershell
+.venv\Scripts\python.exe scripts\export_web_release.py `
+  --model-run-id baseline_... `
+  --model-run-id baseline_... `
+  --model-run-id baseline_... `
+  --output web\release.json
+```
+
+Use `--require-production` only after calibration and uncertainty artifacts are genuinely
+approved. Without it, a passing shadow release remains usable but is visibly labelled `SHADOW`.
+`FPL_WEB_RELEASE_PATH` can select another packaged/mounted artifact; `FPL_DATABASE_PATH` remains
+the local-development fallback.
 
 The intended deployed split is:
 
 ```text
 Vercel static frontend / lightweight API
                     |
-                    +-- approved read-only projection release
+                    +-- immutable read-only compact projection release
                     +-- external manager-state database
                     +-- Python decision service for expensive searches
 ```
 
-The current API adapter is `api/index.py`. `FPL_DATABASE_PATH` may point it at a different local or
-mounted DuckDB file. Do not deploy the ignored development database or use a function's local
-filesystem for persistent squad writes.
+The current API adapter is `api/index.py`. Browser squad state remains in local storage; there are
+no server-side private writes in this MVP. A later authenticated multi-user version still needs an
+external transactional manager-state store.
 
 ## Current limits
 
@@ -57,4 +69,4 @@ filesystem for persistent squad writes.
 - no general multi-transfer or chip-aware optimization;
 - transfer search is one move, evaluated over the frozen three-Gameweek horizon;
 - no official percentile rating yet;
-- no automatic weekly materialisation job.
+- no scheduled weekly materialisation/deployment job (the deterministic manual command exists).

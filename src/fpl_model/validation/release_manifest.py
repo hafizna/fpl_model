@@ -543,7 +543,7 @@ def build_release_manifest(
                 "Shadow calibration/uncertainty/context artifacts are measurement-only "
                 "per docs/SPRINT4_UNCERTAINTY_AND_CALIBRATION.md and docs/INSEASON_REFRESH.md. "
                 "Their absence here does not fail linkage; it is a visibility signal for the "
-                "separate Sprint 5 calibration/uncertainty release gates, not yet implemented. "
+                "separate Sprint 5 calibration/uncertainty release gates. "
                 "non_final_event_live_runs lists in-season appearance inputs built from an "
                 "OFFICIAL_EVENT_ANALYTICALLY_COMPLETE_NOT_FINAL run per docs/INSEASON_REFRESH.md; "
                 "it does not fail linkage either -- finality is a separate future gate."

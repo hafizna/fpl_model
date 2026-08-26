@@ -14,9 +14,8 @@ it does not re-implement any check, only calls all three against the same
 ``model_run_ids`` and folds their verdicts into one combined pass/fail. It is
 VALIDATE-ONLY: it materialises nothing and writes nothing to the database. A
 caller is responsible for having already produced the model runs it names here
-(via the existing ``project_*``/``refresh_*`` pipeline commands) -- see
-`docs/PIPELINE_ARCHITECTURE.md`. A pipeline that also materialises those runs
-automatically is a separate, not-yet-built Sprint 5 item.
+(directly or through ``validation.release_materialization``) -- see
+`docs/PIPELINE_ARCHITECTURE.md`.
 
 The 100%-shortlist ``decision_coverage`` gate is deliberately NOT included here.
 Unlike the three release-level checks above, it does not take ``model_run_ids``
