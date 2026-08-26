@@ -42,6 +42,55 @@ make the overall result approximate: it is the best retained squad, not a certif
 optimum. The JSON reports the eligible pool, pruned pool, complete squads evaluated, beam width,
 coverage gaps, alternatives, and the assumptions needed to reproduce the result.
 
+## Locked and excluded players (scenario comparisons)
+
+`--lock FPL_ID` (repeatable) forces a player into every returned squad; `--exclude FPL_ID`
+(repeatable) forces one out. This is the mechanism for the structural counterfactual comparisons
+design principle 6 requires -- for example, run the command once with `--lock <Haaland's fpl_id>`
+and once with `--exclude <Haaland's fpl_id>` to compare a Haaland vs no-Haaland squad, or lock one
+premium goalkeeper against excluding it (forcing a cheaper set-and-forget-plus-backup structure) to
+test the goalkeeper sanity check design principle 6 also requires:
+
+```powershell
+python scripts/optimize_initial_squad.py `
+  --model-run GW1=baseline_... --model-run GW2=baseline_... --model-run GW3=baseline_... `
+  --lock 123456 `
+  --output data/processed/recommendations/initial_squad_locked_haaland.json
+```
+
+A locked player must still be legal on its own: it must have a complete, transferable projection in
+all three Gameweeks, its position must not already be full among the locks, it must not push any
+club over the three-player limit, and the locked players' combined price must not alone exceed the
+budget. Any violation raises before the search runs, rather than silently dropping the lock or
+producing an infeasible result. A player cannot be both locked and excluded. The command's JSON
+output echoes the resolved `constraints` so a scenario run is reproducible from its own output.
+
+## Dominance audit
+
+The beam search is approximate: candidate pruning can miss a legal, cheaper-or-equal, higher-xPts
+squad entirely -- this is exactly what happened in the documented 22 August 2026 diagnostic (a
+188.68 xPts squad with two GBP 5.0m goalkeepers and a benched GBP 8.0m Watkins, dominated by a
+manually locked Raya/Dubravka structure scoring 189.09 xPts at the same budget). `--audit-dominance`
+re-runs the search up to three more times using the same locked/excluded mechanism above, targeting
+three named structural counterfactuals design principle 6 requires:
+
+- `cheap_goalkeeper_pair` -- excludes the recommended squad's own most expensive goalkeeper;
+- `cheap_bench_reinvestment` -- excludes every non-goalkeeper bench player above the cheap-enabler
+  price threshold who was benched in every retained Gameweek;
+- `premium_starter_reinvestment` -- "premium sanity": excludes the single most expensive
+  premium-priced player (at least `PREMIUM_PRICE_MARGIN_TENTHS` above the cheap-enabler price for
+  their own position) who is never captained across the retained horizon -- a player commanding a
+  premium price must earn it through marginal horizon value, not merely a squad slot.
+
+Each counterfactual's own recommended squad is compared against the original using the standard
+Pareto-dominance rule: a counterfactual dominates when its cumulative three-Gameweek xPts is at
+least as high AND its cost is at most as high, with at least one strict inequality. The output
+JSON's `dominance_audit.is_dominated` flag, `dominating_counterfactuals`, and each counterfactual's
+own comparison are all reported; nothing about the original recommendation changes automatically --
+a dominated result should be treated as `RESEARCH_ONLY` and reviewed, not silently replaced. This
+audits three named counterfactuals only, not an exhaustive proof against every possible structure,
+and each counterfactual is itself the same approximate beam search with one player excluded.
+
 ## Operational boundary
 
 Refresh the official FPL snapshot and rebuild all three compatible projection runs before using a

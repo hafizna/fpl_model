@@ -529,6 +529,180 @@ here is evidence for, but does not by itself constitute, a decision to change
 `baseline_pipeline.py`'s production formula -- an independent season or prospectively frozen
 evaluation is required first.
 
+## Sprint 5: release manifest
+
+Every upstream artifact above (`ingestion_run`, the player identity bridge,
+availability resolution, appearance projection, player rates, team strength,
+context features, shadow calibration, shadow uncertainty) is versioned and linked
+from `model_run`/`baseline_projection_run`, but nothing yet asserted that a chosen
+set of model runs actually cohere as one releasable horizon, or gave a downstream
+consumer one document to point at instead of re-deriving that lineage itself. The
+first Sprint 5 deliverable closes that gap without deciding freshness, coverage, or
+calibration on its own:
+
+```bash
+python scripts/build_release_manifest.py \
+  --model-run baseline_... \
+  --model-run baseline_... \
+  --model-run baseline_...
+```
+
+Pass one `--model-run` per Gameweek in the intended release (normally the anchor GW
+plus its frozen GW+1/GW+2 horizon from `project_frozen_horizon.py`), ordered by
+ascending target Gameweek. `build_release_manifest` in
+`validation/release_manifest.py` never selects "the latest" run itself -- a release
+is a deliberate, reproducible act naming its exact inputs. For each run it walks the
+full lineage graph (ingestion, identity bridge, availability resolution, appearance
+projection, player rates, team strength, context features, shadow calibration,
+shadow uncertainty) and checks that every run in the set:
+
+- has `status` of `completed` or `completed_with_gaps`;
+- targets a distinct Gameweek, given in ascending order;
+- shares one `source_ingestion_run_id` (the same official FPL snapshot) and one
+  frozen `as_of` across the whole horizon -- the same coherence rule
+  `plan_three_gameweeks.py` and `optimize_initial_squad.py` already require of their
+  own three-run inputs;
+- has a linked `baseline_projection_run`, identity bridge, appearance lineage,
+  player-rate run, and team-strength run for every included Gameweek.
+
+Any violation is collected into `linkage.problems` and the manifest fails closed:
+`linkage.passes` is `false` and the CLI exits non-zero. The manifest also reports,
+without failing on it, which Gameweeks are missing shadow calibration, shadow
+uncertainty, or context lineage, and separately resolves every in-season
+appearance run's `live_run_ids` into full `fpl_event_live_run` rows, flagging any
+that are not both `event_finished` and `data_checked` -- i.e. built from an
+`OFFICIAL_EVENT_ANALYTICALLY_COMPLETE_NOT_FINAL` run per
+`docs/INSEASON_REFRESH.md`. This is visibility for the separate freshness/coverage/
+calibration/uncertainty gates the rest of Sprint 5 still needs to add, not a
+pass/fail verdict those gates own. The output is one content-hashed
+`manifest_id` (`release_manifest_<sha256 prefix>`), so the same run set always
+reproduces the same manifest identity.
+
+## Sprint 5: freshness, fixture-completion, and FPL-finality checks
+
+The manifest above proves lineage coherence; it does not ask whether that evidence
+is still current or whether each Gameweek has actually finished. A second,
+independent check answers that for the same run set:
+
+```bash
+python scripts/check_release_freshness.py \
+  --model-run baseline_... \
+  --model-run baseline_... \
+  --model-run baseline_...
+```
+
+For each model run, `validation/release_freshness.py` reads its source
+`ingestion_run.captured_at`, `gameweek_snapshot.finished`/`data_checked` for the
+target Gameweek, and the `fixture_snapshot` completion count, then reports:
+
+- `fixtures.analytically_complete` -- every fixture assigned to that Gameweek is
+  `finished`, the same rule `refresh_fpl_event_live.py --allow-analytically-complete`
+  already uses;
+- `fpl_finality.is_final` -- FPL's own `finished AND data_checked` flags;
+- `drift_check_eligible` -- analytically complete but not yet FPL-final: a
+  Gameweek whose provisional evidence could later be rebuilt and diffed against a
+  final rerun (the rebuild itself is a separate, not-yet-implemented Sprint 5 item);
+- `SNAPSHOT_STALE_RELATIVE_TO_NOW` -- the source snapshot is older than
+  `--stale-after-hours` (default 24) AND the Gameweek's deadline has not yet
+  passed; a completed Gameweek's snapshot age is not itself informative, so this
+  flag is withheld once the deadline has passed.
+
+None of the above fails the check -- provisional, incomplete, or stale evidence is
+a normal mid-season state. It fails closed only when the source snapshot's
+`captured_at` is after the deadline it was used to project for (a lookahead
+hazard; `model_run` already enforces `as_of <= deadline` at the database level, so
+only the snapshot's own capture time needs checking here) or a Gameweek is
+entirely absent from its source snapshot's `gameweek_snapshot`/`fixture_snapshot`
+rows.
+
+## Sprint 5: approved calibration/uncertainty gate
+
+The manifest and freshness checks above are silent on artifact APPROVAL status by
+design -- the manifest only reports which Gameweeks are missing shadow lineage,
+without failing on it. A third, independent check fails closed on that:
+
+```bash
+python scripts/check_release_approval.py \
+  --model-run baseline_... \
+  --model-run baseline_... \
+  --model-run baseline_...
+```
+
+For each model run, `validation/release_approval.py` checks that its linked
+uncertainty artifact is `status='approved'` AND was applied in `'active'` mode
+(`model_uncertainty_lineage.application_mode`, set by `apply_uncertainty_artifact`
+only when the artifact was approved at application time) with every
+`player_fixture_projection.uncertainty` scalar populated, and that its linked
+shadow-calibration artifact is also `status='approved'`.
+
+Every artifact in this database currently has `status='shadow'`
+(`docs/SPRINT4_UNCERTAINTY_AND_CALIBRATION.md`) -- both were fit and measured on
+the same 2025/26 season they would be applied to, and promotion to `approved`
+requires Sprint 4's own unchecked item: an independent-season or prospectively
+frozen 2026/27 confirmatory evaluation. **This check is therefore expected to fail
+for every release today.** That is the correct, honest state, not a defect --
+this gate exists so a release automatically starts passing the day an artifact is
+legitimately promoted, without any change to this script.
+
+## Sprint 5: combined release validation
+
+The three release-level checks above (manifest, freshness, approval) each run and
+report independently. A thin, VALIDATE-ONLY orchestrator runs all three against
+one named release and folds their verdicts together:
+
+```bash
+python scripts/validate_release.py \
+  --model-run baseline_... \
+  --model-run baseline_... \
+  --model-run baseline_...
+```
+
+`validation/release_orchestration.py` calls `build_release_manifest`,
+`check_release_freshness`, and `check_release_approval` against the same
+`model_run_ids`/`database_path` and adds no validation of its own -- it
+materialises and writes nothing; every named run must already exist. `passes`
+requires manifest linkage AND freshness only; `approval_status` (`"approved"` /
+`"shadow_only"`) is tracked and reported separately rather than folded into
+`passes`, because collapsing it in would report failure for every release today
+(no artifact has been promoted past `shadow` yet) and hide the two checks that
+actually matter for day-to-day operation behind a gate nothing can currently
+pass. The 100%-shortlist `decision_coverage` gate is deliberately NOT included
+here -- it evaluates one specific decision command's own owned-squad/shortlist
+pools, which do not exist until that command runs, and stays attached to each
+command's own output instead.
+
+A command that also MATERIALISES a release automatically (running
+`refresh_fpl_snapshot.py` through `project_frozen_horizon.py` end to end) is a
+separate, larger, not-yet-built Sprint 5 item; this orchestrator only validates
+runs a caller already produced through the ordinary pipeline commands.
+
+## Sprint 5: explicit research/shadow/production release state
+
+`docs/PROJECTION_COVERAGE_AUDIT.md` and the Sprint 6/7/8 roadmap already assume
+one explicit label -- `RESEARCH_ONLY`, or eventually `shadow`/`production` --
+exists somewhere. Until now nothing computed it as structured output.
+`validation/release_health.py` derives it read-only from gate reports already
+computed elsewhere, adding no new check:
+
+- `research` (label `RESEARCH_ONLY`) -- manifest linkage fails, freshness fails
+  closed (a lookahead hazard or a Gameweek missing from its own source
+  snapshot -- never mere staleness or incompleteness, which freshness already
+  reports as non-failing flags), or any supplied `decision_coverage` gate is
+  below its required 100%;
+- `shadow` -- manifest and freshness (and any supplied coverage gate) all pass,
+  but calibration/uncertainty are not yet APPROVED -- the expected state for
+  every release today;
+- `production` -- everything above passes AND calibration/uncertainty are
+  APPROVED. No release in this database currently qualifies.
+
+`scripts/validate_release.py` attaches this as a `health` object alongside its
+existing manifest/freshness/approval sections (release-level only, with no
+`decision_coverage` gates supplied, since those are specific to one decision
+command's own output rather than to a release considered on its own). A caller
+labelling one specific lineup/transfer/plan/initial-squad output can call
+`determine_release_health` directly with that command's own `coverage_gate`
+report to fold coverage into the same state.
+
 ## Decision layer: squad planner and transfer recommender
 
 The eventual user-facing feature sits downstream of calibrated player-fixture projections. Its
@@ -562,6 +736,16 @@ immediate hit when no free transfer exists, aggregates DGWs, excludes untransact
 targets with explicit counts, and preserves all quality flags. This is a transparent single-GW
 benchmark, not yet the multi-GW planner described above.
 
+`--audit-goalkeeper-reinvestment` (opt-in; runs one extra search pass) checks design principle 6's
+"set-and-forget goalkeeper plus a cheap backup ... after the saved funds are optimally reinvested"
+counterfactual: `decision/transfer_dominance.py` identifies the squad's own most expensive
+goalkeeper (the one NOT already the higher-xPts starter), swaps it for the cheapest legal same-
+position target, then takes the single best non-goalkeeper reinvestment with the freed bank --
+charging each leg its own hit cost from the squad's actual free-transfer state rather than assuming
+both are free. This is one NAMED two-transfer combo, not general multi-transfer search (a separate,
+larger, not-yet-built Sprint 6 item); it reports whether the combo Pareto-dominates
+`recommended.net_xpts_gain` without changing what `recommend_single_transfers` itself returns.
+
 The rolling three-GW engine is now also implemented, but is not yet operationally validated. It
 loads exactly three consecutive `model_run` records completed by the first deadline and sharing the same official source snapshot,
 model version, and frozen pre-first-deadline `as_of`. It searches roll/single-transfer paths,
@@ -590,6 +774,86 @@ constructs budget/position/club-legal squads with a bounded beam, and exactly re
 and captaincy for each retained squad in each GW. This enables general preseason selection while a
 manager snapshot is unavailable, without pretending the rolling one-transfer engine supports an
 unlimited-transfer state. The search remains explicitly approximate.
+
+Every decision command above (`recommend_lineup.py`, `recommend_transfers.py`,
+`plan_three_gameweeks.py`, `optimize_initial_squad.py`) attaches a `coverage_gate` object to its
+JSON output, implementing the 100% owned-squad/optimizer-shortlist half of the coverage policy
+`docs/PROJECTION_COVERAGE_AUDIT.md` already stated in prose (the 95% selectable-player half is
+`audit_projection_coverage.py`). `validation/decision_coverage.py` reads each command's own
+existing `excluded_missing_projection` diagnostics -- it does not change what any command searches
+or computes -- and reports `passes`/`failing_pools` against the required 100%. `owned_squad` is
+expected to always pass, since `decision/lineup_store.py` already fails closed on any missing owned
+projection before a command ever runs; a shortlist pool (transfer targets, or a rolling/initial-
+squad Gameweek pool) fails when the store silently excluded a missing-projection candidate, which
+is exactly the failure mode `docs/INITIAL_SQUAD_OPTIMIZER.md`'s own diagnostic run described.
+
+Every player entry each of those same four commands returns also carries a `transparency` object
+(or `starters_transparency`/`captain_transparency` alongside an existing `starters`/`captain_fpl_id`
+field where changing the field's own shape would break an existing consumer).
+`validation/decision_transparency.py` reads `player_fixture_shadow_projection` and
+`player_fixture_uncertainty` -- both measurement-only per
+`docs/SPRINT4_UNCERTAINTY_AND_CALIBRATION.md` -- and reports `raw_xpts`,
+`shadow_calibrated_xpts`, `lower_xpts`/`upper_xpts`/`predictive_rmse`, and `risk_band` next to the
+production `expected_points`/`uncertainty` fields those commands already returned, so a raw,
+calibrated, and interval view are all visible together rather than only the single production
+number. This is purely additive display: it is never read by any `decision/*` search or ranking
+logic, and a player absent from either shadow table simply reports `null` fields rather than
+raising. Aggregation to one row per Gameweek/player when a double Gameweek spans two fixtures
+mirrors `decision/lineup_store.py`'s own DGW handling: xPts-shaped values sum across fixtures,
+uncertainty/RMSE-shaped values combine by root-sum-of-squares.
+
+## Sprint 6: consuming only a release that passes the Sprint 5 gate
+
+All four decision commands now call `validation.release_orchestration.
+enforce_release_gate` on their own `model_run_id`(s) before doing any decision
+work, and refuse to produce a recommendation when it fails. "Consume only an
+approved Sprint 5 release" is interpreted as the manifest+freshness gate
+(`orchestrate_release_validation`'s `passes`), not literal artifact
+`status='approved'` -- every artifact is expected to be `shadow_only` today (see
+the Sprint 5 approval gate above), so requiring literal approval would make
+every decision command unusable before Sprint 4's confirmatory evaluation
+exists. `recommend_transfers.py`/`plan_three_gameweeks.py`/
+`optimize_initial_squad.py` build their `model_run_ids` tuple sorted by
+ascending target Gameweek before calling the gate, since `--model-run GW=ID`
+arguments are not guaranteed to arrive in Gameweek order and
+`build_release_manifest` requires ascending order.
+
+A failure raises `ReleaseGateFailure` (carrying the full report); each CLI
+prints it and exits non-zero before touching squad or projection data. Each
+command also accepts a loudly-labelled `--skip-release-validation` escape hatch
+for local development, mirroring the existing `--allow-provisional` precedent in
+`scripts/refresh_fpl_event_live.py` -- it is not intended for an operational
+recommendation. When the gate is enforced, each command's JSON output also
+carries a `release_health` object from `validation.release_health.
+determine_release_health`, folding in that same command's own `coverage_gate`
+so the reported state (`research`/`shadow`/`production`) reflects both release
+health and this specific decision's own coverage.
+
+## Sprint 6: expected autosub value
+
+`decision/lineup.py`'s `total_xpts` only ever sums the 11 starters plus the captain bonus -- every
+bench player contributes exactly zero, even though real FPL autosubs a blanking starter for the
+first eligible bench player. `decision/autosub.py` computes each bench slot's OWN expected xPts
+contribution under FPL's actual autosub rule (verified against
+[LiveFPL](https://www.livefpl.com/blog/fpl-auto-subs) and
+[Fantasy Football Scout](https://www.fantasyfootballscout.co.uk/2023/06/01/how-do-substitutes-work-in-fpl-and-what-are-autosubs)):
+a player is autosubbed only on exactly 0 minutes for the whole Gameweek; the starting goalkeeper can
+only be replaced by the bench goalkeeper (and only if that bench goalkeeper is not also blanking);
+outfield starters are checked against the bench in bench order, skipping a substitution that would
+break legal formation (reusing `decision.lineup.is_legal_starting_xi`'s own definition so this can
+never silently diverge from production lineup legality); each bench player is used for at most one
+substitution. Given every starter's own independent blank probability
+(`1 - appearance_probability`), it enumerates blank patterns and weights each bench player's xPts by
+the probability of the specific pattern that uses them -- an expected value, not a simulated outcome.
+
+`PlayerGameweekProjection` gained an `appearance_probability` field (start + substitute appearance
+probability, combined across DGW fixtures as `1 - product(1 - appearance_i)` via
+`decision.lineup_store.combine_appearance_probability`) to carry this from
+`player_fixture_projection`'s existing `start_probability`/`substitute_appearance_probability`
+columns through every decision `_store.py` module. `recommend_lineup.py`'s output carries the result
+as `expected_autosub_value`, explicitly informational: it is never added to `total_xpts` or any
+other production score, matching the same measurement-only boundary Sprint 4's shadow calibration
+and uncertainty artifacts already observe.
 
 The first presentation boundary is a generated local HTML dashboard. It reads scenario CSVs,
 official identity/status from one pinned ingestion, and exactly three compatible frozen model

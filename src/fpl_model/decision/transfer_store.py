@@ -8,7 +8,12 @@ from math import sqrt
 import duckdb
 
 from fpl_model.decision.lineup import PlayerGameweekProjection
-from fpl_model.decision.lineup_store import StoredLineupInputs, _flags, load_lineup_inputs
+from fpl_model.decision.lineup_store import (
+    StoredLineupInputs,
+    _flags,
+    combine_appearance_probability,
+    load_lineup_inputs,
+)
 from fpl_model.decision.squad import SquadPlayer
 from fpl_model.decision.transfer import TransferTarget
 
@@ -40,19 +45,26 @@ def load_transfer_inputs(
     ).fetchall()
     fixture_rows = connection.execute(
         """
-        SELECT player_code, final_xpts, uncertainty, data_quality_flags
+        SELECT player_code, final_xpts, uncertainty, data_quality_flags,
+               start_probability, substitute_appearance_probability
         FROM player_fixture_projection
         WHERE model_run_id = ?
         """,
         [model_run_id],
     ).fetchall()
-    by_code: dict[int, list[tuple[float, float | None, str | None]]] = {}
-    for player_code, final_xpts, uncertainty, flags in fixture_rows:
+    by_code: dict[
+        int, list[tuple[float, float | None, str | None, float, float]]
+    ] = {}
+    for player_code, final_xpts, uncertainty, flags, start_probability, sub_probability in (
+        fixture_rows
+    ):
         by_code.setdefault(int(player_code), []).append(
             (
                 float(final_xpts),
                 None if uncertainty is None else float(uncertainty),
                 flags,
+                float(start_probability),
+                float(sub_probability),
             )
         )
 
@@ -100,6 +112,7 @@ def load_transfer_inputs(
                     data_quality_flags=tuple(
                         sorted({flag for row in rows for flag in _flags(row[2])})
                     ),
+                    appearance_probability=combine_appearance_probability(rows),
                 ),
             )
         )

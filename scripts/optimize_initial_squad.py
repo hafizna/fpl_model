@@ -15,10 +15,22 @@ from fpl_model.decision.initial_squad import (
     DEFAULT_INITIAL_SQUAD_BEAM_WIDTH,
     DEFAULT_RETURNED_INITIAL_SQUADS,
     InitialSquadPlan,
+    SquadConstraints,
     optimize_initial_squad,
 )
+from fpl_model.decision.initial_squad_dominance import audit_dominance
 from fpl_model.decision.initial_squad_store import load_initial_squad_inputs
 from fpl_model.storage import DEFAULT_DATABASE_PATH
+from fpl_model.validation.decision_coverage import CoverageCount, evaluate_decision_coverage
+from fpl_model.validation.decision_transparency import (
+    load_player_transparency,
+    transparency_report,
+)
+from fpl_model.validation.release_health import determine_release_health
+from fpl_model.validation.release_orchestration import (
+    ReleaseGateFailure,
+    enforce_release_gate,
+)
 
 
 def _model_run(value: str) -> tuple[int, str]:
@@ -70,12 +82,49 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=DEFAULT_RETURNED_INITIAL_SQUADS,
     )
+    parser.add_argument(
+        "--lock",
+        dest="locked_fpl_ids",
+        action="append",
+        type=int,
+        default=[],
+        metavar="FPL_ID",
+        help="Force this player into every returned squad (repeatable). For scenario "
+        "comparisons such as Haaland/no-Haaland.",
+    )
+    parser.add_argument(
+        "--exclude",
+        dest="excluded_fpl_ids",
+        action="append",
+        type=int,
+        default=[],
+        metavar="FPL_ID",
+        help="Force this player out of every returned squad (repeatable). For scenario "
+        "comparisons such as set-and-forget/rotating goalkeeper.",
+    )
+    parser.add_argument(
+        "--audit-dominance",
+        action="store_true",
+        help="Re-run the search with the most expensive goalkeeper and every never-started "
+        "expensive bench player excluded, and flag the recommendation if a cheaper-or-equal, "
+        "higher-xPts counterfactual squad exists. Runs the full search up to two additional "
+        "times, so it is opt-in.",
+    )
     parser.add_argument("--database", type=Path, default=DEFAULT_DATABASE_PATH)
     parser.add_argument("--output", type=Path)
+    parser.add_argument(
+        "--skip-release-validation",
+        action="store_true",
+        help="Skip the manifest/freshness release gate. RESEARCH/DEVELOPMENT USE ONLY -- "
+        "an operational recommendation must consume a release that passes this gate.",
+    )
     return parser.parse_args()
 
 
-def _plan(plan: InitialSquadPlan) -> dict[str, object]:
+def _plan(
+    plan: InitialSquadPlan,
+    transparency_by_gameweek: dict[int, dict[int, object]],
+) -> dict[str, object]:
     return {
         "cumulative_xpts": plan.cumulative_xpts,
         "uncertainty": plan.uncertainty,
@@ -102,8 +151,19 @@ def _plan(plan: InitialSquadPlan) -> dict[str, object]:
                 "formation": row.lineup.formation,
                 "captain_fpl_id": row.lineup.captain.fpl_id,
                 "captain_name": row.lineup.captain.player_name,
+                "captain_transparency": transparency_report(
+                    transparency_by_gameweek.get(row.gameweek, {}).get(
+                        row.lineup.captain.fpl_id
+                    )
+                ),
                 "vice_captain_fpl_id": row.lineup.vice_captain.fpl_id,
                 "starters": [player.fpl_id for player in row.lineup.starters],
+                "starters_transparency": [
+                    transparency_report(
+                        transparency_by_gameweek.get(row.gameweek, {}).get(player.fpl_id)
+                    )
+                    for player in row.lineup.starters
+                ],
                 "bench_goalkeeper": row.lineup.bench_goalkeeper.fpl_id,
                 "outfield_bench_order": [
                     player.fpl_id for player in row.lineup.outfield_bench_order
@@ -119,22 +179,79 @@ def main() -> None:
     model_run_ids = dict(args.model_run)
     if len(model_run_ids) != len(args.model_run):
         raise ValueError("each Gameweek may be specified only once")
+    ordered_run_ids = tuple(model_run_ids[gameweek] for gameweek in sorted(model_run_ids))
+
+    release_gate_result = None
+    if args.skip_release_validation:
+        print("WARNING: --skip-release-validation set; release gate not enforced.")
+    else:
+        try:
+            release_gate_result = enforce_release_gate(
+                model_run_ids=ordered_run_ids, database_path=args.database
+            )
+        except ReleaseGateFailure as failure:
+            print(str(failure))
+            raise SystemExit(1) from failure
+
     with duckdb.connect(str(args.database), read_only=True) as connection:
         inputs = load_initial_squad_inputs(connection, model_run_ids=model_run_ids)
+        transparency_by_gameweek = {
+            gameweek: load_player_transparency(
+                connection,
+                model_run_id=run_id,
+                fpl_ids=tuple(target.player.fpl_id for target in pool.players),
+            )
+            for (gameweek, run_id), pool in zip(inputs.model_run_ids, inputs.pools, strict=True)
+        }
+    constraints = SquadConstraints(
+        locked_fpl_ids=frozenset(args.locked_fpl_ids),
+        excluded_fpl_ids=frozenset(args.excluded_fpl_ids),
+    )
     result = optimize_initial_squad(
         inputs.pools,
         budget_tenths=args.budget,
         beam_width=args.beam_width,
         candidates_per_position_per_lens=args.candidates_per_position_per_lens,
         returned_squads=args.returned_squads,
+        constraints=constraints,
+    )
+    coverage_gate = evaluate_decision_coverage(
+        shortlists=tuple(
+            CoverageCount(
+                label=f"gw{row.gameweek}_pool",
+                covered=row.projected_players,
+                excluded_missing_projection=row.excluded_missing_projection,
+            )
+            for row in inputs.diagnostics
+        ),
+    )
+    release_health = (
+        None
+        if release_gate_result is None
+        else determine_release_health(
+            orchestration_report=release_gate_result.report, coverage_gates=(coverage_gate,)
+        ).report
+    )
+    dominance_audit = (
+        None
+        if not args.audit_dominance
+        else audit_dominance(
+            result,
+            inputs.pools,
+            budget_tenths=args.budget,
+            beam_width=args.beam_width,
+            candidates_per_position_per_lens=args.candidates_per_position_per_lens,
+        ).report
     )
     output = {
         "source_ingestion_run_id": inputs.source_ingestion_run_id,
         "model_run_ids": dict(inputs.model_run_ids),
         "planning_as_of": inputs.planning_as_of.isoformat(),
         "model_version": inputs.model_version,
-        "recommended": _plan(result.recommended),
-        "alternatives": [_plan(plan) for plan in result.alternatives],
+        "recommended": _plan(result.recommended, transparency_by_gameweek),
+        "alternatives": [
+            _plan(plan, transparency_by_gameweek) for plan in result.alternatives
+        ],
         "coverage": [
             {
                 "gameweek": row.gameweek,
@@ -145,6 +262,13 @@ def main() -> None:
             }
             for row in inputs.diagnostics
         ],
+        "coverage_gate": coverage_gate,
+        "release_health": release_health,
+        "constraints": {
+            "locked_fpl_ids": sorted(constraints.locked_fpl_ids),
+            "excluded_fpl_ids": sorted(constraints.excluded_fpl_ids),
+        },
+        "dominance_audit": dominance_audit,
         "search": {
             "search_is_exact": result.search_is_exact,
             "beam_width": result.beam_width,

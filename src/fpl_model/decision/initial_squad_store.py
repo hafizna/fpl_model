@@ -129,7 +129,7 @@ def load_initial_squad_inputs(
                 is_captain=False,
                 is_vice_captain=False,
             )
-            xpts, uncertainty, flags = projections[int(player_code)]
+            xpts, uncertainty, flags, appearance_probability = projections[int(player_code)]
             targets.append(
                 TransferTarget(
                     player=player,
@@ -138,6 +138,7 @@ def load_initial_squad_inputs(
                         expected_points=xpts,
                         uncertainty=uncertainty,
                         data_quality_flags=flags,
+                        appearance_probability=appearance_probability,
                     ),
                 )
             )

@@ -16,6 +16,13 @@ class PlayerGameweekProjection:
     expected_points: float
     uncertainty: float | None = None
     data_quality_flags: tuple[str, ...] = ()
+    appearance_probability: float | None = None
+    """Probability of playing >=1 minute this Gameweek (start or substitute
+    appearance, combined across every fixture for a double Gameweek). ``None``
+    when the upstream appearance projection is unavailable. This is the
+    quantity FPL's own autosub rule keys off (a player is autosubbed only on
+    exactly 0 minutes for the whole Gameweek) -- see `decision/autosub.py`.
+    """
 
     def __post_init__(self) -> None:
         if self.fpl_id <= 0:
@@ -26,6 +33,10 @@ class PlayerGameweekProjection:
             not isfinite(self.uncertainty) or self.uncertainty < 0.0
         ):
             raise ValueError("uncertainty must be finite and non-negative")
+        if self.appearance_probability is not None and not (
+            0.0 <= self.appearance_probability <= 1.0
+        ):
+            raise ValueError("appearance_probability must be between 0.0 and 1.0")
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,7 +61,7 @@ class LineupRecommendation:
         return f"{counts['DEF']}-{counts['MID']}-{counts['FWD']}"
 
 
-def _is_legal_starting_xi(players: tuple[SquadPlayer, ...]) -> bool:
+def is_legal_starting_xi(players: tuple[SquadPlayer, ...]) -> bool:
     return (
         sum(player.position == "GK" for player in players) == 1
         and sum(player.position == "DEF" for player in players) >= 3
@@ -85,7 +96,7 @@ def recommend_lineup(
     best_starters: tuple[SquadPlayer, ...] | None = None
     best_score = float("-inf")
     for candidate in combinations(squad.players, 11):
-        if not _is_legal_starting_xi(candidate):
+        if not is_legal_starting_xi(candidate):
             continue
         score = sum(projection_by_id[player.fpl_id].expected_points for player in candidate)
         # combinations() follows canonical squad_position order. Keeping the

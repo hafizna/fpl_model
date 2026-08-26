@@ -34,6 +34,27 @@ def _flags(value: str | None) -> set[str]:
     return {flag.strip() for flag in value.split("|") if flag.strip()}
 
 
+def combine_appearance_probability(
+    fixture_rows: list[tuple[float, float | None, str | None, float, float]],
+) -> float:
+    """Combine per-fixture start+substitute appearance probability into one
+    Gameweek-level probability of playing >=1 minute, for autosub value.
+
+    Each fixture's own appearance probability is
+    ``start_probability + substitute_appearance_probability`` (mutually
+    exclusive per player_fixture_projection's own CHECK constraint). For a
+    double Gameweek, fixtures are combined as independent events: the
+    probability of blanking BOTH fixtures is the product of each fixture's own
+    blank probability, so the Gameweek appearance probability is
+    ``1 - product(1 - appearance_i)``.
+    """
+    blank_probability = 1.0
+    for _, _, _, start_probability, sub_probability in fixture_rows:
+        appearance = start_probability + sub_probability
+        blank_probability *= max(0.0, 1.0 - appearance)
+    return 1.0 - blank_probability
+
+
 def load_lineup_inputs(
     connection: duckdb.DuckDBPyConnection,
     *,
@@ -140,14 +161,19 @@ def load_lineup_inputs(
     }
     projection_rows = connection.execute(
         """
-        SELECT player_code, final_xpts, uncertainty, data_quality_flags
+        SELECT player_code, final_xpts, uncertainty, data_quality_flags,
+               start_probability, substitute_appearance_probability
         FROM player_fixture_projection
         WHERE model_run_id = ?
         """,
         [model_run_id],
     ).fetchall()
-    by_fpl_id: dict[int, list[tuple[float, float | None, str | None]]] = {}
-    for player_code, final_xpts, uncertainty, flags in projection_rows:
+    by_fpl_id: dict[
+        int, list[tuple[float, float | None, str | None, float, float]]
+    ] = {}
+    for player_code, final_xpts, uncertainty, flags, start_probability, sub_probability in (
+        projection_rows
+    ):
         fpl_id = code_to_fpl_id.get(int(player_code))
         if fpl_id is None:
             continue
@@ -156,6 +182,8 @@ def load_lineup_inputs(
                 float(final_xpts),
                 None if uncertainty is None else float(uncertainty),
                 flags,
+                float(start_probability),
+                float(sub_probability),
             )
         )
 
@@ -182,6 +210,7 @@ def load_lineup_inputs(
                 data_quality_flags=tuple(
                     sorted({flag for row in fixture_rows for flag in _flags(row[2])})
                 ),
+                appearance_probability=combine_appearance_probability(fixture_rows),
             )
         )
 

@@ -10,7 +10,12 @@ from math import sqrt
 import duckdb
 
 from fpl_model.decision.lineup import PlayerGameweekProjection
-from fpl_model.decision.lineup_store import StoredLineupInputs, _flags, load_lineup_inputs
+from fpl_model.decision.lineup_store import (
+    StoredLineupInputs,
+    _flags,
+    combine_appearance_probability,
+    load_lineup_inputs,
+)
 from fpl_model.decision.rolling import GameweekProjectionPool
 from fpl_model.decision.squad import SquadPlayer
 from fpl_model.decision.transfer import TransferTarget
@@ -38,22 +43,27 @@ class StoredRollingInputs:
 def aggregate_projections(
     connection: duckdb.DuckDBPyConnection,
     model_run_id: str,
-) -> dict[int, tuple[float, float | None, tuple[str, ...]]]:
+) -> dict[int, tuple[float, float | None, tuple[str, ...], float]]:
     rows = connection.execute(
         """
-        SELECT player_code, final_xpts, uncertainty, data_quality_flags
+        SELECT player_code, final_xpts, uncertainty, data_quality_flags,
+               start_probability, substitute_appearance_probability
         FROM player_fixture_projection
         WHERE model_run_id = ?
         """,
         [model_run_id],
     ).fetchall()
-    by_code: dict[int, list[tuple[float, float | None, str | None]]] = {}
-    for player_code, final_xpts, uncertainty, flags in rows:
+    by_code: dict[
+        int, list[tuple[float, float | None, str | None, float, float]]
+    ] = {}
+    for player_code, final_xpts, uncertainty, flags, start_probability, sub_probability in rows:
         by_code.setdefault(int(player_code), []).append(
             (
                 float(final_xpts),
                 None if uncertainty is None else float(uncertainty),
                 flags,
+                float(start_probability),
+                float(sub_probability),
             )
         )
     result = {}
@@ -68,6 +78,7 @@ def aggregate_projections(
             sum(row[0] for row in fixture_rows),
             combined_uncertainty,
             tuple(sorted({flag for row in fixture_rows for flag in _flags(row[2])})),
+            combine_appearance_probability(fixture_rows),
         )
     return result
 
@@ -204,7 +215,7 @@ def load_rolling_inputs(
                     is_captain=False,
                     is_vice_captain=False,
                 )
-            xpts, uncertainty, flags = projections[int(player_code)]
+            xpts, uncertainty, flags, appearance_probability = projections[int(player_code)]
             targets.append(
                 TransferTarget(
                     player=player,
@@ -213,6 +224,7 @@ def load_rolling_inputs(
                         expected_points=xpts,
                         uncertainty=uncertainty,
                         data_quality_flags=flags,
+                        appearance_probability=appearance_probability,
                     ),
                 )
             )

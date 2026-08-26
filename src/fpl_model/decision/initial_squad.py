@@ -26,6 +26,25 @@ _AVAILABLE_CHIPS = {
 
 
 @dataclass(frozen=True, slots=True)
+class SquadConstraints:
+    """Force-include or force-exclude specific players from the search.
+
+    Used for scenario comparisons the design principles require (for example
+    Haaland/no-Haaland, or set-and-forget vs rotating goalkeeper) rather than
+    trusting the beam search's own proxy-xPts pruning to surface every
+    structural alternative a manager might reasonably ask about.
+    """
+
+    locked_fpl_ids: frozenset[int] = frozenset()
+    excluded_fpl_ids: frozenset[int] = frozenset()
+
+    def __post_init__(self) -> None:
+        overlap = self.locked_fpl_ids & self.excluded_fpl_ids
+        if overlap:
+            raise ValueError(f"players cannot be both locked and excluded: {sorted(overlap)}")
+
+
+@dataclass(frozen=True, slots=True)
 class InitialSquadGameweek:
     gameweek: int
     lineup: LineupRecommendation
@@ -112,21 +131,63 @@ def _validate_pools(
     return maps, common_ids
 
 
+def _validate_constraints(
+    constraints: SquadConstraints,
+    *,
+    maps: tuple[dict[int, TransferTarget], ...],
+    common_ids: set[int],
+    budget_tenths: int,
+) -> None:
+    missing = sorted(constraints.locked_fpl_ids - common_ids)
+    if missing:
+        raise ValueError(
+            "locked players lack a complete, transferable three-Gameweek projection: "
+            f"{missing}"
+        )
+    locked_players = [maps[0][fpl_id].player for fpl_id in constraints.locked_fpl_ids]
+    position_counts = Counter(player.position for player in locked_players)
+    over_position = {
+        position: count
+        for position, count in position_counts.items()
+        if count > POSITION_COUNTS[position]
+    }
+    if over_position:
+        raise ValueError(
+            "locked players exceed the legal position counts for the initial squad: "
+            f"{over_position}"
+        )
+    team_counts = Counter(player.team_id for player in locked_players)
+    over_club = {team: count for team, count in team_counts.items() if count > 3}
+    if over_club:
+        raise ValueError(f"locked players exceed the three-player club limit: {over_club}")
+    locked_cost = sum(player.current_price_tenths for player in locked_players)
+    if locked_cost > budget_tenths:
+        raise ValueError(
+            f"locked players alone cost {locked_cost} tenths, exceeding the "
+            f"{budget_tenths}-tenth budget"
+        )
+
+
 def _candidate_ids(
     maps: tuple[dict[int, TransferTarget], ...],
     common_ids: set[int],
     *,
     per_lens: int,
+    constraints: SquadConstraints,
 ) -> tuple[int, ...]:
+    eligible_ids = common_ids - constraints.excluded_fpl_ids
     horizon_score = {
         fpl_id: sum(rows[fpl_id].projection.expected_points for rows in maps)
-        for fpl_id in common_ids
+        for fpl_id in eligible_ids
     }
-    selected: set[int] = set()
+    # Locked players must survive pruning even if their proxy score/value/price
+    # would otherwise drop them from every lens -- a manager locking a player is
+    # an explicit override of the proxy ranking, not a suggestion to it.
+    selected: set[int] = set(constraints.locked_fpl_ids)
     for position, required in POSITION_COUNTS.items():
         position_ids = [
             fpl_id
-            for fpl_id in common_ids
+            for fpl_id in eligible_ids
             if maps[0][fpl_id].player.position == position
         ]
         by_score = sorted(position_ids, key=lambda value: (-horizon_score[value], value))
@@ -320,6 +381,7 @@ def optimize_initial_squad(
     beam_width: int = DEFAULT_INITIAL_SQUAD_BEAM_WIDTH,
     candidates_per_position_per_lens: int = DEFAULT_CANDIDATES_PER_POSITION_PER_LENS,
     returned_squads: int = DEFAULT_RETURNED_INITIAL_SQUADS,
+    constraints: SquadConstraints | None = None,
 ) -> InitialSquadOptimizerResult:
     """Select a legal initial squad and re-optimize XI/captain in each of three GWs.
 
@@ -327,16 +389,27 @@ def optimize_initial_squad(
     price, and cheapest enablers), followed by a bounded beam. Completed squads
     are ranked by exact three-GW lineup-plus-captain xPts. The result is an
     auditable approximate search, not a certified global optimum.
+
+    ``constraints`` force-includes (``locked_fpl_ids``) or force-excludes
+    (``excluded_fpl_ids``) specific players, for scenario comparisons such as
+    Haaland/no-Haaland or set-and-forget/rotating goalkeeper. A locked player
+    who cannot legally fit (wrong position count, over the three-per-club
+    limit, or alone over budget) raises before any search runs.
     """
     if budget_tenths <= 0:
         raise ValueError("budget_tenths must be positive")
     if beam_width <= 0 or candidates_per_position_per_lens <= 0 or returned_squads <= 0:
         raise ValueError("beam width, candidate limit, and returned squads must be positive")
+    constraints = constraints or SquadConstraints()
     maps, common_ids = _validate_pools(pools)
+    _validate_constraints(
+        constraints, maps=maps, common_ids=common_ids, budget_tenths=budget_tenths
+    )
     candidate_ids = _candidate_ids(
         maps,
         common_ids,
         per_lens=candidates_per_position_per_lens,
+        constraints=constraints,
     )
     players = {fpl_id: maps[0][fpl_id].player for fpl_id in candidate_ids}
     candidate_ids_by_position = {
@@ -350,14 +423,44 @@ def optimize_initial_squad(
         for fpl_id in candidate_ids
     }
 
-    states = [_PartialSquad(player_ids=(), cost_tenths=0, proxy_xpts=0.0)]
+    # Locked players are pre-seeded into the search's single starting state and
+    # removed from the position loop's own slot count, so the beam search fills
+    # only the remaining open slots per position around them. _POSITION_ORDER's
+    # combo-dedup (`fpl_id <= last_id`) still holds: it only requires each
+    # position's own picks be added in ascending fpl_id order across iterations,
+    # and a pre-seeded id is already accounted for by `same_position` on the
+    # first iteration for that position.
+    locked_ids = tuple(sorted(constraints.locked_fpl_ids))
+    locked_counts = Counter(players[fpl_id].position for fpl_id in locked_ids)
+    remaining_position_order: list[str] = []
+    consumed: Counter[str] = Counter()
     for position in _POSITION_ORDER:
+        if consumed[position] < locked_counts[position]:
+            consumed[position] += 1
+            continue
+        remaining_position_order.append(position)
+
+    states = [
+        _PartialSquad(
+            player_ids=locked_ids,
+            cost_tenths=sum(players[fpl_id].current_price_tenths for fpl_id in locked_ids),
+            proxy_xpts=sum(horizon_score[fpl_id] for fpl_id in locked_ids),
+        )
+    ]
+    locked_id_set = set(locked_ids)
+    for position in remaining_position_order:
         expanded: list[_PartialSquad] = []
         for state in states:
             selected = set(state.player_ids)
             team_counts = Counter(players[fpl_id].team_id for fpl_id in state.player_ids)
+            # last_id's combo-dedup must only track picks made by THIS loop, not
+            # the pre-seeded locked players -- a locked player's fpl_id can be
+            # smaller OR larger than the search's own picks, and either way it
+            # is permanently fixed rather than a choice the loop is ordering.
             same_position = [
-                fpl_id for fpl_id in state.player_ids if players[fpl_id].position == position
+                fpl_id
+                for fpl_id in state.player_ids
+                if players[fpl_id].position == position and fpl_id not in locked_id_set
             ]
             last_id = max(same_position, default=0)
             for fpl_id in candidate_ids_by_position[position]:

@@ -17,6 +17,16 @@ from fpl_model.decision.rolling import (
 )
 from fpl_model.decision.rolling_store import load_rolling_inputs
 from fpl_model.storage import DEFAULT_DATABASE_PATH
+from fpl_model.validation.decision_coverage import CoverageCount, evaluate_decision_coverage
+from fpl_model.validation.decision_transparency import (
+    load_player_transparency,
+    transparency_report,
+)
+from fpl_model.validation.release_health import determine_release_health
+from fpl_model.validation.release_orchestration import (
+    ReleaseGateFailure,
+    enforce_release_gate,
+)
 
 
 def _model_run(value: str) -> tuple[int, str]:
@@ -50,10 +60,25 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--returned-plans", type=int, default=DEFAULT_RETURNED_PLANS)
     parser.add_argument("--database", type=Path, default=DEFAULT_DATABASE_PATH)
     parser.add_argument("--output", type=Path)
+    parser.add_argument(
+        "--skip-release-validation",
+        action="store_true",
+        help="Skip the manifest/freshness release gate. RESEARCH/DEVELOPMENT USE ONLY -- "
+        "an operational recommendation must consume a release that passes this gate.",
+    )
     return parser.parse_args()
 
 
-def _plan(plan: RollingPlan, names: dict[int, str]) -> dict[str, object]:
+def _plan(
+    plan: RollingPlan,
+    names: dict[int, str],
+    transparency_by_gameweek: dict[int, dict[int, object]],
+) -> dict[str, object]:
+    def _transparency(gameweek: int, fpl_id: int | None) -> dict[str, object] | None:
+        if fpl_id is None:
+            return None
+        return transparency_report(transparency_by_gameweek.get(gameweek, {}).get(fpl_id))
+
     return {
         "cumulative_net_xpts": plan.cumulative_net_xpts,
         "total_transfer_cost": plan.total_transfer_cost,
@@ -67,8 +92,10 @@ def _plan(plan: RollingPlan, names: dict[int, str]) -> dict[str, object]:
                 "decision": step.decision,
                 "outgoing_fpl_id": step.outgoing_fpl_id,
                 "outgoing_name": names.get(step.outgoing_fpl_id),
+                "outgoing_transparency": _transparency(step.gameweek, step.outgoing_fpl_id),
                 "incoming_fpl_id": step.incoming_fpl_id,
                 "incoming_name": names.get(step.incoming_fpl_id),
+                "incoming_transparency": _transparency(step.gameweek, step.incoming_fpl_id),
                 "free_transfers_before": step.free_transfers_before,
                 "free_transfers_after": step.free_transfers_after,
                 "bank_after_tenths": step.bank_after_tenths,
@@ -77,8 +104,13 @@ def _plan(plan: RollingPlan, names: dict[int, str]) -> dict[str, object]:
                 "formation": step.lineup.formation,
                 "captain_fpl_id": step.lineup.captain.fpl_id,
                 "captain_name": step.lineup.captain.player_name,
+                "captain_transparency": _transparency(step.gameweek, step.lineup.captain.fpl_id),
                 "vice_captain_fpl_id": step.lineup.vice_captain.fpl_id,
                 "starters": [player.fpl_id for player in step.lineup.starters],
+                "starters_transparency": [
+                    _transparency(step.gameweek, player.fpl_id)
+                    for player in step.lineup.starters
+                ],
                 "bench_goalkeeper": step.lineup.bench_goalkeeper.fpl_id,
                 "outfield_bench_order": [
                     player.fpl_id for player in step.lineup.outfield_bench_order
@@ -94,12 +126,34 @@ def main() -> None:
     model_run_ids = dict(args.model_run)
     if len(model_run_ids) != len(args.model_run):
         raise ValueError("each Gameweek may be specified only once")
+    ordered_run_ids = tuple(model_run_ids[gameweek] for gameweek in sorted(model_run_ids))
+
+    release_gate_result = None
+    if args.skip_release_validation:
+        print("WARNING: --skip-release-validation set; release gate not enforced.")
+    else:
+        try:
+            release_gate_result = enforce_release_gate(
+                model_run_ids=ordered_run_ids, database_path=args.database
+            )
+        except ReleaseGateFailure as failure:
+            print(str(failure))
+            raise SystemExit(1) from failure
+
     with duckdb.connect(str(args.database), read_only=True) as connection:
         inputs = load_rolling_inputs(
             connection,
             squad_snapshot_id=args.squad_snapshot_id,
             model_run_ids=model_run_ids,
         )
+        transparency_by_gameweek = {
+            gameweek: load_player_transparency(
+                connection,
+                model_run_id=run_id,
+                fpl_ids=tuple(target.player.fpl_id for target in pool.players),
+            )
+            for (gameweek, run_id), pool in zip(inputs.model_run_ids, inputs.pools, strict=True)
+        }
     result = plan_three_gameweeks(
         inputs.lineup_inputs.squad,
         inputs.pools,
@@ -112,13 +166,37 @@ def main() -> None:
         for pool in inputs.pools
         for row in pool.players
     }
+    coverage_gate = evaluate_decision_coverage(
+        owned_squad=CoverageCount(
+            label="owned_squad",
+            covered=len(inputs.lineup_inputs.squad.players),
+            excluded_missing_projection=0,
+        ),
+        shortlists=tuple(
+            CoverageCount(
+                label=f"gw{row.gameweek}_pool",
+                covered=row.projected_players,
+                excluded_missing_projection=row.excluded_missing_projection,
+            )
+            for row in inputs.diagnostics
+        ),
+    )
+    release_health = (
+        None
+        if release_gate_result is None
+        else determine_release_health(
+            orchestration_report=release_gate_result.report, coverage_gates=(coverage_gate,)
+        ).report
+    )
     output = {
         "squad_snapshot_id": inputs.lineup_inputs.squad_snapshot_id,
         "model_run_ids": dict(inputs.model_run_ids),
         "planning_as_of": inputs.planning_as_of.isoformat(),
         "model_version": inputs.model_version,
-        "recommended": _plan(result.recommended, names),
-        "alternatives": [_plan(plan, names) for plan in result.alternatives],
+        "recommended": _plan(result.recommended, names, transparency_by_gameweek),
+        "alternatives": [
+            _plan(plan, names, transparency_by_gameweek) for plan in result.alternatives
+        ],
         "coverage": [
             {
                 "gameweek": row.gameweek,
@@ -129,6 +207,8 @@ def main() -> None:
             }
             for row in inputs.diagnostics
         ],
+        "coverage_gate": coverage_gate,
+        "release_health": release_health,
         "search": {
             "search_is_exact": result.search_is_exact,
             "beam_width": result.beam_width,

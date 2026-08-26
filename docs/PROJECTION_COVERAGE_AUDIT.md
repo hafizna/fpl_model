@@ -36,3 +36,24 @@ The original v6 audit found 404 projections, 196 gaps, and 68.1% selectable cove
 auditable empirical priors in baseline policy v7, the same frozen inputs produce 583 projections
 and 17 gaps. All remaining gaps are roster-blocked, so selectable coverage is 100% and the coverage
 gate passes. This does not waive calibration, uncertainty, or squad-economics gates.
+
+## The 100% shortlist/squad half of the gate
+
+The 95% selectable-player half above is checked by `audit_projection_coverage.py`. The 100% half
+was, until Sprint 5, only ever stated here in prose: `decision/lineup_store.py` already fails
+closed if any of a manager's 15 owned players lacks a projection, but
+`decision/transfer_store.py`, `decision/rolling_store.py`, and `decision/initial_squad_store.py`
+only ever silently excluded missing-projection candidates from their optimizer shortlists and
+counted them as `excluded_missing_projection` -- underrepresenting missing/new/cheap players in the
+choice set exactly as the initial-squad diagnostic below describes, without ever failing on it.
+
+`validation/decision_coverage.py` turns those existing counts into a checked verdict.
+`recommend_lineup.py`, `recommend_transfers.py`, `plan_three_gameweeks.py`, and
+`optimize_initial_squad.py` each attach a `coverage_gate` object to their JSON output: one
+`owned_squad` pool (100% required; expected to always pass since `load_lineup_inputs` already
+enforces it upstream, but still checked explicitly rather than assumed) plus one `shortlist` pool
+per Gameweek pool the command actually searched. `coverage_gate.passes` is `false`, and
+`failing_pools` names every pool below 100%, whenever any candidate was excluded for a missing
+projection -- the same underlying condition that produced the Watkins/goalkeeper-structure failures
+below. This does not change what any command computes; it only makes the existing exclusion counts
+into an explicit, reportable gate instead of an unread number.

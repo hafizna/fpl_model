@@ -318,6 +318,7 @@ def _recommendations(
                     expected_points=rows[int(player.player_code)][0],
                     uncertainty=rows[int(player.player_code)][1],
                     data_quality_flags=rows[int(player.player_code)][2],
+                    appearance_probability=rows[int(player.player_code)][3],
                 )
                 for player in squad.players
             ),

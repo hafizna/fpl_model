@@ -376,6 +376,45 @@ The runner stores all eleven component values, applies home/away once, and recor
 history as a gap rather than assigning zero xPts. Optional run-ID arguments pin an exact upstream
 lineage when reproducing a result.
 
+Link one Gameweek horizon's full upstream lineage (official snapshot, identity bridge,
+availability, appearance, player rates, team strength, context, shadow calibration/uncertainty)
+into one immutable, content-hashed release manifest. This does not itself decide freshness,
+coverage, or calibration; it fails closed only when the named runs do not cohere as one horizon
+(shared snapshot, shared frozen `as_of`, complete lineage per Gameweek):
+
+```bash
+python scripts/build_release_manifest.py \
+  --model-run baseline_... --model-run baseline_... --model-run baseline_...
+```
+
+Check freshness, fixture-completion, and FPL-finality for the same run set. This reports staleness,
+incomplete fixtures, and non-final Gameweeks as flags rather than failures; it fails closed only on
+a lookahead hazard (source snapshot captured after its own deadline) or a Gameweek missing entirely
+from its snapshot:
+
+```bash
+python scripts/check_release_freshness.py \
+  --model-run baseline_... --model-run baseline_... --model-run baseline_...
+```
+
+Check that every released projection row has APPROVED (not merely shadow) calibration and
+uncertainty lineage. Every artifact in this database is currently `shadow`, so this is expected to
+fail closed until Sprint 4's independent-season 2026/27 confirmatory evaluation promotes one -- see
+`docs/SPRINT4_UNCERTAINTY_AND_CALIBRATION.md`:
+
+```bash
+python scripts/check_release_approval.py \
+  --model-run baseline_... --model-run baseline_... --model-run baseline_...
+```
+
+Run the manifest, freshness, and approval gates together against one named release. This is
+validate-only -- it materialises nothing and every named run must already exist:
+
+```bash
+python scripts/validate_release.py \
+  --model-run baseline_... --model-run baseline_... --model-run baseline_...
+```
+
 See `docs/PIPELINE_ARCHITECTURE.md` for the weekly refresh, injury/eligibility snapshot, and Excel
 output contract.
 
@@ -459,21 +498,28 @@ See `THIRD_PARTY_NOTICES.md`.
 This sprint turns upstream model artifacts into one approved, auditable release. It must complete
 before decision outputs can lose the `RESEARCH_ONLY` label.
 
-- [ ] Create one immutable release manifest linking official snapshot, event-live evidence,
+- [x] Create one immutable release manifest linking official snapshot, event-live evidence,
       availability, appearance, player rates, team strength, context, model runs, and horizon runs
-- [ ] Record freshness, fixture-completion, FPL-finality, and provisional-to-final drift checks
-- [ ] Require 100% coverage for the owned squad, optimizer shortlist, and every retained decision
+- [x] Record freshness, fixture-completion, FPL-finality, and provisional-to-final drift-eligibility
+      checks (the drift rebuild-and-compare itself is the separate item below)
+- [x] Require 100% coverage for the owned squad, optimizer shortlist, and every retained decision
       path; retain the global selectable-player coverage gate
-- [ ] Attach approved calibration and uncertainty lineage to every released player-fixture
-      projection; fail closed when required artifacts are absent or stale
-- [ ] Keep raw mean xPts, calibrated xPts, uncertainty, and data-quality flags separately visible
+- [x] Attach approved calibration and uncertainty lineage to every released player-fixture
+      projection; fail closed when required artifacts are absent or stale (the gate is
+      implemented and tested; it fails closed today because no artifact has been promoted past
+      `shadow` yet -- see Sprint 4's own unchecked confirmatory-evaluation item)
+- [x] Keep raw mean xPts, calibrated xPts, uncertainty, and data-quality flags separately visible
       rather than hiding them inside one opaque score
 - [ ] Add a deterministic pre-deadline orchestration command that materialises and validates the
-      complete GW, GW+1, and GW+2 release
+      complete GW, GW+1, and GW+2 release (the validate half is done --
+      `scripts/validate_release.py` runs the manifest/freshness/approval gates together against an
+      already-materialised release; automatic end-to-end materialisation is not yet built)
 - [ ] Rebuild an analytically complete provisional release after official finalisation and report
       whether any material player, lineup, rating, or transfer decision changed
-- [ ] Add release-level smoke tests, machine-readable health output, and explicit
-      `research`/`shadow`/`production` approval states
+- [x] Add release-level smoke tests, machine-readable health output, and explicit
+      `research`/`shadow`/`production` approval states (`validation/release_health.py` plus
+      `scripts/validate_release.py`'s `health` output; "smoke tests" are the deterministic
+      pytest suite each gate module already carries, matching this repo's existing convention)
 - [ ] Production projection sign-off: no unresolved freshness, coverage, calibration, uncertainty,
       or lineage gate
 
@@ -488,21 +534,42 @@ or silently change the decision objective.
 - [x] Rolling three-Gameweek planner and frozen-run contract
 - [x] Frozen preseason GW+1/GW+2 fixture rescoring
 - [x] Approximate initial-squad beam-search prototype (`RESEARCH_ONLY`)
-- [ ] Add locked, required, excluded, and scenario player constraints (for example Haaland/no-
-      Haaland and set-and-forget/rotating goalkeeper comparisons)
-- [ ] Replace or audit the beam search with an exact/dominance-checked optimizer
-- [ ] Add counterfactual bench economics: cheapest legal bench plus optimal reinvestment must be
-      compared against every expensive-bench recommendation
-- [ ] Add goalkeeper sanity: a rotating pair must beat set-and-forget plus cheap backup after the
-      saved funds are optimally reinvested
-- [ ] Add premium sanity: an expensive player who is rarely started or captained must prove higher
-      marginal horizon value than the best cheaper structure
-- [ ] Model expected autosub value rather than treating bench players as either perfect future
-      rotation pieces or zero-value reserves
+- [x] Add locked and excluded player constraints for the initial-squad optimizer (`--lock`/
+      `--exclude`, for example Haaland/no-Haaland and set-and-forget/rotating goalkeeper
+      comparisons); the same constraint concept for the rolling multi-Gameweek transfer planner
+      (locking/excluding a transfer target rather than an initial pick) is a separate, not yet
+      built extension
+- [x] Replace or audit the beam search with an exact/dominance-checked optimizer (audited, not
+      replaced: `decision/initial_squad_dominance.py` plus `optimize_initial_squad.py
+      --audit-dominance` runs two named structural counterfactuals -- cheap goalkeeper pair,
+      cheap bench reinvestment -- and flags Pareto-dominance against the beam's own result; it
+      does not certify a global optimum)
+- [x] Add counterfactual bench economics: cheapest legal bench plus optimal reinvestment must be
+      compared against every expensive-bench recommendation (`initial_squad_dominance.py`'s
+      `cheap_bench_reinvestment` counterfactual for preseason picks); this checks one named
+      counterfactual, not every possible bench structure
+- [x] Add goalkeeper sanity: a rotating pair must beat set-and-forget plus cheap backup after the
+      saved funds are optimally reinvested (`transfer_dominance.py`'s
+      `--audit-goalkeeper-reinvestment` for an existing manager squad, plus
+      `initial_squad_dominance.py`'s `cheap_goalkeeper_pair` for preseason picks); both charge the
+      swap's own hit cost from actual free-transfer state rather than assuming it is free
+- [x] Add premium sanity: an expensive player who is rarely started or captained must prove higher
+      marginal horizon value than the best cheaper structure (`initial_squad_dominance.py`'s
+      `premium_starter_reinvestment` counterfactual: the most expensive premium-priced player
+      never captained across the retained horizon, excluded and compared by Pareto-dominance)
+- [x] Model expected autosub value rather than treating bench players as either perfect future
+      rotation pieces or zero-value reserves (`decision/autosub.py`, replicating FPL's real
+      autosub rule -- 0-minute blanks, GK-for-GK only, bench order, formation-legal substitutions
+      -- as an expected value over independent blank probabilities; informational only, never
+      added to `total_xpts`)
 - [ ] Integrate planned transfers into the initial-squad horizon instead of freezing all 15 players
 - [ ] Add multi-transfer and chip-aware optimization
 - [ ] Add optional ownership/EO and risk-adjusted objectives separately from mean xPts
-- [ ] Consume only an approved Sprint 5 projection release and fail closed when its gates fail
+- [x] Consume only an approved Sprint 5 projection release and fail closed when its gates fail
+      (interpreted as the manifest+freshness gate, not literal artifact `status='approved'` --
+      see `docs/PIPELINE_ARCHITECTURE.md`; every decision command now calls
+      `enforce_release_gate` before producing a recommendation, with a loudly-labelled
+      `--skip-release-validation` escape hatch for local development only)
 - [ ] Walk-forward evaluate the full planner and decision policy before operational use
 - [ ] Operational sign-off: no dominated squad, all sanity checks pass, and every recommendation
       includes marginal-value explanations

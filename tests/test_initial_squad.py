@@ -4,7 +4,10 @@ from collections import Counter
 
 import pytest
 
-from fpl_model.decision.initial_squad import optimize_initial_squad
+from fpl_model.decision.initial_squad import (
+    SquadConstraints,
+    optimize_initial_squad,
+)
 from fpl_model.decision.lineup import PlayerGameweekProjection
 from fpl_model.decision.rolling import GameweekProjectionPool
 from fpl_model.decision.squad import SquadPlayer
@@ -144,4 +147,123 @@ def test_search_is_deterministic_for_identical_inputs():
     )
 
     assert first == second
+
+
+def test_locked_player_is_forced_into_the_squad_despite_being_pruned_on_price():
+    # Player 19 (a GBP 100.0m goalkeeper) is priced so high the unconstrained
+    # search never picks it -- it would consume the entire budget alone.
+    unconstrained = optimize_initial_squad(
+        _pools(), beam_width=500, candidates_per_position_per_lens=20
+    )
+    assert 19 not in {player.fpl_id for player in unconstrained.recommended.squad.players}
+
+    locked = optimize_initial_squad(
+        _pools(),
+        beam_width=500,
+        candidates_per_position_per_lens=20,
+        budget_tenths=2_000,
+        constraints=SquadConstraints(locked_fpl_ids=frozenset({19})),
+    )
+
+    squad_ids = {player.fpl_id for player in locked.recommended.squad.players}
+    assert 19 in squad_ids
+    assert len(locked.recommended.squad.players) == 15
+
+
+def test_excluded_player_never_appears_in_any_returned_squad():
+    result = optimize_initial_squad(
+        _pools(),
+        beam_width=500,
+        candidates_per_position_per_lens=20,
+        constraints=SquadConstraints(excluded_fpl_ids=frozenset({16})),
+    )
+
+    assert 16 not in {player.fpl_id for player in result.recommended.squad.players}
+    for plan in result.alternatives:
+        assert 16 not in {player.fpl_id for player in plan.squad.players}
+    assert 16 not in result.candidate_player_ids
+
+
+def test_locking_multiple_players_across_positions_keeps_them_all():
+    # 16=FWD, 17=MID, 18=DEF -- one lock per distinct position.
+    result = optimize_initial_squad(
+        _pools(),
+        beam_width=500,
+        candidates_per_position_per_lens=20,
+        constraints=SquadConstraints(locked_fpl_ids=frozenset({16, 17, 18})),
+    )
+
+    squad_ids = {player.fpl_id for player in result.recommended.squad.players}
+    assert {16, 17, 18}.issubset(squad_ids)
+    assert len(result.recommended.squad.players) == 15
+
+
+def test_rejects_a_player_both_locked_and_excluded():
+    with pytest.raises(ValueError, match="cannot be both locked and excluded"):
+        SquadConstraints(locked_fpl_ids=frozenset({16}), excluded_fpl_ids=frozenset({16}))
+
+
+def test_rejects_locking_a_player_missing_from_the_full_horizon():
+    pools = _pools()
+    missing_high_forward = GameweekProjectionPool(
+        gameweek=2,
+        players=tuple(row for row in pools[1].players if row.player.fpl_id != 16),
+    )
+
+    with pytest.raises(ValueError, match="lack a complete, transferable"):
+        optimize_initial_squad(
+            (pools[0], missing_high_forward, pools[2]),
+            beam_width=500,
+            candidates_per_position_per_lens=20,
+            constraints=SquadConstraints(locked_fpl_ids=frozenset({16})),
+        )
+
+
+def test_rejects_locking_too_many_players_in_one_position():
+    # GK requires exactly 2; locking three GKs can never be legal.
+    with pytest.raises(ValueError, match="exceed the legal position counts"):
+        optimize_initial_squad(
+            _pools(),
+            beam_width=500,
+            candidates_per_position_per_lens=20,
+            constraints=SquadConstraints(locked_fpl_ids=frozenset({1, 2, 19})),
+        )
+
+
+def test_rejects_locking_more_than_three_players_from_one_club():
+    rows = list(_players())
+    for index in range(4):
+        original = rows[index]
+        rows[index] = _target(original.player.fpl_id, original.player.position, team_id=20)
+    pools = tuple(
+        GameweekProjectionPool(gameweek=gameweek, players=tuple(rows))
+        for gameweek in (1, 2, 3)
+    )
+    locked_ids = frozenset(row.player.fpl_id for row in rows[:4])
+
+    with pytest.raises(ValueError, match="exceed the three-player club limit"):
+        optimize_initial_squad(
+            pools,
+            beam_width=500,
+            candidates_per_position_per_lens=20,
+            constraints=SquadConstraints(locked_fpl_ids=locked_ids),
+        )
+
+
+def test_rejects_locked_players_alone_exceeding_budget():
+    # Two GBP 100.0m goalkeepers alone already exceed the default GBP 100.0m budget.
+    rows = list(_players())
+    rows.append(_target(20, "GK", price=1_000, xpts=100.0, team_id=90))
+    pools = tuple(
+        GameweekProjectionPool(gameweek=gameweek, players=tuple(rows))
+        for gameweek in (1, 2, 3)
+    )
+
+    with pytest.raises(ValueError, match="exceeding the"):
+        optimize_initial_squad(
+            pools,
+            beam_width=500,
+            candidates_per_position_per_lens=20,
+            constraints=SquadConstraints(locked_fpl_ids=frozenset({19, 20})),
+        )
 
