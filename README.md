@@ -594,10 +594,90 @@ or silently change the decision objective.
 - [ ] Operational sign-off: no dominated squad, all sanity checks pass, and every recommendation
       includes marginal-value explanations
 
+### Production critical path — authoritative execution order
+
+The numbered research sprints above remain the engineering record, but their unfinished items are
+no longer treated as one sequential launch checklist. The production path is deliberately smaller:
+
+1. make owned-squad decisions safe when role/minutes assumptions are uncertain;
+2. expose the existing lineup, three-Gameweek, and validated single-transfer capabilities through
+   the three primary menus;
+3. operate a clearly labelled closed alpha and paid-founder beta on immutable releases;
+4. earn full model-production sign-off prospectively;
+5. add advanced optimization only after the core workflow is trusted and retained.
+
+Until the prospective model-production gate passes, public outputs must say `Beta`,
+`Model Preview`, or `Model xPts`. They must not claim independently verified accuracy, guaranteed
+rank improvement, or a production-approved `AI Score`.
+
+#### P0 — Role, minutes, and in-season decision safety
+
+- [ ] Distinguish missing previous-PL history from observed previous non-start history
+- [ ] Distinguish starter, substitute, unused substitute, not-in-squad, unavailable, and
+      not-yet-eligible observations
+- [ ] Add a role state (`unknown`, `likely_starter`, `rotation`, `likely_bench`, `unavailable`)
+      updated from official starts, minutes, availability, and reviewed evidence
+- [ ] Detect material conflicts such as a 60+ minute start with low projected start probability,
+      or a zero-minute available player with a high projected appearance probability
+- [ ] Add named regression cases for Tzolis-like starters, current-only Fulham starters, and
+      Henderson/Welbeck-like non-appearances
+- [ ] Expose simple `likely starter`, `rotation risk`, and `likely bench` presets on top of the
+      existing reviewed appearance-scenario override boundary
+- [ ] Require source/reason, observation time, and one-deadline expiry for every override; preserve
+      the immutable base projection beside the adjusted scenario
+- [ ] Compare base and plausible role scenarios; when the recommendation changes, label the
+      decision `sensitive` and withhold an unconditional `Best option`
+- [ ] Materialize a deadline-safe current-season player-rate update from final official xG, xA,
+      xGC, DefCon, saves, cards, BPS, and minutes, with small-sample shrinkage and no retrospective
+      post-match xP leakage
+- [ ] P0 sign-off: no owned-player lineup or transfer decision can depend on a material role
+      conflict without a visible warning or reviewed scenario
+
+#### P1 — Usable three-menu MVP
+
+- [ ] Let a user load a public squad from an FPL Team ID without storing an FPL password
+- [ ] Weekly squad: legal XI, captain, vice-captain, bench, raw xPts, marginal changes, and a small
+      `Assumptions to review` surface only when a material owned-player conflict exists
+- [ ] Three-Gameweek outlook: raw optimized-lineup xPts per GW and cumulative, player contribution,
+      fixtures, captaincy, bench depth, and confidence; percentile rating is not an MVP blocker
+- [ ] Transfers: rank hold and validated single-transfer alternatives, show no-hit first, and keep
+      hit scenarios, multi-transfer, and chips explicitly separate
+- [ ] Recompute all three menus from a reviewed role scenario without overwriting the base release
+- [ ] Pin every response to an immutable release ID and expose status, capture time, freshness,
+      finality, coverage, and sensitive-decision state
+- [ ] Add mobile-first interaction and end-to-end tests for Team ID to weekly decision without a CLI
+
+#### P2 — Closed alpha and paid-founder beta
+
+- [ ] Deploy the application and a separately operable projection/decision API with documented
+      secrets, backups, rollback, monitoring, and cost limits
+- [ ] Schedule and alert the complete snapshot-to-release refresh before every deadline
+- [ ] Add authentication, entitlement, privacy/terms, account deletion, support, and Indonesian
+      payment flow without storing FPL credentials
+- [ ] Run a 10-20 user closed alpha across at least three deadlines; record conflicts,
+      recommendation flips, failures, support load, and next-deadline return usage
+- [ ] Open a clearly labelled founder beta only after the alpha gates pass; payment validates
+      willingness to pay and does not imply that the model is production-approved
+- [ ] Measure activation, retention, assumption-review completion, usefulness, and paid conversion
+      before targeting 200 subscribers
+
+#### P3 — Full production and post-MVP backlog
+
+- [ ] Complete prospective 2026/27 appearance, xPts, calibration, uncertainty, and decision-policy
+      evaluation, then promote only artifacts that pass overall and weakest-cohort gates
+- [ ] Complete the versioned percentile rating contract below; raw xPts remains visible
+- [ ] Complete operational sign-off for stale-data handling, incidents, rollback, privacy, support,
+      and recommendation audit trails
+- [ ] After retention is proven, resume multi-transfer/chip optimization, ownership/EO objectives,
+      five-plus-GW branching plans, licensed enrichment, and editable non-minutes beliefs
+- [ ] Treat any LLM as a presentation or structured-input layer, never as the projection or
+      optimization source of truth
+
 ### Sprint 7 — Squad rating and application score contract
 
-This sprint defines the shared scoring language used by all application menus. Until it passes,
-the UI should say `Model Preview` or `Model Score`, not `AI Score`.
+This full percentile contract belongs to P3. P1 may ship raw per-Gameweek and cumulative xPts with
+confidence labels; until this contract passes, the UI should say `Model Preview` or `Model Score`,
+not `AI Score`.
 
 - [ ] Show raw optimized-XI-plus-captain xPts separately for GW, GW+1, and GW+2
 - [ ] Define one fixed, reproducible benchmark population of legal same-budget squads for each
@@ -617,8 +697,9 @@ the UI should say `Model Preview` or `Model Score`, not `AI Score`.
 
 ### Sprint 8 — Application experience: three primary menus
 
-The application layer consumes approved projection releases, decision outputs, and the versioned
-rating contract. It does not recompute modelling logic in the browser.
+P1 implements the smallest safe subset of this application layer before the full percentile rating
+contract. The application consumes immutable projection releases and decision outputs and does not
+recompute modelling logic in the browser.
 
 #### 8A — Shared application data contract
 
