@@ -2,8 +2,9 @@
 
 The preseason optimizer answers a public-data question: which legal 15-player squad has the best
 retained three-Gameweek mean-xPts plan? It does not need a manager screenshot or private FPL state.
-It is deliberately separate from the rolling transfer planner, because preseason unlimited
-transfers are an initial-selection problem rather than a one-transfer state transition.
+Initial selection remains an unlimited-transfer problem. After that first deadline, the optimizer
+reuses the rolling transfer planner to compare rolling the free transfer with one legal transfer in
+GW+1 and GW+2.
 
 ## Inputs
 
@@ -35,12 +36,20 @@ Candidate retention uses three transparent lenses within each FPL position:
 A bounded beam then constructs 2 GK / 5 DEF / 5 MID / 3 FWD squads while enforcing the £100.0m
 budget and maximum three players per club. Every completed squad is rescored with the existing
 exhaustive lineup engine independently in each Gameweek, including legal formation, captain,
-vice-captain, and bench order. The objective is the sum of those three lineup-plus-captain xPts.
+vice-captain, and bench order. The best frozen-squad shortlist is then rescored again: GW1 uses the
+initial selection, while GW2/GW3 search legal roll or single-transfer paths using one free transfer
+after the opening deadline, exact bank/club/position rules, and four-point hits if applicable. The
+objective is cumulative net lineup-plus-captain xPts after transfer costs.
 
 The legal and financial checks on each retained squad are exact. Candidate pruning and beam search
-make the overall result approximate: it is the best retained squad, not a certificate of the global
-optimum. The JSON reports the eligible pool, pruned pool, complete squads evaluated, beam width,
-coverage gaps, alternatives, and the assumptions needed to reproduce the result.
+make the overall result approximate: it is the best retained squad and transfer path, not a
+certificate of the global optimum. Planned-transfer rescoring is also limited to the top frozen
+squad shortlist (`--planned-transfer-shortlist`, default 30), so a weak frozen plan with exceptional
+transfer optionality can still be pruned. The JSON reports both search widths, transfers, FT/bank
+state, net Gameweek xPts, coverage gaps, alternatives, and reproducibility assumptions.
+
+`--freeze-squad-horizon` disables the second-stage transfer search and reproduces the older
+hold-all-15 evaluation as a named counterfactual.
 
 ## Locked and excluded players (scenario comparisons)
 
@@ -58,8 +67,10 @@ python scripts/optimize_initial_squad.py `
   --output data/processed/recommendations/initial_squad_locked_haaland.json
 ```
 
-A locked player must still be legal on its own: it must have a complete, transferable projection in
-all three Gameweeks, its position must not already be full among the locks, it must not push any
+A locked player must still be legal on its own and remains protected from planned sale throughout
+the horizon. An excluded player cannot enter through a planned transfer. A lock must have a
+complete, transferable projection in all three Gameweeks, its position must not already be full
+among the locks, it must not push any
 club over the three-player limit, and the locked players' combined price must not alone exceed the
 budget. Any violation raises before the search runs, rather than silently dropping the lock or
 producing an infeasible result. A player cannot be both locked and excluded. The command's JSON
@@ -98,7 +109,8 @@ recommendation near the deadline. The current frozen preseason horizon changes f
 venue, and deadline by Gameweek, but keeps appearance, player rates, team strength, and prices
 frozen to the anchor `as_of`.
 
-The optimizer does not model future transfers, price changes, Bench Boost, or Triple Captain. Once
-the manager supplies their actual squad, bank, selling prices, free transfers, and chip state, the
-separate rolling planner becomes the correct personal decision boundary.
+The optimizer models at most one planned transfer in each of GW+1 and GW+2. It does not model future
+price changes, multi-transfer combinations, Bench Boost, Triple Captain, Wildcard, or Free Hit.
+Once the manager supplies their actual squad, purchase/selling prices, bank, free transfers, and
+chip state, the separate rolling planner remains the correct personal decision boundary.
 

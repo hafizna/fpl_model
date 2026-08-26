@@ -579,7 +579,10 @@ or silently change the decision objective.
       autosub rule -- 0-minute blanks, GK-for-GK only, bench order, formation-legal substitutions
       -- as an expected value over independent blank probabilities; informational only, never
       added to `total_xpts`)
-- [ ] Integrate planned transfers into the initial-squad horizon instead of freezing all 15 players
+- [x] Integrate planned transfers into the initial-squad horizon instead of freezing all 15
+      players (`optimize_initial_squad.py` now rescores the top frozen-squad shortlist over legal
+      roll/single-transfer paths for GW+1 and GW+2; `--freeze-squad-horizon` reproduces the older
+      hold-all-15 counterfactual)
 - [ ] Add multi-transfer and chip-aware optimization
 - [ ] Add optional ownership/EO and risk-adjusted objectives separately from mean xPts
 - [x] Consume only an approved Sprint 5 projection release and fail closed when its gates fail

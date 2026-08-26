@@ -4,7 +4,11 @@ from dataclasses import replace
 
 import pytest
 
-from fpl_model.decision.rolling import GameweekProjectionPool, plan_three_gameweeks
+from fpl_model.decision.rolling import (
+    GameweekProjectionPool,
+    plan_rolling_horizon,
+    plan_three_gameweeks,
+)
 from fpl_model.decision.transfer import TransferTarget
 from tests.test_lineup import _projections
 from tests.test_squad import _players, _validate
@@ -144,3 +148,31 @@ def test_owned_untransferable_player_cannot_be_sold_then_bought_back():
 
     assert result.recommended.steps[0].incoming_fpl_id == 16
     assert all(step.incoming_fpl_id != 11 for step in result.recommended.steps[1:])
+
+
+def test_short_horizon_respects_protected_players_and_excluded_targets():
+    squad = _validate(_players(), free_transfers=1, unlimited_transfers=False)
+    pool = _pool(4, candidate_xpts=20.0)
+    candidate = pool.players[-1]
+    pool = replace(
+        pool,
+        players=(
+            *pool.players[:-1],
+            replace(candidate, player=replace(candidate.player, team_id=99)),
+        ),
+    )
+
+    protected = plan_rolling_horizon(
+        squad,
+        (pool,),
+        protected_fpl_ids=frozenset({11}),
+    )
+    excluded = plan_rolling_horizon(
+        squad,
+        (pool,),
+        excluded_target_fpl_ids=frozenset({16}),
+    )
+
+    assert protected.recommended.steps[0].outgoing_fpl_id != 11
+    assert protected.recommended.steps[0].incoming_fpl_id == 16
+    assert excluded.recommended.steps[0].decision == "roll"

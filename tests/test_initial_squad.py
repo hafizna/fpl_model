@@ -267,3 +267,69 @@ def test_rejects_locked_players_alone_exceeding_budget():
             constraints=SquadConstraints(locked_fpl_ids=frozenset({19, 20})),
         )
 
+
+def test_planned_transfers_can_choose_a_better_initial_core_then_switch():
+    def rows(gameweek: int) -> tuple[TransferTarget, ...]:
+        values: list[TransferTarget] = []
+        fpl_id = 1
+        for position, count in (("GK", 2), ("DEF", 5), ("FWD", 3)):
+            for _ in range(count):
+                values.append(
+                    _target(fpl_id, position, xpts=2.0, team_id=100 + fpl_id)
+                )
+                fpl_id += 1
+        for offset in range(4):
+            mid_id = 20 + offset
+            values.append(
+                _target(mid_id, "MID", xpts=12.0, team_id=100 + mid_id)
+            )
+        initial_star_id = 30
+        future_star_id = 31
+        values.append(
+            _target(
+                initial_star_id,
+                "MID",
+                xpts=20.0 if gameweek == 1 else 0.0,
+                team_id=130,
+            )
+        )
+        values.append(
+            _target(
+                future_star_id,
+                "MID",
+                xpts=0.0 if gameweek == 1 else 15.0,
+                team_id=131,
+            )
+        )
+        return tuple(values)
+
+    pools = tuple(
+        GameweekProjectionPool(gameweek=gameweek, players=rows(gameweek))
+        for gameweek in (1, 2, 3)
+    )
+    frozen = optimize_initial_squad(
+        pools,
+        beam_width=100,
+        candidates_per_position_per_lens=20,
+        returned_squads=1,
+    )
+    planned = optimize_initial_squad(
+        pools,
+        beam_width=100,
+        candidates_per_position_per_lens=20,
+        returned_squads=1,
+        plan_future_transfers=True,
+        planned_transfer_shortlist=10,
+        transfer_beam_width=10,
+        transfer_candidates_per_position=3,
+    )
+
+    frozen_ids = {player.fpl_id for player in frozen.recommended.squad.players}
+    planned_ids = {player.fpl_id for player in planned.recommended.squad.players}
+    assert 31 in frozen_ids and 30 not in frozen_ids
+    assert 30 in planned_ids and 31 not in planned_ids
+    assert planned.recommended.gameweeks[1].outgoing_fpl_id == 30
+    assert planned.recommended.gameweeks[1].incoming_fpl_id == 31
+    assert planned.recommended.total_transfer_cost == 0.0
+    assert planned.recommended.cumulative_xpts > frozen.recommended.cumulative_xpts
+

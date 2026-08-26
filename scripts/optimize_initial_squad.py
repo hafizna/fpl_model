@@ -13,6 +13,7 @@ from fpl_model.decision.initial_squad import (
     DEFAULT_CANDIDATES_PER_POSITION_PER_LENS,
     DEFAULT_INITIAL_BUDGET_TENTHS,
     DEFAULT_INITIAL_SQUAD_BEAM_WIDTH,
+    DEFAULT_PLANNED_TRANSFER_SHORTLIST,
     DEFAULT_RETURNED_INITIAL_SQUADS,
     InitialSquadPlan,
     SquadConstraints,
@@ -83,6 +84,17 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_RETURNED_INITIAL_SQUADS,
     )
     parser.add_argument(
+        "--planned-transfer-shortlist",
+        type=int,
+        default=DEFAULT_PLANNED_TRANSFER_SHORTLIST,
+        help="Top frozen-squad candidates rescored with legal GW+1/GW+2 transfers.",
+    )
+    parser.add_argument(
+        "--freeze-squad-horizon",
+        action="store_true",
+        help="Disable planned GW+1/GW+2 transfers and reproduce the older frozen-15 evaluation.",
+    )
+    parser.add_argument(
         "--lock",
         dest="locked_fpl_ids",
         action="append",
@@ -124,6 +136,7 @@ def parse_args() -> argparse.Namespace:
 def _plan(
     plan: InitialSquadPlan,
     transparency_by_gameweek: dict[int, dict[int, object]],
+    player_names: dict[int, str],
 ) -> dict[str, object]:
     return {
         "cumulative_xpts": plan.cumulative_xpts,
@@ -131,6 +144,10 @@ def _plan(
         "squad_cost_tenths": plan.squad_cost_tenths,
         "bank_tenths": plan.bank_tenths,
         "data_quality_flags": list(plan.data_quality_flags),
+        "planned_transfers": plan.planned_transfers,
+        "total_transfer_cost": plan.total_transfer_cost,
+        "terminal_bank_tenths": plan.terminal_bank_tenths,
+        "terminal_free_transfers": plan.terminal_free_transfers,
         "squad": [
             {
                 "fpl_id": player.fpl_id,
@@ -146,6 +163,27 @@ def _plan(
             {
                 "gameweek": row.gameweek,
                 "total_xpts": row.lineup.total_xpts,
+                "net_gameweek_xpts": (
+                    row.lineup.total_xpts
+                    if row.net_gameweek_xpts is None
+                    else row.net_gameweek_xpts
+                ),
+                "outgoing_fpl_id": row.outgoing_fpl_id,
+                "outgoing_name": (
+                    None
+                    if row.outgoing_fpl_id is None
+                    else player_names.get(row.outgoing_fpl_id)
+                ),
+                "incoming_fpl_id": row.incoming_fpl_id,
+                "incoming_name": (
+                    None
+                    if row.incoming_fpl_id is None
+                    else player_names.get(row.incoming_fpl_id)
+                ),
+                "transfer_cost": row.transfer_cost,
+                "free_transfers_before": row.free_transfers_before,
+                "free_transfers_after": row.free_transfers_after,
+                "bank_after_tenths": row.bank_after_tenths,
                 "starting_xpts": row.lineup.starting_xpts,
                 "captain_bonus_xpts": row.lineup.captain_bonus_xpts,
                 "formation": row.lineup.formation,
@@ -214,7 +252,14 @@ def main() -> None:
         candidates_per_position_per_lens=args.candidates_per_position_per_lens,
         returned_squads=args.returned_squads,
         constraints=constraints,
+        plan_future_transfers=not args.freeze_squad_horizon,
+        planned_transfer_shortlist=args.planned_transfer_shortlist,
     )
+    player_names = {
+        target.player.fpl_id: target.player.player_name
+        for pool in inputs.pools
+        for target in pool.players
+    }
     coverage_gate = evaluate_decision_coverage(
         shortlists=tuple(
             CoverageCount(
@@ -241,6 +286,8 @@ def main() -> None:
             budget_tenths=args.budget,
             beam_width=args.beam_width,
             candidates_per_position_per_lens=args.candidates_per_position_per_lens,
+            plan_future_transfers=not args.freeze_squad_horizon,
+            planned_transfer_shortlist=args.planned_transfer_shortlist,
         ).report
     )
     output = {
@@ -248,9 +295,9 @@ def main() -> None:
         "model_run_ids": dict(inputs.model_run_ids),
         "planning_as_of": inputs.planning_as_of.isoformat(),
         "model_version": inputs.model_version,
-        "recommended": _plan(result.recommended, transparency_by_gameweek),
+        "recommended": _plan(result.recommended, transparency_by_gameweek, player_names),
         "alternatives": [
-            _plan(plan, transparency_by_gameweek) for plan in result.alternatives
+            _plan(plan, transparency_by_gameweek, player_names) for plan in result.alternatives
         ],
         "coverage": [
             {
@@ -276,16 +323,21 @@ def main() -> None:
             "fully_projected_transferable_players": len(result.eligible_player_ids),
             "candidate_players_after_pruning": len(result.candidate_player_ids),
             "complete_squads_evaluated": result.complete_squads_evaluated,
+            "planned_transfers": result.planned_transfers,
+            "planned_transfer_shortlist": result.planned_transfer_shortlist,
         },
         "method_note": (
             "Approximate candidate-pruned beam search. Candidate retention uses horizon xPts, "
             "horizon xPts per price, and cheap-enabler lenses. Every completed squad is checked "
             "against the exact initial budget, 2/5/5/3 positions, max-three-per-club rule, and "
-            "then rescored with an exhaustive legal XI/captain search in every Gameweek."
+            "then rescored with an exhaustive legal XI/captain search in every Gameweek. The "
+            "top frozen-squad shortlist is additionally rescored with legal GW+1/GW+2 transfer "
+            "paths unless --freeze-squad-horizon is set."
         ),
         "limitations": [
             "The bounded search is not a proof of the global optimum.",
-            "Bench Boost, Triple Captain, future transfers, and future price changes are excluded.",
+            "Bench Boost, Triple Captain, and future price changes are excluded.",
+            "Planned-transfer search considers roll or at most one transfer per future Gameweek.",
             "All three model runs share frozen preseason player-rate, appearance, and team inputs.",
             "Refresh the public FPL snapshot and rebuild the horizon before an operational pick.",
         ],

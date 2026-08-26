@@ -138,6 +138,8 @@ def _run_counterfactual(
     budget_tenths: int,
     beam_width: int,
     candidates_per_position_per_lens: int,
+    plan_future_transfers: bool,
+    planned_transfer_shortlist: int,
 ) -> CounterfactualResult:
     if not excluded_fpl_ids:
         return CounterfactualResult(
@@ -155,6 +157,8 @@ def _run_counterfactual(
             candidates_per_position_per_lens=candidates_per_position_per_lens,
             returned_squads=1,
             constraints=SquadConstraints(excluded_fpl_ids=frozenset(excluded_fpl_ids)),
+            plan_future_transfers=plan_future_transfers,
+            planned_transfer_shortlist=planned_transfer_shortlist,
         )
     except ValueError as error:
         return CounterfactualResult(
@@ -180,6 +184,8 @@ def audit_dominance(
     budget_tenths: int,
     beam_width: int = DEFAULT_INITIAL_SQUAD_BEAM_WIDTH,
     candidates_per_position_per_lens: int = DEFAULT_CANDIDATES_PER_POSITION_PER_LENS,
+    plan_future_transfers: bool = False,
+    planned_transfer_shortlist: int = 30,
 ) -> DominanceAudit:
     """Check the beam search's own recommendation against named counterfactuals.
 
@@ -227,6 +233,8 @@ def audit_dominance(
             budget_tenths=budget_tenths,
             beam_width=beam_width,
             candidates_per_position_per_lens=candidates_per_position_per_lens,
+            plan_future_transfers=plan_future_transfers,
+            planned_transfer_shortlist=planned_transfer_shortlist,
         )
     )
 
@@ -247,6 +255,8 @@ def audit_dominance(
             budget_tenths=budget_tenths,
             beam_width=beam_width,
             candidates_per_position_per_lens=candidates_per_position_per_lens,
+            plan_future_transfers=plan_future_transfers,
+            planned_transfer_shortlist=planned_transfer_shortlist,
         )
     )
 
@@ -264,6 +274,8 @@ def audit_dominance(
             budget_tenths=budget_tenths,
             beam_width=beam_width,
             candidates_per_position_per_lens=candidates_per_position_per_lens,
+            plan_future_transfers=plan_future_transfers,
+            planned_transfer_shortlist=planned_transfer_shortlist,
         )
     )
 

@@ -90,9 +90,9 @@ def _validate_pools(
     squad: ValidatedSquad,
     pools: tuple[GameweekProjectionPool, ...],
 ) -> tuple[dict[int, TransferTarget], ...]:
-    if len(pools) != PLANNING_HORIZON_GAMEWEEKS:
-        raise ValueError("rolling planner requires exactly three Gameweek projection pools")
-    expected = tuple(range(pools[0].gameweek, pools[0].gameweek + 3))
+    if not 1 <= len(pools) <= PLANNING_HORIZON_GAMEWEEKS:
+        raise ValueError("rolling horizon requires between one and three Gameweek pools")
+    expected = tuple(range(pools[0].gameweek, pools[0].gameweek + len(pools)))
     actual = tuple(pool.gameweek for pool in pools)
     if actual != expected:
         raise ValueError(f"projection pools must be consecutive, expected {expected}, got {actual}")
@@ -202,11 +202,17 @@ def _candidate_targets(
     common_ids: set[int],
     owned_ids: set[int],
     transferable_ids: set[int],
+    excluded_target_ids: frozenset[int],
     per_position: int,
 ) -> tuple[TransferTarget, ...]:
     scores = {
-        fpl_id: sum(maps[future][fpl_id].projection.expected_points for future in range(index, 3))
-        for fpl_id in (common_ids - owned_ids) & transferable_ids
+        fpl_id: sum(
+            maps[future][fpl_id].projection.expected_points
+            for future in range(index, len(maps))
+        )
+        for fpl_id in (
+            (common_ids - owned_ids) & transferable_ids - excluded_target_ids
+        )
     }
     result: list[TransferTarget] = []
     for position in ("GK", "DEF", "MID", "FWD"):
@@ -220,7 +226,7 @@ def _candidate_targets(
     return tuple(result)
 
 
-def plan_three_gameweeks(
+def plan_rolling_horizon(
     squad: ValidatedSquad,
     pools: tuple[GameweekProjectionPool, ...],
     *,
@@ -228,14 +234,23 @@ def plan_three_gameweeks(
     candidates_per_position: int = DEFAULT_CANDIDATES_PER_POSITION,
     returned_plans: int = DEFAULT_RETURNED_PLANS,
     hit_cost: float = DEFAULT_HIT_COST,
+    protected_fpl_ids: frozenset[int] = frozenset(),
+    excluded_target_fpl_ids: frozenset[int] = frozenset(),
 ) -> RollingPlannerResult:
-    """Search no-transfer/single-transfer paths over three consecutive GWs.
+    """Search no-transfer/single-transfer paths over one to three GWs.
 
     Candidate pruning and beam search make this intentionally approximate.
     Every retained state still obeys exact FPL squad, budget, and FT rules.
     """
     if beam_width <= 0 or candidates_per_position <= 0 or returned_plans <= 0:
         raise ValueError("beam_width, candidates_per_position, and returned_plans must be positive")
+    owned_ids = {player.fpl_id for player in squad.players}
+    unknown_protected = sorted(protected_fpl_ids - owned_ids)
+    if unknown_protected:
+        raise ValueError(f"protected players are not in the starting squad: {unknown_protected}")
+    overlap = protected_fpl_ids & excluded_target_fpl_ids
+    if overlap:
+        raise ValueError(f"players cannot be both protected and excluded: {sorted(overlap)}")
     maps = _validate_pools(squad, pools)
     common_ids = set.intersection(*(set(rows) for rows in maps))
     initial = _SearchState(
@@ -295,6 +310,7 @@ def plan_three_gameweeks(
                     if pool.transferable_fpl_ids is None
                     else set(pool.transferable_fpl_ids)
                 ),
+                excluded_target_ids=excluded_target_fpl_ids,
                 per_position=candidates_per_position,
             )
             max_options = sum(
@@ -312,6 +328,8 @@ def plan_three_gameweeks(
             )
             for option in recommendation.transfer_alternatives:
                 if option.outgoing is None or option.incoming is None:
+                    continue
+                if option.outgoing.fpl_id in protected_fpl_ids:
                     continue
                 transferred = apply_single_transfer(
                     state.squad,
@@ -380,4 +398,27 @@ def plan_three_gameweeks(
         eligible_player_ids=tuple(sorted(common_ids)),
         beam_width=beam_width,
         candidates_per_position=candidates_per_position,
+    )
+
+
+def plan_three_gameweeks(
+    squad: ValidatedSquad,
+    pools: tuple[GameweekProjectionPool, ...],
+    *,
+    beam_width: int = DEFAULT_BEAM_WIDTH,
+    candidates_per_position: int = DEFAULT_CANDIDATES_PER_POSITION,
+    returned_plans: int = DEFAULT_RETURNED_PLANS,
+    hit_cost: float = DEFAULT_HIT_COST,
+) -> RollingPlannerResult:
+    """Preserve the public exactly-three-Gameweek planner contract."""
+
+    if len(pools) != PLANNING_HORIZON_GAMEWEEKS:
+        raise ValueError("rolling planner requires exactly three Gameweek projection pools")
+    return plan_rolling_horizon(
+        squad,
+        pools,
+        beam_width=beam_width,
+        candidates_per_position=candidates_per_position,
+        returned_plans=returned_plans,
+        hit_cost=hit_cost,
     )

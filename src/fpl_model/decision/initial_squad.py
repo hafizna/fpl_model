@@ -7,7 +7,13 @@ from dataclasses import dataclass, replace
 from math import isfinite, sqrt
 
 from fpl_model.decision.lineup import LineupRecommendation, recommend_lineup
-from fpl_model.decision.rolling import GameweekProjectionPool
+from fpl_model.decision.rolling import (
+    DEFAULT_BEAM_WIDTH as DEFAULT_TRANSFER_BEAM_WIDTH,
+)
+from fpl_model.decision.rolling import (
+    DEFAULT_CANDIDATES_PER_POSITION as DEFAULT_TRANSFER_CANDIDATES_PER_POSITION,
+)
+from fpl_model.decision.rolling import GameweekProjectionPool, plan_rolling_horizon
 from fpl_model.decision.squad import POSITION_COUNTS, SquadPlayer, ValidatedSquad, validate_squad
 from fpl_model.decision.transfer import TransferTarget
 
@@ -15,6 +21,7 @@ DEFAULT_INITIAL_BUDGET_TENTHS = 1_000
 DEFAULT_INITIAL_SQUAD_BEAM_WIDTH = 2_000
 DEFAULT_CANDIDATES_PER_POSITION_PER_LENS = 10
 DEFAULT_RETURNED_INITIAL_SQUADS = 5
+DEFAULT_PLANNED_TRANSFER_SHORTLIST = 30
 
 _POSITION_ORDER = ("FWD",) * 3 + ("MID",) * 5 + ("DEF",) * 5 + ("GK",) * 2
 _AVAILABLE_CHIPS = {
@@ -48,6 +55,13 @@ class SquadConstraints:
 class InitialSquadGameweek:
     gameweek: int
     lineup: LineupRecommendation
+    outgoing_fpl_id: int | None = None
+    incoming_fpl_id: int | None = None
+    transfer_cost: float = 0.0
+    net_gameweek_xpts: float | None = None
+    free_transfers_before: int | None = None
+    free_transfers_after: int | None = None
+    bank_after_tenths: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +73,10 @@ class InitialSquadPlan:
     cumulative_xpts: float
     uncertainty: float | None
     data_quality_flags: tuple[str, ...]
+    planned_transfers: bool = False
+    total_transfer_cost: float = 0.0
+    terminal_bank_tenths: int | None = None
+    terminal_free_transfers: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +88,8 @@ class InitialSquadOptimizerResult:
     complete_squads_evaluated: int
     beam_width: int
     candidates_per_position_per_lens: int
+    planned_transfers: bool = False
+    planned_transfer_shortlist: int = 0
     search_is_exact: bool = False
 
 
@@ -374,6 +394,76 @@ def _evaluate_squad(
     )
 
 
+def _evaluate_planned_transfers(
+    plan: InitialSquadPlan,
+    *,
+    future_pools: tuple[GameweekProjectionPool, ...],
+    constraints: SquadConstraints,
+    transfer_beam_width: int,
+    transfer_candidates_per_position: int,
+) -> InitialSquadPlan:
+    first = plan.gameweeks[0]
+    future_squad = validate_squad(
+        plan.squad.players,
+        bank_tenths=plan.squad.bank_tenths,
+        free_transfers=1,
+        unlimited_transfers=False,
+        chip_period=plan.squad.chip_period,
+        chip_states=dict(plan.squad.chip_states),
+    )
+    rolling = plan_rolling_horizon(
+        future_squad,
+        future_pools,
+        beam_width=transfer_beam_width,
+        candidates_per_position=transfer_candidates_per_position,
+        returned_plans=1,
+        protected_fpl_ids=constraints.locked_fpl_ids,
+        excluded_target_fpl_ids=constraints.excluded_fpl_ids,
+    ).recommended
+    gameweeks = (
+        InitialSquadGameweek(
+            gameweek=first.gameweek,
+            lineup=first.lineup,
+            net_gameweek_xpts=first.lineup.total_xpts,
+            free_transfers_after=1,
+            bank_after_tenths=plan.bank_tenths,
+        ),
+        *(
+            InitialSquadGameweek(
+                gameweek=step.gameweek,
+                lineup=step.lineup,
+                outgoing_fpl_id=step.outgoing_fpl_id,
+                incoming_fpl_id=step.incoming_fpl_id,
+                transfer_cost=step.transfer_cost,
+                net_gameweek_xpts=step.net_gameweek_xpts,
+                free_transfers_before=step.free_transfers_before,
+                free_transfers_after=step.free_transfers_after,
+                bank_after_tenths=step.bank_after_tenths,
+            )
+            for step in rolling.steps
+        ),
+    )
+    first_uncertainty = first.lineup.uncertainty
+    uncertainty = (
+        None
+        if first_uncertainty is None or rolling.uncertainty is None
+        else sqrt(first_uncertainty**2 + rolling.uncertainty**2)
+    )
+    return replace(
+        plan,
+        gameweeks=gameweeks,
+        cumulative_xpts=first.lineup.total_xpts + rolling.cumulative_net_xpts,
+        uncertainty=uncertainty,
+        data_quality_flags=tuple(
+            sorted(set(first.lineup.data_quality_flags) | set(rolling.data_quality_flags))
+        ),
+        planned_transfers=True,
+        total_transfer_cost=rolling.total_transfer_cost,
+        terminal_bank_tenths=rolling.terminal_bank_tenths,
+        terminal_free_transfers=rolling.terminal_free_transfers,
+    )
+
+
 def optimize_initial_squad(
     pools: tuple[GameweekProjectionPool, ...],
     *,
@@ -382,13 +472,19 @@ def optimize_initial_squad(
     candidates_per_position_per_lens: int = DEFAULT_CANDIDATES_PER_POSITION_PER_LENS,
     returned_squads: int = DEFAULT_RETURNED_INITIAL_SQUADS,
     constraints: SquadConstraints | None = None,
+    plan_future_transfers: bool = False,
+    planned_transfer_shortlist: int = DEFAULT_PLANNED_TRANSFER_SHORTLIST,
+    transfer_beam_width: int = DEFAULT_TRANSFER_BEAM_WIDTH,
+    transfer_candidates_per_position: int = DEFAULT_TRANSFER_CANDIDATES_PER_POSITION,
 ) -> InitialSquadOptimizerResult:
-    """Select a legal initial squad and re-optimize XI/captain in each of three GWs.
+    """Select a legal initial squad and optimize its three-GW decision path.
 
     Candidate pruning uses three transparent lenses (horizon xPts, xPts per
     price, and cheapest enablers), followed by a bounded beam. Completed squads
     are ranked by exact three-GW lineup-plus-captain xPts. The result is an
-    auditable approximate search, not a certified global optimum.
+    auditable approximate search, not a certified global optimum. When
+    ``plan_future_transfers`` is true, the best frozen-squad shortlist is
+    rescored with legal roll/single-transfer paths for GW+1 and GW+2.
 
     ``constraints`` force-includes (``locked_fpl_ids``) or force-excludes
     (``excluded_fpl_ids``) specific players, for scenario comparisons such as
@@ -400,6 +496,14 @@ def optimize_initial_squad(
         raise ValueError("budget_tenths must be positive")
     if beam_width <= 0 or candidates_per_position_per_lens <= 0 or returned_squads <= 0:
         raise ValueError("beam width, candidate limit, and returned squads must be positive")
+    if (
+        planned_transfer_shortlist <= 0
+        or transfer_beam_width <= 0
+        or transfer_candidates_per_position <= 0
+    ):
+        raise ValueError("planned-transfer search limits must be positive")
+    if plan_future_transfers and planned_transfer_shortlist < returned_squads:
+        raise ValueError("planned_transfer_shortlist must cover every returned squad")
     constraints = constraints or SquadConstraints()
     maps, common_ids = _validate_pools(pools)
     _validate_constraints(
@@ -509,6 +613,26 @@ def optimize_initial_squad(
             tuple(player.fpl_id for player in plan.squad.players),
         )
     )
+    complete_squads_evaluated = len(plans)
+    if plan_future_transfers:
+        plans = [
+            _evaluate_planned_transfers(
+                plan,
+                future_pools=pools[1:],
+                constraints=constraints,
+                transfer_beam_width=transfer_beam_width,
+                transfer_candidates_per_position=transfer_candidates_per_position,
+            )
+            for plan in plans[:planned_transfer_shortlist]
+        ]
+        plans.sort(
+            key=lambda plan: (
+                -plan.cumulative_xpts,
+                plan.total_transfer_cost,
+                plan.squad_cost_tenths,
+                tuple(player.fpl_id for player in plan.squad.players),
+            )
+        )
     if not plans or not isfinite(plans[0].cumulative_xpts):
         raise ValueError("initial-squad search produced no finite completed plan")
     return InitialSquadOptimizerResult(
@@ -516,7 +640,9 @@ def optimize_initial_squad(
         alternatives=tuple(plans[1:returned_squads]),
         eligible_player_ids=tuple(sorted(common_ids)),
         candidate_player_ids=candidate_ids,
-        complete_squads_evaluated=len(plans),
+        complete_squads_evaluated=complete_squads_evaluated,
         beam_width=beam_width,
         candidates_per_position_per_lens=candidates_per_position_per_lens,
+        planned_transfers=plan_future_transfers,
+        planned_transfer_shortlist=(planned_transfer_shortlist if plan_future_transfers else 0),
     )
