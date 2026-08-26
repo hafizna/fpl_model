@@ -21,6 +21,10 @@ dev = [
   "pytest>=8.0,<9",
   "ruff>=0.6,<1",
 ]
+web = [
+  "fastapi>=0.116,<1",
+  "uvicorn[standard]>=0.35,<1",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

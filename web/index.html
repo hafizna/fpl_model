@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Explainable FPL squad, lineup, and transfer scenarios." />
+    <title>Touchline — FPL Decision Lab</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <a class="brand" href="#weekly" aria-label="Touchline home">
+          <span class="brand-mark">T</span>
+          <span><strong>Touchline</strong><small>Decision Lab</small></span>
+        </a>
+
+        <nav class="primary-nav" aria-label="Primary navigation">
+          <button class="nav-item active" data-view="weekly"><span>01</span>Weekly scenario</button>
+          <button class="nav-item" data-view="outlook"><span>02</span>3-GW outlook</button>
+          <button class="nav-item" data-view="transfers"><span>03</span>Transfers</button>
+        </nav>
+
+        <div class="release-card">
+          <div class="eyebrow">Projection release</div>
+          <div class="release-row"><span class="status-dot"></span><strong id="release-label">Loading</strong></div>
+          <p id="release-meta">Connecting to the local model…</p>
+        </div>
+      </aside>
+
+      <main>
+        <header class="topbar">
+          <div>
+            <div class="eyebrow">2026/27 workspace</div>
+            <h1 id="page-title">Weekly squad scenario</h1>
+          </div>
+          <div class="deadline-block">
+            <span>Planning horizon</span>
+            <strong id="horizon-label">—</strong>
+          </div>
+        </header>
+
+        <div id="error-banner" class="error-banner" hidden></div>
+
+        <section class="workspace">
+          <div class="content-column">
+            <section id="weekly-view" class="view active">
+              <div class="section-heading">
+                <div><div class="eyebrow">Model selection</div><h2>Best legal XI</h2></div>
+                <button id="refresh-lineup" class="button secondary">Recalculate</button>
+              </div>
+              <div id="weekly-summary" class="metric-strip skeleton"></div>
+              <div id="pitch" class="pitch skeleton" aria-live="polite"></div>
+              <div id="bench" class="bench-row"></div>
+              <div class="model-note">
+                <strong>How this is picked</strong>
+                <p>Every legal XI is enumerated. Captaincy, bench order, appearance probability, and expected autosub value come from the frozen projection release.</p>
+              </div>
+            </section>
+
+            <section id="outlook-view" class="view">
+              <div class="section-heading">
+                <div><div class="eyebrow">Core planning</div><h2>Three-Gameweek outlook</h2></div>
+              </div>
+              <div id="outlook-total" class="hero-score skeleton"></div>
+              <div id="outlook-grid" class="outlook-grid"></div>
+              <div id="player-outlook" class="table-card"></div>
+            </section>
+
+            <section id="transfers-view" class="view">
+              <div class="section-heading">
+                <div><div class="eyebrow">Net xPts</div><h2>Transfer recommendations</h2></div>
+                <button id="run-transfers" class="button primary">Scan all single transfers</button>
+              </div>
+              <div class="transfer-intro">
+                Hold is always included. Affordability uses the selling prices below plus bank; a hit is charged when no free transfer remains.
+              </div>
+              <div id="transfer-results" class="transfer-list empty-state">Run the scan to compare the current squad with every legal, affordable same-position move.</div>
+            </section>
+          </div>
+
+          <aside class="squad-panel">
+            <div class="section-heading compact">
+              <div><div class="eyebrow">Private state</div><h2>My squad</h2></div>
+              <span id="squad-cost" class="cost-pill">—</span>
+            </div>
+            <div class="state-inputs">
+              <label>Bank <span><input id="bank" type="number" min="0" step="0.1" value="0.0" />m</span></label>
+              <label>Free transfers
+                <select id="free-transfers">
+                  <option value="0">0</option><option value="1" selected>1</option><option value="2">2</option>
+                  <option value="3">3</option><option value="4">4</option><option value="5">5</option>
+                </select>
+              </label>
+            </div>
+            <div id="squad-editor" class="squad-editor skeleton"></div>
+            <p class="private-note">Saved in this browser only. No FPL password or session cookie is stored.</p>
+          </aside>
+        </section>
+      </main>
+    </div>
+    <script src="/app.js" defer></script>
+  </body>
+</html>
