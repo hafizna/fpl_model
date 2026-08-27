@@ -52,6 +52,37 @@ class FPLClient:
             raise ValueError("FPL event-live payload changed shape")
         return payload
 
+    def entry(self, entry_id: int) -> dict[str, Any]:
+        """Fetch one manager's public profile (`name`, `current_event`, etc.).
+
+        Public, no authentication required -- distinct from `my-team/{id}/`,
+        which is the private, editable view and requires a login session.
+        """
+        if entry_id <= 0:
+            raise ValueError("entry_id must be positive")
+        payload = self._get_json(f"entry/{entry_id}/")
+        if not isinstance(payload, dict) or "id" not in payload:
+            raise ValueError("FPL entry payload changed shape")
+        return payload
+
+    def entry_picks(self, entry_id: int, gameweek: int) -> dict[str, Any]:
+        """Fetch one manager's public squad picks for one Gameweek.
+
+        Public, no authentication required. The `picks` list carries only
+        `element`/`position`/`multiplier`/`is_captain`/`is_vice_captain`/
+        `element_type` -- no per-player purchase or selling price. `bank` and
+        `value` (both FPL's own tenths-of-a-million unit) live under
+        `entry_history`.
+        """
+        if entry_id <= 0:
+            raise ValueError("entry_id must be positive")
+        if not 1 <= gameweek <= 38:
+            raise ValueError("gameweek must be between 1 and 38")
+        payload = self._get_json(f"entry/{entry_id}/event/{gameweek}/picks/")
+        if not isinstance(payload, dict) or not isinstance(payload.get("picks"), list):
+            raise ValueError("FPL entry picks payload changed shape")
+        return payload
+
     def raw_players(self) -> pd.DataFrame:
         return pd.DataFrame(self.bootstrap()["elements"])
 
