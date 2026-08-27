@@ -16,6 +16,21 @@ Open <http://127.0.0.1:8000/>. The initial browser state is seeded with the curr
 squad, then stored only in that browser's local storage. The app never asks for or stores an FPL
 password or session cookie.
 
+## End-to-end tests
+
+`tests/test_e2e_team_id_to_lineup.py` drives the actual served page in a real headless Chromium
+browser (not just the FastAPI `TestClient`), covering "Team ID to weekly decision without a CLI":
+entering a Team ID, loading the resolved squad, and confirming the rendered pitch, outlook, and
+squad editor. It runs a real `uvicorn` server in a background thread against a fixture compact
+release, with `FPLClient.entry_picks` monkeypatched so no request reaches the real FPL API. Needs
+the `dev` extra installed with a Chromium binary:
+
+```powershell
+.venv\Scripts\python.exe -m pip install -e ".[dev,web]"
+.venv\Scripts\python.exe -m playwright install chromium
+.venv\Scripts\python.exe -m pytest tests/test_e2e_team_id_to_lineup.py
+```
+
 Implemented surfaces:
 
 - loading a public squad by FPL Team ID (`GET /api/squad/from-entry/{id}`) -- no password or

@@ -754,14 +754,19 @@ rank improvement, or a production-approved `AI Score`.
 - [ ] Recompute all three menus from a reviewed role scenario without overwriting the base release
 - [ ] Pin every response to an immutable release ID and expose status, capture time, freshness,
       finality, coverage, and sensitive-decision state
-- [ ] Add mobile-first interaction and end-to-end tests for Team ID to weekly decision without a CLI
-      (`web/styles.css` mobile-first CSS done -- `body { min-width: 1120px }` removed and replaced
-      with `320px`; two new breakpoints at 860px and 480px collapse the sidebar into a horizontal
+- [x] Add mobile-first interaction and end-to-end tests for Team ID to weekly decision without a CLI
+      (`web/styles.css` mobile-first CSS -- `body { min-width: 1120px }` removed and replaced with
+      `320px`; two new breakpoints at 860px and 480px collapse the sidebar into a horizontal
       scrollable top bar, stack the squad panel above content, and shrink every grid (pitch, bench,
       metrics, outlook, transfer cards) to fit a phone screen; verified with real Chromium
-      screenshots at 320/390/820/1440px, zero horizontal overflow at any width. Still open: the
-      end-to-end Team-ID-to-weekly-decision test harness itself -- this was verified manually with
-      Playwright during development, not committed as an automated test)
+      screenshots at 320/390/820/1440px, zero horizontal overflow at any width.
+      `tests/test_e2e_team_id_to_lineup.py` drives the actual served page in a real headless
+      Chromium browser via a real `uvicorn` server run in a background thread -- not the FastAPI
+      `TestClient`, which never touches app.js/the DOM -- covering Team ID entry, the resolved
+      squad rendering as an 11-player legal XI with exactly one captain and one vice-captain badge,
+      and the outlook/squad-editor menus. `FPLClient.entry_picks` is monkeypatched so no request
+      reaches the real FPL API. New `playwright` dev dependency plus a one-time
+      `playwright install chromium` step, documented in `docs/WEB_APP.md`)
 
 #### P2 — Closed alpha and paid-founder beta
 
