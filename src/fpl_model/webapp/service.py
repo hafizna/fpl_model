@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal
 from math import sqrt
@@ -21,6 +22,7 @@ from fpl_model.decision.autosub import compute_expected_autosub_value
 from fpl_model.decision.lineup import PlayerGameweekProjection, recommend_lineup
 from fpl_model.decision.lineup_store import combine_appearance_probability
 from fpl_model.decision.squad import CHIP_NAMES, SquadPlayer, validate_squad
+from fpl_model.ingest.squad_snapshot import validate_entry_picks_payload
 from fpl_model.storage import DEFAULT_DATABASE_PATH
 
 
@@ -336,6 +338,64 @@ def load_web_bootstrap(
             catalog.values(),
             key=lambda row: (row["position"], -row["price_tenths"], row["name"]),
         ),
+    }
+
+
+def resolve_entry_picks(
+    picks_payload: Mapping[str, Any],
+    *,
+    database_path: str | Path = DEFAULT_DATABASE_PATH,
+    release_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """Resolve one FPL public entry-picks payload against the bootstrap catalog.
+
+    Read-only and server-side-storage-free, matching this app's own
+    "browser local storage only, no server-side private writes" boundary
+    (`docs/WEB_APP.md`): unlike `ingest.squad_snapshot.import_squad_snapshot_from_entry`
+    (the CLI/persistence path, which writes an immutable `squad_snapshot`
+    row), this resolves ``picks_payload`` against the ALREADY-LOADED
+    bootstrap catalog (``load_web_bootstrap``'s own ``players`` list, which
+    already carries ``price_tenths``) and returns exactly the shape the
+    frontend's existing squad-state contract expects
+    (``fpl_ids``/``bank_tenths``/``selling_prices``) -- no second database or
+    release read.
+
+    FPL's public picks payload has no per-player purchase/selling price;
+    ``selling_prices`` here is always the CURRENT market price from the
+    catalog, and ``selling_price_is_estimated`` is always ``True`` -- the
+    caller must surface that caveat rather than imply an FPL-exact sell
+    value, exactly the same caveat `import_squad_snapshot_from_entry` makes.
+    """
+    private_rows = validate_entry_picks_payload(picks_payload)
+    entry_history = picks_payload.get("entry_history")
+    if not isinstance(entry_history, Mapping) or "bank" not in entry_history:
+        raise ValueError("picks_payload is missing entry_history.bank")
+    # FPL's payload carries `bank` as an integer number of tenths of a
+    # million, matching this app's own `bank_tenths` unit directly -- no
+    # conversion needed here (contrast `import_squad_snapshot_from_entry`,
+    # which must convert down to the CSV-import path's whole-millions
+    # contract before re-multiplying by ten internally).
+    bank_tenths = int(entry_history["bank"])
+
+    _, catalog, _, _, _ = _load_web_inputs(
+        database_path=database_path,
+        release_path=release_path,
+    )
+    fpl_ids = [int(value) for value in private_rows["fpl_id"]]
+    missing = sorted(set(fpl_ids) - set(catalog))
+    if missing:
+        raise ValueError(f"squad players lack complete horizon projections: {missing}")
+
+    selling_prices = {fpl_id: catalog[fpl_id]["price_tenths"] for fpl_id in fpl_ids}
+    captain_row = private_rows.loc[private_rows["is_captain"]].iloc[0]
+    vice_captain_row = private_rows.loc[private_rows["is_vice_captain"]].iloc[0]
+    return {
+        "fpl_ids": fpl_ids,
+        "bank_tenths": bank_tenths,
+        "selling_prices": selling_prices,
+        "captain_fpl_id": int(captain_row["fpl_id"]),
+        "vice_captain_fpl_id": int(vice_captain_row["fpl_id"]),
+        "selling_price_is_estimated": True,
     }
 
 

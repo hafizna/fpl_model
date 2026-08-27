@@ -6,6 +6,7 @@ from fpl_model.webapp.service import (
     load_web_bootstrap,
     recommend_web_lineups,
     recommend_web_transfers,
+    resolve_entry_picks,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "load_web_bootstrap",
     "recommend_web_lineups",
     "recommend_web_transfers",
+    "resolve_entry_picks",
 ]

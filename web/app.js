@@ -8,6 +8,8 @@ const DEFAULT_SQUAD = [
 const state = {
   bootstrap: null,
   selected: JSON.parse(localStorage.getItem("touchline-squad") || "null") || DEFAULT_SQUAD,
+  sellingPrices: JSON.parse(localStorage.getItem("touchline-selling-prices") || "null") || {},
+  sellingPriceIsEstimated: JSON.parse(localStorage.getItem("touchline-selling-estimated") || "false"),
   lineups: null,
   transfers: null,
 };
@@ -22,7 +24,7 @@ function requestBody() {
     fpl_ids: state.selected,
     bank_tenths: Math.round(Number($("#bank").value || 0) * 10),
     free_transfers: Number($("#free-transfers").value),
-    selling_prices: {},
+    selling_prices: state.sellingPrices,
   };
 }
 
@@ -58,6 +60,9 @@ function renderSquadEditor() {
   const selectedPlayers = state.selected.map(playerById).filter(Boolean);
   const cost = selectedPlayers.reduce((sum, player) => sum + player.price_tenths, 0);
   $("#squad-cost").textContent = `${money(cost)} squad`;
+  $("#team-id-note").textContent = state.sellingPriceIsEstimated
+    ? "Loaded from your public Team ID. Selling prices are ESTIMATED from current market price, not FPL's own profit-sharing sale rule — check the FPL app for your exact sell value before making a real transfer."
+    : "Loads your public squad by Team ID only — never a password or session cookie. Estimated selling prices (current market price, not FPL's own profit-sharing rule) are used until you adjust them below.";
   const positionOrder = ["GK", "DEF", "MID", "FWD"];
   $("#squad-editor").classList.remove("skeleton");
   $("#squad-editor").innerHTML = positionOrder.map((position) => {
@@ -142,6 +147,36 @@ function renderTransfers() {
   </article>`).join("")}`;
 }
 
+async function loadFromTeamId() {
+  const input = $("#team-id");
+  const entryId = Number(input.value);
+  const button = $("#load-team-id");
+  if (!Number.isInteger(entryId) || entryId <= 0) {
+    showError("Enter a valid FPL Team ID.");
+    return;
+  }
+  showError("");
+  button.disabled = true;
+  button.textContent = "Loading…";
+  try {
+    const resolved = await api(`/api/squad/from-entry/${entryId}`);
+    state.selected = resolved.fpl_ids;
+    state.sellingPrices = resolved.selling_prices;
+    state.sellingPriceIsEstimated = resolved.selling_price_is_estimated;
+    localStorage.setItem("touchline-squad", JSON.stringify(state.selected));
+    localStorage.setItem("touchline-selling-prices", JSON.stringify(state.sellingPrices));
+    localStorage.setItem("touchline-selling-estimated", JSON.stringify(state.sellingPriceIsEstimated));
+    $("#bank").value = (resolved.bank_tenths / 10).toFixed(1);
+    renderSquadEditor();
+    await runLineups();
+  } catch (error) {
+    showError(error.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = "Load squad";
+  }
+}
+
 async function runLineups() {
   showError("");
   $("#refresh-lineup").disabled = true;
@@ -185,11 +220,18 @@ async function init() {
   bindNavigation();
   $("#refresh-lineup").addEventListener("click", runLineups);
   $("#run-transfers").addEventListener("click", runTransfers);
+  $("#load-team-id").addEventListener("click", loadFromTeamId);
+  $("#team-id").addEventListener("keydown", (event) => { if (event.key === "Enter") loadFromTeamId(); });
   $("#bank").addEventListener("change", runLineups);
   $("#free-transfers").addEventListener("change", () => { state.transfers = null; });
   try {
     state.bootstrap = await api("/api/bootstrap");
-    if (state.selected.some((id) => !playerById(id))) state.selected = DEFAULT_SQUAD;
+    if (state.selected.some((id) => !playerById(id))) {
+      state.selected = DEFAULT_SQUAD;
+      state.sellingPrices = {};
+      state.sellingPriceIsEstimated = false;
+      showError("A previously loaded squad no longer matches the current release; showing the default squad.");
+    }
     renderRelease();
     renderSquadEditor();
     await runLineups();

@@ -84,6 +84,13 @@
               <div><div class="eyebrow">Private state</div><h2>My squad</h2></div>
               <span id="squad-cost" class="cost-pill">—</span>
             </div>
+            <div class="team-id-row">
+              <label for="team-id">FPL Team ID
+                <span><input id="team-id" type="number" min="1" step="1" placeholder="e.g. 1234567" /></span>
+              </label>
+              <button id="load-team-id" class="button secondary" type="button">Load squad</button>
+            </div>
+            <p id="team-id-note" class="private-note">Loads your public squad by Team ID only — never a password or session cookie. Estimated selling prices (current market price, not FPL's own profit-sharing rule) are used until you adjust them below.</p>
             <div class="state-inputs">
               <label>Bank <span><input id="bank" type="number" min="0" step="0.1" value="0.0" />m</span></label>
               <label>Free transfers

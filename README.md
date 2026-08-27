@@ -734,7 +734,17 @@ rank improvement, or a production-approved `AI Score`.
 
 #### P1 — Usable three-menu MVP
 
-- [ ] Let a user load a public squad from an FPL Team ID without storing an FPL password
+- [x] Let a user load a public squad from an FPL Team ID without storing an FPL password
+      (`GET /api/squad/from-entry/{id}` in `api/index.py`, backed by `ingest/fpl.py`'s
+      `FPLClient.entry_picks` and `webapp/service.py`'s `resolve_entry_picks`; fetches from FPL's
+      public `entry/{id}/event/{gw}/picks/` endpoint only -- never `my-team/{id}/`, which requires
+      a login session -- and performs no server-side write, matching the app's existing
+      "browser local storage only" boundary. The CLI/persistence equivalent,
+      `ingest.squad_snapshot.import_squad_snapshot_from_entry`, exists separately for building an
+      immutable `squad_snapshot` database row. Caveat: FPL's public payload carries no per-player
+      purchase/selling price, so both are estimated from current market price and flagged
+      `selling_price_is_estimated`, surfaced as a visible caveat in the UI rather than implying an
+      FPL-exact sell value)
 - [ ] Weekly squad: legal XI, captain, vice-captain, bench, raw xPts, marginal changes, and a small
       `Assumptions to review` surface only when a material owned-player conflict exists
 - [ ] Three-Gameweek outlook: raw optimized-lineup xPts per GW and cumulative, player contribution,

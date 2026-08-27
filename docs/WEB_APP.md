@@ -18,12 +18,31 @@ password or session cookie.
 
 Implemented surfaces:
 
-- squad selection plus bank and free-transfer state;
+- loading a public squad by FPL Team ID (`GET /api/squad/from-entry/{id}`) -- no password or
+  session cookie, ever; manual squad selection plus bank and free-transfer state remains available
+  as an override;
 - exhaustive legal weekly XI, captain, vice-captain, and bench order;
 - a frozen three-Gameweek raw-xPts outlook;
 - expected autosub value as a separate diagnostic;
 - every legal, affordable same-position single transfer rescored over the same horizon;
 - explicit `RESEARCH_ONLY`/`SHADOW`/`PRODUCTION` release status and pinned model-run metadata.
+
+### Loading a squad by Team ID
+
+`GET /api/squad/from-entry/{entry_id}?gameweek=N` fetches live from FPL's public
+`entry/{id}/event/{gw}/picks/` endpoint (never `my-team/{id}/`, which is private and requires a
+login session). `gameweek` defaults to the current release horizon's own start Gameweek. This
+performs no server-side write -- the resolved squad (`fpl_ids`, `bank_tenths`, `selling_prices`,
+captain/vice-captain) is handed straight back to the browser, which remains the only place squad
+state is kept, matching this app's existing "browser local storage only" boundary.
+
+FPL's public picks payload has no per-player purchase or selling price, so `selling_prices` is
+always estimated from the CURRENT market price in the release catalog, and
+`selling_price_is_estimated` is always `true` in the response -- the frontend surfaces this as a
+visible caveat rather than implying an FPL-exact sell value (FPL's real selling price follows a
+profit-sharing rule on price rises that cannot be reconstructed from a single picks snapshot). The
+CLI/persistence equivalent, for building an immutable `squad_snapshot` database row instead of a
+one-off browser fetch, is `ingest.squad_snapshot.import_squad_snapshot_from_entry`.
 
 The three-Gameweek screen deliberately says `outlook`, not `rating`. A benchmark-relative rating
 and percentile do not exist until the Sprint 7 score contract is implemented.

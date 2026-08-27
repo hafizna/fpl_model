@@ -79,6 +79,11 @@ h2 { margin: 4px 0 0; font-size: 19px; letter-spacing: -0.02em; }
 .model-note p { margin: 5px 0 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
 .squad-panel { position: sticky; top: 20px; max-height: calc(100vh - 40px); overflow: auto; padding: 20px; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); }
 .cost-pill { padding: 6px 8px; border-radius: 7px; background: #1b2922; color: var(--green); font-size: 10px; }
+.team-id-row { margin-bottom: 8px; display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: end; }
+.team-id-row label { color: var(--muted); font-size: 9px; text-transform: uppercase; letter-spacing: .08em; }
+.team-id-row input { width: 100%; height: 34px; margin-top: 5px; padding: 0 9px; border: 1px solid var(--line); border-radius: 7px; background: #0d1511; color: var(--ink); }
+.team-id-row .button { height: 34px; padding: 0 12px; }
+#team-id-note { margin: 0 0 16px; }
 .state-inputs { margin-bottom: 16px; display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
 .state-inputs label { color: var(--muted); font-size: 9px; text-transform: uppercase; letter-spacing: .08em; }
 .state-inputs input, .state-inputs select { width: 100%; height: 34px; margin-top: 5px; padding: 0 9px; border: 1px solid var(--line); border-radius: 7px; background: #0d1511; color: var(--ink); }
