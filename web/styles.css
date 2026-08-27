@@ -13,7 +13,7 @@
 }
 
 * { box-sizing: border-box; }
-body { margin: 0; min-width: 1120px; background: #0c1310; color: var(--ink); font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+body { margin: 0; min-width: 320px; background: #0c1310; color: var(--ink); font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; overflow-x: hidden; }
 button, input, select { font: inherit; }
 button { color: inherit; }
 .app-shell { min-height: 100vh; display: grid; grid-template-columns: 248px 1fr; }
@@ -128,3 +128,72 @@ h2 { margin: 4px 0 0; font-size: 19px; letter-spacing: -0.02em; }
 .skeleton { background-image: linear-gradient(100deg, transparent 20%, rgba(255,255,255,.035) 40%, transparent 60%); background-size: 200% 100%; animation: shimmer 1.4s infinite; }
 @keyframes shimmer { to { background-position: -200% 0; } }
 @media (max-width: 1220px) { .workspace { grid-template-columns: minmax(600px, 1fr) 320px; padding-left: 24px; padding-right: 24px; } .player-card { width: 105px; } }
+
+@media (max-width: 860px) {
+  .app-shell { grid-template-columns: 1fr; }
+  .sidebar { position: sticky; top: 0; z-index: 10; height: auto; padding: 14px 16px; flex-direction: row; align-items: center; gap: 16px; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+  .brand { flex: 0 0 auto; }
+  .brand small { display: none; }
+  .primary-nav { margin-top: 0; flex: 1 1 auto; display: flex; gap: 6px; overflow-x: auto; }
+  .nav-item { flex: 0 0 auto; padding: 10px 12px; white-space: nowrap; }
+  .release-card { margin-top: 0; flex: 0 0 auto; padding: 10px 12px; max-width: 190px; }
+  .release-card p { display: none; }
+
+  .topbar { height: auto; padding: 18px 16px; flex-wrap: wrap; gap: 10px; }
+  .topbar h1 { font-size: 21px; }
+  .deadline-block { text-align: left; }
+  .error-banner { margin: 14px 16px -2px; }
+
+  .workspace { grid-template-columns: 1fr; padding: 18px 16px 32px; gap: 18px; }
+  .squad-panel { position: static; max-height: none; order: -1; }
+
+  .metric-strip { grid-template-columns: repeat(2, 1fr); }
+  .metric-strip div:nth-child(2) { border-right: 0; }
+  .metric-strip div { padding-bottom: 10px; }
+
+  .pitch { min-height: 0; padding: 20px 12px; gap: 14px; }
+  .pitch-line { flex-wrap: wrap; gap: 10px; row-gap: 16px; }
+  .player-card { width: 88px; padding: 9px 6px 8px; }
+
+  .bench-row { grid-template-columns: repeat(2, 1fr); }
+  .bench-title { grid-column: 1 / -1; place-items: start; padding-bottom: 2px; }
+
+  .team-id-row { grid-template-columns: 1fr; }
+  .team-id-row .button { width: 100%; }
+  .state-inputs { grid-template-columns: 1fr 1fr; }
+
+  .outlook-grid { grid-template-columns: repeat(2, 1fr); }
+  .hero-score { padding: 20px; }
+  .hero-score strong { font-size: 36px; }
+
+  .table-head, .table-row { grid-template-columns: 1fr 70px 70px; padding: 10px 12px; }
+
+  .transfer-card { grid-template-columns: 1fr; gap: 10px; }
+  .transfer-card > div:last-child { text-align: left; }
+}
+
+@media (max-width: 480px) {
+  .sidebar { padding: 12px; gap: 10px; }
+  .brand-mark { width: 32px; height: 32px; }
+  .brand strong { font-size: 15px; }
+  .release-card { display: none; }
+
+  .topbar { padding: 14px 12px; }
+  .workspace { padding: 14px 12px 28px; }
+
+  .metric-strip { grid-template-columns: 1fr 1fr; padding: 12px 14px; gap: 12px; }
+  .metric-strip strong { font-size: 16px; }
+
+  .pitch { padding: 16px 8px; }
+  .player-card { width: 78px; }
+  .player-card strong { font-size: 10.5px; }
+
+  .bench-row { grid-template-columns: 1fr 1fr; padding: 10px; }
+
+  .outlook-grid { grid-template-columns: 1fr; }
+
+  .table-head, .table-row { grid-template-columns: 1fr 56px 56px; padding: 9px 10px; font-size: 10px; }
+  .table-row { font-size: 10px; }
+
+  .squad-player { grid-template-columns: 28px minmax(0, 1fr) 32px; }
+}

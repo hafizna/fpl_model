@@ -755,6 +755,13 @@ rank improvement, or a production-approved `AI Score`.
 - [ ] Pin every response to an immutable release ID and expose status, capture time, freshness,
       finality, coverage, and sensitive-decision state
 - [ ] Add mobile-first interaction and end-to-end tests for Team ID to weekly decision without a CLI
+      (`web/styles.css` mobile-first CSS done -- `body { min-width: 1120px }` removed and replaced
+      with `320px`; two new breakpoints at 860px and 480px collapse the sidebar into a horizontal
+      scrollable top bar, stack the squad panel above content, and shrink every grid (pitch, bench,
+      metrics, outlook, transfer cards) to fit a phone screen; verified with real Chromium
+      screenshots at 320/390/820/1440px, zero horizontal overflow at any width. Still open: the
+      end-to-end Team-ID-to-weekly-decision test harness itself -- this was verified manually with
+      Playwright during development, not committed as an automated test)
 
 #### P2 — Closed alpha and paid-founder beta
 
