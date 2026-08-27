@@ -21,6 +21,15 @@ def _aware(value: datetime, field: str) -> None:
 
 @dataclass(frozen=True, slots=True)
 class ReviewedAppearanceScenarioOverride:
+    """``effective_until`` is intentionally still optional HERE: a reviewer
+    creating an override does not always know the exact deadline timestamp up
+    front. P0's "require ... one-deadline expiry for every override" is
+    enforced at STORE time instead (`store_appearance_scenario_override`
+    resolves a ``None`` to the target Gameweek's own deadline before
+    inserting) -- the stored row is never left open-ended, even though the
+    caller may omit this field.
+    """
+
     override_id: str
     player_code: int
     target_gameweek: int
@@ -47,6 +56,7 @@ class AppearanceScenarioOverrideStoreResult:
     override_id: str
     availability_as_of: datetime
     deadline: datetime
+    effective_until: datetime
     requires_pipeline_refresh: bool
 
 
@@ -121,6 +131,17 @@ def store_appearance_scenario_override(
         availability_as_of, deadline = state
         if override.observed_at > deadline:
             raise ValueError("override observed after the target deadline")
+        # P0 "require ... one-deadline expiry": a caller that omitted
+        # effective_until gets the target Gameweek's own deadline -- the
+        # override can never silently outlive the Gameweek it was reviewed
+        # for. A caller-supplied effective_until beyond that deadline is
+        # rejected rather than silently clamped, since that would hide a
+        # reviewer's mistaken belief that the override applies further out.
+        effective_until = override.effective_until
+        if effective_until is None:
+            effective_until = deadline
+        elif effective_until > deadline:
+            raise ValueError("effective_until cannot extend past the target deadline")
         projection_exists = connection.execute(
             """
             SELECT count(*) FROM appearance_projection_run
@@ -140,7 +161,7 @@ def store_appearance_scenario_override(
                 override.player_code,
                 override.target_gameweek,
                 override.observed_at,
-                override.effective_until,
+                effective_until,
                 scenario.start_probability_if_available,
                 scenario.substitute_probability_if_available,
                 scenario.sixty_probability_given_start,
@@ -154,6 +175,7 @@ def store_appearance_scenario_override(
         override_id=override.override_id,
         availability_as_of=availability_as_of,
         deadline=deadline,
+        effective_until=effective_until,
         requires_pipeline_refresh=(
             override.observed_at > availability_as_of or bool(projection_exists)
         ),

@@ -22,6 +22,7 @@ from fpl_model.validation.release_orchestration import (
     ReleaseGateFailure,
     enforce_release_gate,
 )
+from fpl_model.validation.role_state import load_role_states, role_state_report
 
 
 def parse_args() -> argparse.Namespace:
@@ -47,7 +48,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _player(player, transparency_by_id) -> dict[str, object] | None:
+def _player(player, transparency_by_id, role_state_by_id) -> dict[str, object] | None:
     if player is None:
         return None
     return {
@@ -59,14 +60,15 @@ def _player(player, transparency_by_id) -> dict[str, object] | None:
         "current_price_tenths": player.current_price_tenths,
         "selling_price_tenths": player.selling_price_tenths,
         "transparency": transparency_report(transparency_by_id.get(player.fpl_id)),
+        "role_state": role_state_report(role_state_by_id.get(player.fpl_id)),
     }
 
 
-def _option(option: TransferOption, transparency_by_id) -> dict[str, object]:
+def _option(option: TransferOption, transparency_by_id, role_state_by_id) -> dict[str, object]:
     return {
         "decision": "no_transfer" if option.is_no_transfer else "transfer",
-        "outgoing": _player(option.outgoing, transparency_by_id),
-        "incoming": _player(option.incoming, transparency_by_id),
+        "outgoing": _player(option.outgoing, transparency_by_id, role_state_by_id),
+        "incoming": _player(option.incoming, transparency_by_id, role_state_by_id),
         "bank_after_tenths": option.bank_after_tenths,
         "transfer_cost": option.transfer_cost,
         "gross_xpts_gain": option.gross_xpts_gain,
@@ -104,6 +106,11 @@ def main() -> None:
             | {target.player.fpl_id for target in targets}
         )
         transparency_by_id = load_player_transparency(
+            connection,
+            model_run_id=inputs.model_run_id,
+            fpl_ids=relevant_fpl_ids,
+        )
+        role_state_by_id = load_role_states(
             connection,
             model_run_id=inputs.model_run_id,
             fpl_ids=relevant_fpl_ids,
@@ -149,10 +156,10 @@ def main() -> None:
         "squad_snapshot_id": inputs.squad_snapshot_id,
         "model_run_id": inputs.model_run_id,
         "target_gameweek": inputs.target_gameweek,
-        "recommended": _option(recommendation.recommended, transparency_by_id),
-        "no_transfer": _option(recommendation.no_transfer, transparency_by_id),
+        "recommended": _option(recommendation.recommended, transparency_by_id, role_state_by_id),
+        "no_transfer": _option(recommendation.no_transfer, transparency_by_id, role_state_by_id),
         "transfer_alternatives": [
-            _option(option, transparency_by_id)
+            _option(option, transparency_by_id, role_state_by_id)
             for option in recommendation.transfer_alternatives
         ],
         "candidate_accounting": {

@@ -156,6 +156,14 @@ The command rejects evidence observed after the deadline. If the evidence is new
 FPL snapshot—or that snapshot has already been resolved—it asks for another FPL refresh so the old
 resolution remains immutable.
 
+`--effective-until` is optional: omit it and the override is stored with `effective_until` set to
+the target Gameweek's own deadline, so it can never silently outlive the Gameweek it was reviewed
+for. Pass an earlier timestamp explicitly to expire the override sooner (for example, "reassess
+after Thursday's training report"). A value later than the deadline is rejected outright rather than
+silently clamped, since that would hide a reviewer's mistaken belief that the override applies
+further out. The same rule applies to `add_appearance_scenario_override.py` below. Both commands
+print the effective expiry that was actually stored.
+
 The workbook appearance-history boundary is documented in
 `docs/research/CLAUDE_APPEARANCE_HISTORY_EXPORT_PROMPT.md`. Once that read-only export exists, the
 validated GW1 handoff is:
@@ -190,6 +198,26 @@ python scripts/add_appearance_scenario_override.py \
 These inputs describe playing time conditional on availability. They require timestamped evidence
 and never modify an existing projection run. When the command requests a refresh, capture a new FPL
 snapshot, resolve availability again, and materialise a new appearance projection.
+
+A reviewer who does not want to hand-pick all five fields can start from a named preset instead:
+
+```bash
+python scripts/add_appearance_scenario_override.py \
+  --player-code 123456 --gameweek 1 \
+  --observed-at 2026-08-21T10:00:00+07:00 \
+  --preset rotation_risk \
+  --source reviewed_team_news \
+  --rationale "Returning from injury, expected to be managed carefully"
+```
+
+`context/appearance_scenario_presets.py` defines three presets -- `likely_starter`, `rotation_risk`,
+`likely_bench` -- whose probability bands deliberately reuse `role_state.py`'s own
+`ROTATION_THRESHOLD`/`LIKELY_STARTER_THRESHOLD` constants and `model/appearance.py`'s own default
+minutes, so a preset's name means the same thing a manager already sees in a player's role state. Any
+of the individual `--start-if-available`/`--sub-if-available`/`--sixty-given-start`/
+`--minutes-per-start`/`--minutes-per-substitute` flags can still be combined with `--preset` to
+override one field of the chosen preset -- the result passes through the same
+`ConditionalAppearanceScenario` validation a fully hand-built scenario would.
 
 Previous-season player rate inputs can be archived and materialised independently:
 
@@ -856,6 +884,146 @@ columns through every decision `_store.py` module. `recommend_lineup.py`'s outpu
 as `expected_autosub_value`, explicitly informational: it is never added to `total_xpts` or any
 other production score, matching the same measurement-only boundary Sprint 4's shadow calibration
 and uncertainty artifacts already observe.
+
+## P0: explicit role state
+
+A raw `start_probability` number forces a manager to reverse-engineer whether a player reads as a
+safe starter, a rotation risk, or effectively a bench spot. `validation/role_state.py` derives one
+explicit category -- `unavailable`, `unknown`, `likely_bench`, `rotation`, `likely_starter` -- plus a
+plain-language reason, from inputs that already exist: the player's own resolved eligibility
+(`player_availability_resolution.is_eligible`, read from the SAME `availability_resolution_run` the
+model run's own appearance projection used) and `start_probability`/`appearance_probability` from
+`player_fixture_projection`, combined across double-Gameweek fixtures the same way
+`combine_appearance_probability` already does.
+
+Precedence is deliberate: a resolved-ineligible player reads `unavailable` even if their own
+projection is stale-high (e.g. a late injury confirmed after the projection ran); missing evidence
+(unresolved eligibility, or a player entirely absent from `player_fixture_projection` for this run)
+reads `unknown`, never silently folded into `likely_bench` -- evidence-missing and evidence-low are
+different conditions a manager needs to tell apart. Every decision-producing CLI script attaches
+`role_state` to every player it returns exactly the way each already attaches `transparency`
+(`decision_transparency.py`) -- read-only, additive, and never consumed by `decision/*` search or
+ranking logic: `recommend_lineup.py` (per-player), `recommend_transfers.py` (owned squad and
+transfer targets), and `plan_three_gameweeks.py`/`optimize_initial_squad.py` (per-Gameweek, since a
+player's role state can differ across the horizon). This coverage is what the P0 sign-off item
+("no owned-player lineup or transfer decision can depend on a material role conflict without a
+visible warning") verifies -- auditing the four scripts found `recommend_transfers.py`,
+`plan_three_gameweeks.py`, and `optimize_initial_squad.py` had `transparency` but not yet
+`role_state`, which this wiring closed.
+
+## P0: retrospective material conflict audit
+
+A model can be well-calibrated in aggregate while still being badly wrong for one specific player
+in one specific Gameweek -- exactly the two shapes P0 names: "a 60+ minute start with low projected
+start probability, or a zero-minute available player with a high projected appearance probability".
+`validation/material_conflict.py`'s `audit_material_conflicts` compares one completed `model_run`'s
+own stored `player_fixture_projection` against the SAME Gameweek's own FINAL
+`fpl_event_live_run`/`player_gameweek_stat` outcome (`event_finished AND data_checked`; a provisional
+event, or a Gameweek/official-snapshot mismatch between the two runs, raises rather than silently
+comparing unrelated data). `LOW_START_PROBABILITY_THRESHOLD`/`HIGH_APPEARANCE_PROBABILITY_THRESHOLD`
+deliberately reuse `role_state.py`'s own `ROTATION_THRESHOLD`/`LIKELY_STARTER_THRESHOLD` constants,
+so "low"/"high" mean the same number a manager already sees in a player's role state, not an
+independently drifting pair of thresholds.
+
+```bash
+python scripts/audit_material_conflicts.py \
+  --model-run-id baseline_... --live-run-id fpl_live_gw...
+```
+
+This is retrospective and read-only: it changes no projection, calibration, or recommendation. It
+is the audit layer the prospective decision-safety warning below (`role_scenario_sensitivity.py`)
+is intended to eventually validate against a track record of Gameweeks -- material-conflict audit
+tells you a past `ROTATION`-labelled player's outcome actually mattered; role-scenario sensitivity
+tells you, before the deadline, when a CURRENT recommendation depends on one.
+
+## P0: retrospective appearance observation classification
+
+A raw `played`/`minutes`/`starts` triple leaves every 0-minute player looking the same, whether they
+were injured, not yet registered, or simply an unused substitute. `validation/appearance_observation.py`'s
+`load_appearance_observations` classifies one completed, FINAL Gameweek's own outcome
+(`fpl_event_live_run`/`player_gameweek_stat`) into one of six named categories -- `starter`,
+`substitute`, `unavailable`, `not_yet_eligible`, `no_team_fixture`, or
+`unused_substitute_or_not_in_squad` -- using only data already in this database: the matching
+`availability_resolution_run` for eligibility, `player_snapshot` for registration, and
+`fixture_snapshot` for whether the player's team even had a fixture that Gameweek.
+
+FPL's `event/{gw}/live` endpoint returns a stats row for every player in the game whether they played
+or not, but it does not expose the 20-man matchday squad or bench list -- so an unused substitute
+genuinely cannot be told apart from a player left out of the squad entirely using data this pipeline
+has access to. Rather than guess, both collapse into the single named
+`unused_substitute_or_not_in_squad` bucket, which is itself the honest answer: a manager reading it
+knows exactly what is and is not known, rather than being shown a confident label the underlying data
+cannot support.
+
+```bash
+python scripts/classify_appearance_observations.py --live-run-id fpl_live_gw...
+```
+
+This is retrospective and read-only, the same boundary `material_conflict.py` observes: it changes no
+projection, calibration, or recommendation, and requires a FINAL live run
+(`event_finished AND data_checked`).
+
+## P0: prospective role-scenario sensitivity
+
+A raw `role_state` per player still leaves a manager to work out, unassisted, whether any given
+`ROTATION` label actually changes what they should do. `decision/role_scenario_sensitivity.py`'s
+`evaluate_role_scenario_sensitivity` answers that directly: for every squad member `role_state.py`
+marks `ROTATION` (never `LIKELY_STARTER`, `LIKELY_BENCH`, `UNAVAILABLE`, or `UNKNOWN` -- perturbing
+those would not plausibly change anything), it re-runs the exact same `recommend_lineup` search with
+that one player's projection replaced by a "blanks entirely" counterfactual (0 expected points, 0
+appearance probability -- exactly FPL's own 0-minute autosub condition), one player at a time, and
+checks whether the starting XI or captain would change.
+
+`recommend_lineup.py`'s output carries the result as `role_scenario_sensitivity`: `label` is either
+`"stable"` or `"sensitive"`, and `scenarios_that_change_the_recommendation` names exactly which
+player(s) drive a `sensitive` label, so a manager sees which specific rotation risk the recommendation
+is conditional on rather than an unconditional "best option". Like `role_state` and
+`expected_autosub_value`, this is read-only and additive: it never alters what `recommend_lineup`
+itself returns for the base scenario, only labels it.
+
+## P0: deadline-safe current-season player-rate update (materialize-only)
+
+`baseline_pipeline.py`'s in-season path still scores every Gameweek from the frozen previous-season
+`player_rate_history` (flagged `FROZEN_PREVIOUS_SEASON_PLAYER_RATES`) -- a player's current-season
+form never updates their rate inputs. `model/current_season_rates.py`'s
+`materialize_current_season_rates` closes that gap as a NEW, separate lineage
+(`current_season_player_rate_run`/`current_season_player_rate`) rather than repurposing
+`player_rate_history_run`/`player_rate_history`, which stay Vaastav-previous-season-import-only
+(enforced by their own foreign key into `player_fixture_history_import_run`).
+
+Deadline safety mirrors `material_conflict.py`'s own finality gate: a Gameweek enters the rate
+window only if its `fpl_event_live_run` was already FINAL (`event_finished AND data_checked`) at or
+before the run's own `as_of`, and only if it is strictly before the target `as_of_gameweek`. A
+provisional Gameweek -- or the Gameweek being scored itself -- can never leak into its own rate
+window; this is what "no retrospective post-match xP leakage" means concretely here.
+
+Shrinkage blends each per-90 rate toward that SAME player's own previous-season rate (the latest
+matching `player_rate_history` row for their `player_code`), weighted by minutes:
+
+```
+blended = (current_minutes * current_rate + K * prior_rate) / (current_minutes + K)
+```
+
+`K` is `SHRINKAGE_PRIOR_MINUTES = 900.0`, reusing `baseline_pipeline.py`'s own
+`PRIOR_REFERENCE_MINUTES` rather than an independently drifting constant. A player with no
+previous-season rate history at all is NOT rescued by an invented prior here -- the raw
+current-season rate is stored with an explicit `NO_PREVIOUS_SEASON_RATE_HISTORY` flag;
+`baseline_pipeline.py`'s own existing empirical cohort-average prior remains the fallback for that
+case (see the Tzolis-shaped regression case above).
+
+```bash
+python scripts/materialize_current_season_rates.py \
+  --source-ingestion-run-id fpl_... --season 2026-27 \
+  --as-of-gameweek 3 --as-of 2026-09-01T00:00:00+00:00
+```
+
+Two deliberate scope limits: xGC is NOT a per-player field here (it is a team-level input,
+`team_strength_projection`, in this model's architecture, never a per-player rate); and cards/BPS
+are not yet included, only xG/xA/DefCon/saves. And, per an explicit decision, **this run is
+materialize-only** -- `baseline_pipeline.py`'s in-season path does not yet consume it, so
+`final_xpts` is unaffected. Wiring a current-season rate into production scoring is deferred to a
+separate, explicitly-approved change that should go through the existing shadow/calibration release
+path (`validation/release_health.py`) rather than changing `final_xpts` outright without one.
 
 The first presentation boundary is a generated local HTML dashboard. It reads scenario CSVs,
 official identity/status from one pinned ingestion, and exactly three compatible frozen model

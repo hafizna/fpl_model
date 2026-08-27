@@ -54,6 +54,7 @@ def main() -> None:
     )
     result = store_reviewed_override(override, database_path=args.database)
     print(f"Stored {result.override_id}")
+    print(f"Effective until: {result.effective_until.isoformat()}")
     if result.requires_fpl_refresh:
         print(
             "Refresh the official FPL snapshot, then rerun availability resolution "

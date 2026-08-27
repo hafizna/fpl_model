@@ -11,6 +11,7 @@ import duckdb
 from fpl_model.decision.autosub import compute_expected_autosub_value
 from fpl_model.decision.lineup import recommend_lineup
 from fpl_model.decision.lineup_store import load_lineup_inputs
+from fpl_model.decision.role_scenario_sensitivity import evaluate_role_scenario_sensitivity
 from fpl_model.storage import DEFAULT_DATABASE_PATH
 from fpl_model.validation.decision_coverage import CoverageCount, evaluate_decision_coverage
 from fpl_model.validation.decision_transparency import (
@@ -22,6 +23,7 @@ from fpl_model.validation.release_orchestration import (
     ReleaseGateFailure,
     enforce_release_gate,
 )
+from fpl_model.validation.role_state import load_role_states, role_state_report
 
 
 def parse_args() -> argparse.Namespace:
@@ -39,7 +41,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _player(player, projection_by_id, transparency_by_id) -> dict[str, object]:
+def _player(player, projection_by_id, transparency_by_id, role_state_by_id) -> dict[str, object]:
     projection = projection_by_id[player.fpl_id]
     return {
         "fpl_id": player.fpl_id,
@@ -51,6 +53,7 @@ def _player(player, projection_by_id, transparency_by_id) -> dict[str, object]:
         "uncertainty": projection.uncertainty,
         "data_quality_flags": list(projection.data_quality_flags),
         "transparency": transparency_report(transparency_by_id.get(player.fpl_id)),
+        "role_state": role_state_report(role_state_by_id.get(player.fpl_id)),
     }
 
 
@@ -79,9 +82,20 @@ def main() -> None:
             model_run_id=inputs.model_run_id,
             fpl_ids=tuple(player.fpl_id for player in inputs.squad.players),
         )
+        role_state_by_id = load_role_states(
+            connection,
+            model_run_id=inputs.model_run_id,
+            fpl_ids=tuple(player.fpl_id for player in inputs.squad.players),
+        )
     recommendation = recommend_lineup(inputs.squad, inputs.projections)
     projection_by_id = {projection.fpl_id: projection for projection in inputs.projections}
     autosub_value = compute_expected_autosub_value(recommendation, projection_by_id)
+    role_scenario_sensitivity = evaluate_role_scenario_sensitivity(
+        inputs.squad,
+        tuple(inputs.projections),
+        role_state_by_id=role_state_by_id,
+        base_recommendation=recommendation,
+    )
     coverage_gate = evaluate_decision_coverage(
         owned_squad=CoverageCount(
             label="owned_squad",
@@ -105,17 +119,24 @@ def main() -> None:
         "captain_bonus_xpts": recommendation.captain_bonus_xpts,
         "total_xpts": recommendation.total_xpts,
         "uncertainty": recommendation.uncertainty,
-        "captain": _player(recommendation.captain, projection_by_id, transparency_by_id),
-        "vice_captain": _player(recommendation.vice_captain, projection_by_id, transparency_by_id),
+        "captain": _player(
+            recommendation.captain, projection_by_id, transparency_by_id, role_state_by_id
+        ),
+        "vice_captain": _player(
+            recommendation.vice_captain, projection_by_id, transparency_by_id, role_state_by_id
+        ),
         "starters": [
-            _player(player, projection_by_id, transparency_by_id)
+            _player(player, projection_by_id, transparency_by_id, role_state_by_id)
             for player in recommendation.starters
         ],
         "bench_goalkeeper": _player(
-            recommendation.bench_goalkeeper, projection_by_id, transparency_by_id
+            recommendation.bench_goalkeeper,
+            projection_by_id,
+            transparency_by_id,
+            role_state_by_id,
         ),
         "outfield_bench_order": [
-            _player(player, projection_by_id, transparency_by_id)
+            _player(player, projection_by_id, transparency_by_id, role_state_by_id)
             for player in recommendation.outfield_bench_order
         ],
         "data_quality_flags": list(recommendation.data_quality_flags),
@@ -142,10 +163,14 @@ def main() -> None:
         },
         "coverage_gate": coverage_gate,
         "release_health": release_health,
+        "role_scenario_sensitivity": role_scenario_sensitivity.report,
         "method_note": (
             "Exhaustive maximum-mean-xPts search across every legal XI; captain is the "
             "highest-xPts starter and vice-captain the second highest. Missing squad "
-            "projections are rejected, never treated as zero."
+            "projections are rejected, never treated as zero. `role_scenario_sensitivity` "
+            "labels this recommendation `sensitive` rather than an unconditional best "
+            "option when a ROTATION-state player blanking would change the starting XI "
+            "or captain -- see that field for which player(s) drive the warning."
         ),
     }
     output = json.dumps(result, indent=2, sort_keys=True) + "\n"

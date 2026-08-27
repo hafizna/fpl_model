@@ -182,11 +182,11 @@ def test_materializer_uses_latest_causal_snapshot_and_reviewed_override(tmp_path
         connection.execute(
             """
             INSERT INTO availability_override VALUES (
-                'review-doubt', 1002, 1, ?, NULL, 0.75, true,
+                'review-doubt', 1002, 1, ?, ?, 0.75, true,
                 'manual_review', 'Reviewed before deadline'
             )
             """,
-            [AS_OF - timedelta(minutes=5)],
+            [AS_OF - timedelta(minutes=5), deadline],
         )
 
     result = materialize_latest_fpl_availability(
@@ -334,3 +334,86 @@ def test_override_observed_after_deadline_is_rejected(tmp_path):
 
     with pytest.raises(ValueError, match="after the target deadline"):
         store_reviewed_override(override, database_path=database_path)
+
+
+def test_omitted_effective_until_defaults_to_the_target_deadline(tmp_path):
+    database_path = tmp_path / "fpl.duckdb"
+    initialize_database(database_path)
+    deadline = datetime(2026, 8, 22, 17, 30, tzinfo=UTC)
+    with duckdb.connect(str(database_path)) as connection:
+        _insert_snapshot(
+            connection,
+            run_id="causal",
+            captured_at=AS_OF,
+            deadline=deadline,
+        )
+    override = create_reviewed_override(
+        player_code=1002,
+        target_gameweek=1,
+        observed_at=AS_OF - timedelta(minutes=5),
+        source="club_press_conference",
+        rationale="No explicit expiry given by the reviewer.",
+        availability_probability=0.75,
+    )
+
+    result = store_reviewed_override(override, database_path=database_path)
+
+    assert result.effective_until == deadline
+    with duckdb.connect(str(database_path), read_only=True) as connection:
+        stored_effective_until = connection.execute(
+            "SELECT effective_until FROM availability_override WHERE override_id = ?",
+            [override.override_id],
+        ).fetchone()[0]
+    assert stored_effective_until == deadline
+
+
+def test_effective_until_beyond_the_deadline_is_rejected(tmp_path):
+    database_path = tmp_path / "fpl.duckdb"
+    initialize_database(database_path)
+    deadline = datetime(2026, 8, 22, 17, 30, tzinfo=UTC)
+    with duckdb.connect(str(database_path)) as connection:
+        _insert_snapshot(
+            connection,
+            run_id="causal",
+            captured_at=AS_OF,
+            deadline=deadline,
+        )
+    override = create_reviewed_override(
+        player_code=1002,
+        target_gameweek=1,
+        observed_at=AS_OF - timedelta(minutes=5),
+        source="club_press_conference",
+        rationale="Reviewer mistakenly believes this applies past the deadline.",
+        availability_probability=0.75,
+        effective_until=deadline + timedelta(days=7),
+    )
+
+    with pytest.raises(ValueError, match="cannot extend past the target deadline"):
+        store_reviewed_override(override, database_path=database_path)
+
+
+def test_caller_supplied_effective_until_within_deadline_is_kept(tmp_path):
+    database_path = tmp_path / "fpl.duckdb"
+    initialize_database(database_path)
+    deadline = datetime(2026, 8, 22, 17, 30, tzinfo=UTC)
+    with duckdb.connect(str(database_path)) as connection:
+        _insert_snapshot(
+            connection,
+            run_id="causal",
+            captured_at=AS_OF,
+            deadline=deadline,
+        )
+    earlier_expiry = AS_OF + timedelta(hours=1)
+    override = create_reviewed_override(
+        player_code=1002,
+        target_gameweek=1,
+        observed_at=AS_OF - timedelta(minutes=5),
+        source="club_press_conference",
+        rationale="Explicit early expiry: reassess after training update.",
+        availability_probability=0.75,
+        effective_until=earlier_expiry,
+    )
+
+    result = store_reviewed_override(override, database_path=database_path)
+
+    assert result.effective_until == earlier_expiry

@@ -612,26 +612,125 @@ rank improvement, or a production-approved `AI Score`.
 
 #### P0 — Role, minutes, and in-season decision safety
 
-- [ ] Distinguish missing previous-PL history from observed previous non-start history
-- [ ] Distinguish starter, substitute, unused substitute, not-in-squad, unavailable, and
-      not-yet-eligible observations
-- [ ] Add a role state (`unknown`, `likely_starter`, `rotation`, `likely_bench`, `unavailable`)
+- [x] Distinguish missing previous-PL history from observed previous non-start history
+      (`NO_PREVIOUS_PL_PLAYER_RATE_HISTORY` -- no row at all -- vs `NO_USABLE_PLAYER_RATE_HISTORY`
+      plus `ZERO_LONG_FORM_MINUTES`/`ZERO_PRIOR_STARTS` -- a row exists but recorded no minutes;
+      already flows through `baseline_pipeline.py`, coverage audit, and backtests); user-facing
+      translation of these flags into plain-language warnings is now covered by `role_state`
+      (below) and the named regression cases
+- [x] Distinguish starter, substitute, unused substitute, not-in-squad, unavailable, and
+      not-yet-eligible observations (`validation/appearance_observation.py`,
+      `scripts/classify_appearance_observations.py`; retrospective classification of one
+      completed, FINAL Gameweek's own outcome from data already in the database --
+      `player_gameweek_stat` + the matching `availability_resolution_run` + `player_snapshot`
+      registration + `fixture_snapshot` team participation. Caveat: FPL's live-data endpoint does
+      not expose the 20-man matchday squad or bench list, so `unused substitute` and `not-in-squad`
+      cannot actually be told apart from data available to this pipeline; rather than guess, both
+      collapse into one honestly-named `unused_substitute_or_not_in_squad` bucket instead of
+      claiming a distinction the source data cannot support)
+- [x] Add a role state (`unknown`, `likely_starter`, `rotation`, `likely_bench`, `unavailable`)
       updated from official starts, minutes, availability, and reviewed evidence
-- [ ] Detect material conflicts such as a 60+ minute start with low projected start probability,
+      (`validation/role_state.py`; resolved eligibility takes precedence over a stale-high
+      projection, and missing evidence reads `unknown` rather than being folded into
+      `likely_bench`; wired into `recommend_lineup.py`'s output alongside `transparency`)
+- [x] Detect material conflicts such as a 60+ minute start with low projected start probability,
       or a zero-minute available player with a high projected appearance probability
-- [ ] Add named regression cases for Tzolis-like starters, current-only Fulham starters, and
-      Henderson/Welbeck-like non-appearances
-- [ ] Expose simple `likely starter`, `rotation risk`, and `likely bench` presets on top of the
+      (`validation/material_conflict.py`, `scripts/audit_material_conflicts.py`; retrospective
+      only -- compares one completed model run against its own final event-live outcome and
+      fails closed on a provisional event or a Gameweek/snapshot mismatch; the prospective
+      counterpart that warns on a CURRENT decision is `decision/role_scenario_sensitivity.py`,
+      the "sensitive decision" item further below)
+- [x] Add named regression cases for Tzolis-like starters, current-only Fulham starters, and
+      Henderson/Welbeck-like non-appearances (`tests/test_baseline_pipeline_regression_cases.py`,
+      exercising the real `baseline_pipeline.py`/`appearance_pipeline.py` entry points, not
+      re-derived logic: a Tzolis-shaped player -- zero previous-PL rate/appearance history but a
+      real, priced, selectable squad member -- must be rescued by the empirical-prior cohort
+      fallback with an explanatory flag rather than silently excluded or silently confident, mirroring
+      the real Christos Tzolis reviewed in
+      `docs/research/selected_squad_player_rate_evidence_2026_27.json`, whose actual fix is
+      deliberately deferred pending a backtested external-league translation policy -- this test
+      locks in the current, already-reviewed contract, not a claim the number is correct; a
+      Fulham-shaped new signing with no appearance data anywhere must be excluded from
+      `player_fixture_projection` entirely rather than defaulted, the opposite failure direction;
+      and a reviewed appearance-scenario override must be able to override a strong
+      history-derived projection for an established player carrying a genuine current-season
+      doubt, the Henderson/Welbeck shape)
+- [x] Expose simple `likely starter`, `rotation risk`, and `likely bench` presets on top of the
       existing reviewed appearance-scenario override boundary
-- [ ] Require source/reason, observation time, and one-deadline expiry for every override; preserve
-      the immutable base projection beside the adjusted scenario
-- [ ] Compare base and plausible role scenarios; when the recommendation changes, label the
+      (`context/appearance_scenario_presets.py`, `--preset` on
+      `scripts/add_appearance_scenario_override.py`; each preset's probability band deliberately
+      reuses `role_state.py`'s own `ROTATION_THRESHOLD`/`LIKELY_STARTER_THRESHOLD` constants and
+      `model/appearance.py`'s own default minutes, so a preset's name means the same thing a
+      manager already sees in a player's role state rather than an independently drifting
+      definition; individual `--start-if-available`/etc. flags still override one field of the
+      chosen preset, and the result passes through the same `ConditionalAppearanceScenario`
+      validation a fully hand-built scenario would)
+- [x] Require source/reason, observation time, and one-deadline expiry for every override; preserve
+      the immutable base projection beside the adjusted scenario (`context/availability.py`,
+      `context/minutes.py`; `effective_until` is optional at create time but always resolved before
+      storage -- defaults to the target Gameweek's own deadline when omitted, and a caller-supplied
+      value beyond that deadline is rejected rather than silently clamped, so a reviewed override can
+      never outlive the Gameweek it was reviewed for; the immutable base projection run is untouched
+      by an override row, which only feeds a later, separate resolution/projection run. Caveat: the
+      new `NOT NULL`/`CHECK` constraints on `availability_override.effective_until` and
+      `appearance_scenario_override.effective_until` apply only to a freshly created database --
+      DuckDB cannot `ALTER COLUMN` or add a `CHECK` constraint on a table that a foreign key still
+      references, so there is deliberately no v14->v15 migration; an existing database must be
+      re-initialised to pick up the DB-level constraint, though the Python-level validation in both
+      `store_*` functions already enforces the same rule regardless of the underlying column's
+      nullability -- see `docs/DATA_MODEL.md` and the comment above `SCHEMA_VERSION` in
+      `storage/database.py`)
+- [x] Compare base and plausible role scenarios; when the recommendation changes, label the
       decision `sensitive` and withhold an unconditional `Best option`
-- [ ] Materialize a deadline-safe current-season player-rate update from final official xG, xA,
-      xGC, DefCon, saves, cards, BPS, and minutes, with small-sample shrinkage and no retrospective
-      post-match xP leakage
-- [ ] P0 sign-off: no owned-player lineup or transfer decision can depend on a material role
-      conflict without a visible warning or reviewed scenario
+      (`decision/role_scenario_sensitivity.py`, wired into `scripts/recommend_lineup.py`'s
+      `role_scenario_sensitivity` output field: for every squad member `role_state.py` already
+      marks `ROTATION`, re-runs the same `recommend_lineup` search with that one player's
+      projection replaced by a "blanks entirely" scenario -- 0 xPts, 0 appearance probability,
+      exactly the 0-minute condition FPL's own autosub rule keys off -- one player at a time. The
+      recommendation is labelled `sensitive`, and the specific player(s) responsible are named,
+      when any such scenario changes the starting XI or captain; `LIKELY_STARTER`/`LIKELY_BENCH`/
+      `UNAVAILABLE`/`UNKNOWN` players are never perturbed, since a plausible outcome for them would
+      not plausibly change anything. This never alters the base recommendation itself -- only
+      labels it and names the alternative that would flip it)
+- [x] Materialize a deadline-safe current-season player-rate update from final official xG, xA,
+      DefCon, and saves, with small-sample shrinkage and no retrospective post-match xP leakage
+      (`model/current_season_rates.py`, `scripts/materialize_current_season_rates.py`; a NEW
+      lineage -- `current_season_player_rate_run`/`current_season_player_rate` -- separate from
+      `player_rate_history_run`/`player_rate_history`, which stay Vaastav-previous-season-only, so
+      this is additive rather than a repurposing of that FK-constrained schema. Deadline safety:
+      built only from `fpl_event_live_run` rows already FINAL -- `event_finished AND data_checked`
+      -- as of the run's own `as_of`, so a provisional Gameweek, or the Gameweek being scored
+      itself, can never leak into its own rate window. Shrinkage: each per-90 rate is blended
+      toward that SAME player's own previous-season rate, weighted by `SHRINKAGE_PRIOR_MINUTES`
+      (900.0, reusing `baseline_pipeline.py`'s own `PRIOR_REFERENCE_MINUTES`); a player with no
+      previous-season history gets the raw current-season rate with an explicit
+      `NO_PREVIOUS_SEASON_RATE_HISTORY` flag rather than an invented prior. Caveats: xGC is
+      deliberately NOT a per-player field here -- it is a team-level input
+      (`team_strength_projection`) in this model's architecture, never a per-player rate; cards/BPS
+      are not yet included (only xG/xA/DefCon/saves, the components `_derive_rate_priors`'s own
+      cohort fallback already covers); and, per an explicit scope decision, this run is
+      MATERIALIZE-ONLY -- `baseline_pipeline.py`'s in-season path does not yet consume it, so
+      `final_xpts` is unaffected and still comes entirely from the frozen previous-season
+      `player_rate_history` (`FROZEN_PREVIOUS_SEASON_PLAYER_RATES`). Wiring this into production
+      scoring is deliberately deferred to a separate, explicitly-approved change that should go
+      through the existing shadow/calibration release path (`validation/release_health.py`) rather
+      than changing `final_xpts` outright)
+- [x] P0 sign-off: no owned-player lineup or transfer decision can depend on a material role
+      conflict without a visible warning or reviewed scenario (verified by auditing every
+      decision-producing CLI script: `recommend_lineup.py` already carried `role_state` and
+      `role_scenario_sensitivity`; `recommend_transfers.py`, `plan_three_gameweeks.py`, and
+      `optimize_initial_squad.py` carried `transparency` but not `role_state` -- this was the
+      actual gap this sign-off check found, now closed by wiring `role_state`/`role_state_by_gameweek`
+      into all three the same way `recommend_lineup.py` already does, each with a dedicated wiring
+      test (`tests/test_recommend_transfers_role_state_wiring.py`,
+      `tests/test_plan_three_gameweeks_role_state_wiring.py`,
+      `tests/test_optimize_initial_squad_role_state_wiring.py`). Every owned-squad or transfer-target
+      player on every decision surface now carries an explicit `unavailable`/`unknown`/
+      `likely_bench`/`rotation`/`likely_starter` label; `recommend_lineup.py` additionally carries
+      the richer `role_scenario_sensitivity` "would the recommendation itself flip" check, which the
+      other three do not yet have -- extending that specific mechanism to transfer/rolling/initial-squad
+      decision shapes is a distinct future enhancement, not required by this item's literal wording
+      ("a visible warning **or** reviewed scenario"), which `role_state` alone already satisfies)
 
 #### P1 — Usable three-menu MVP
 

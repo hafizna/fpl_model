@@ -8,7 +8,7 @@ from pathlib import Path
 import duckdb
 
 DEFAULT_DATABASE_PATH = Path("data/processed/fpl_model.duckdb")
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 16
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -313,14 +313,14 @@ CREATE TABLE IF NOT EXISTS availability_override (
     player_code BIGINT NOT NULL,
     target_gameweek INTEGER NOT NULL,
     observed_at TIMESTAMPTZ NOT NULL,
-    effective_until TIMESTAMPTZ,
+    effective_until TIMESTAMPTZ NOT NULL,
     availability_probability DOUBLE,
     is_eligible BOOLEAN,
     source VARCHAR NOT NULL,
     rationale VARCHAR NOT NULL,
     CHECK (availability_probability BETWEEN 0.0 AND 1.0),
     CHECK (availability_probability IS NOT NULL OR is_eligible IS NOT NULL),
-    CHECK (effective_until IS NULL OR effective_until >= observed_at)
+    CHECK (effective_until >= observed_at)
 );
 
 CREATE TABLE IF NOT EXISTS availability_resolution_run (
@@ -390,7 +390,7 @@ CREATE TABLE IF NOT EXISTS appearance_scenario_override (
     player_code BIGINT NOT NULL,
     target_gameweek INTEGER NOT NULL,
     observed_at TIMESTAMPTZ NOT NULL,
-    effective_until TIMESTAMPTZ,
+    effective_until TIMESTAMPTZ NOT NULL,
     start_probability_if_available DOUBLE NOT NULL,
     substitute_probability_if_available DOUBLE NOT NULL,
     sixty_probability_given_start DOUBLE NOT NULL,
@@ -406,7 +406,7 @@ CREATE TABLE IF NOT EXISTS appearance_scenario_override (
     CHECK (sixty_probability_given_start BETWEEN 0.0 AND 1.0),
     CHECK (minutes_per_start BETWEEN 0.0 AND 90.0),
     CHECK (minutes_per_substitute BETWEEN 0.0 AND 90.0),
-    CHECK (effective_until IS NULL OR effective_until >= observed_at)
+    CHECK (effective_until >= observed_at)
 );
 
 CREATE TABLE IF NOT EXISTS player_fixture_history_import_run (
@@ -529,6 +529,75 @@ CREATE TABLE IF NOT EXISTS player_rate_history (
     CHECK (long_form_defensive_contribution >= 0),
     CHECK (short_form_defcon_minutes >= 0),
     CHECK (short_form_defensive_contribution >= 0)
+);
+
+-- P0 "materialize a deadline-safe current-season player-rate update": a
+-- SEPARATE lineage from player_rate_history_run/player_rate_history (which
+-- are Vaastav-previous-season-import-only, enforced by their own FK into
+-- player_fixture_history_import_run) rather than a repurposing of that
+-- table -- see validation/player_rates_asof.py's own docstring, which
+-- already warned against reusing a one-shot-per-run schema for a
+-- per-gameweek current-season table. Every row is built ONLY from
+-- fpl_event_live_run entries that were already FINAL
+-- (event_finished AND data_checked) as of this run's own as_of, via
+-- player_gameweek_stat -- never from a provisional Gameweek, and never from
+-- the Gameweek being scored itself (see model/current_season_rates.py).
+CREATE TABLE IF NOT EXISTS current_season_player_rate_run (
+    rate_run_id VARCHAR PRIMARY KEY,
+    source_ingestion_run_id VARCHAR NOT NULL REFERENCES ingestion_run(ingestion_run_id),
+    season VARCHAR NOT NULL,
+    as_of_gameweek INTEGER NOT NULL,
+    as_of TIMESTAMPTZ NOT NULL,
+    shrinkage_prior_minutes DOUBLE NOT NULL,
+    policy_version VARCHAR NOT NULL,
+    player_rows INTEGER NOT NULL,
+    status VARCHAR NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
+    UNIQUE (source_ingestion_run_id, as_of_gameweek, policy_version),
+    CHECK (as_of_gameweek BETWEEN 1 AND 38),
+    CHECK (shrinkage_prior_minutes >= 0.0),
+    CHECK (player_rows >= 0),
+    CHECK (status = 'completed')
+);
+
+CREATE TABLE IF NOT EXISTS current_season_player_rate (
+    rate_run_id VARCHAR NOT NULL
+        REFERENCES current_season_player_rate_run(rate_run_id),
+    player_code BIGINT NOT NULL,
+    fpl_id INTEGER NOT NULL,
+    position VARCHAR NOT NULL,
+    -- Raw current-season observed totals, causally windowed to Gameweeks
+    -- final before as_of_gameweek -- the same "what actually happened"
+    -- inputs player_rates_as_of already computes for the backtest.
+    current_season_minutes INTEGER NOT NULL,
+    current_season_starts INTEGER NOT NULL,
+    -- Bayesian-shrunk per-90 rates: blended toward this player's OWN
+    -- previous-season rate (from the most recent player_rate_history row for
+    -- this player_code) weighted by shrinkage_prior_minutes, i.e.
+    -- blended = (current_minutes * current_rate + K * prior_rate)
+    --           / (current_minutes + K)
+    -- A player with no previous-PL rate history at all falls back to the
+    -- existing empirical cohort-average prior baseline_pipeline.py already
+    -- computes (see model/current_season_rates.py) rather than a new prior
+    -- mechanism. Mirrors player_rate_history's own per-player rate fields
+    -- exactly -- expected_goals_conceded is deliberately NOT here, since
+    -- xGC is a team-level input (team_strength_projection), never a
+    -- per-player rate, in this model's architecture.
+    shrunk_expected_goals_per_90 DOUBLE NOT NULL,
+    shrunk_expected_assists_per_90 DOUBLE NOT NULL,
+    shrunk_defensive_contribution_per_90 DOUBLE NOT NULL,
+    shrunk_saves_per_90 DOUBLE NOT NULL,
+    prior_source VARCHAR NOT NULL,
+    data_quality_flags VARCHAR NOT NULL,
+    PRIMARY KEY (rate_run_id, player_code),
+    CHECK (position IN ('GK', 'DEF', 'MID', 'FWD')),
+    CHECK (current_season_minutes >= 0),
+    CHECK (current_season_starts >= 0),
+    CHECK (shrunk_expected_goals_per_90 >= 0.0),
+    CHECK (shrunk_expected_assists_per_90 >= 0.0),
+    CHECK (shrunk_defensive_contribution_per_90 >= 0.0),
+    CHECK (shrunk_saves_per_90 >= 0.0),
+    CHECK (prior_source IN ('previous_season_player_rate', 'no_previous_season_history'))
 );
 
 CREATE TABLE IF NOT EXISTS player_rate_evidence_import_run (
@@ -1111,6 +1180,18 @@ ALTER TABLE team_snapshot ALTER COLUMN strength_attack_away DROP NOT NULL;
 ALTER TABLE team_snapshot ALTER COLUMN strength_defence_home DROP NOT NULL;
 ALTER TABLE team_snapshot ALTER COLUMN strength_defence_away DROP NOT NULL;
 """
+
+# P0 "require ... one-deadline expiry for every override": effective_until
+# becomes required rather than optional for any NEW database (SCHEMA_SQL
+# below). There is deliberately no v14->v15 migration for an EXISTING
+# database: DuckDB cannot ALTER COLUMN or ADD CONSTRAINT on
+# availability_override while player_availability_resolution.
+# selected_override_id holds a foreign key into it, and neither override
+# table is known to hold any row anywhere yet. An existing database with rows
+# in `availability_override`/`appearance_scenario_override` predating this
+# schema version must be re-initialised (drop and rebuild from
+# `scripts/init_local_db.py`) rather than upgraded in place -- see
+# `docs/DATA_MODEL.md`.
 
 
 @dataclass(frozen=True, slots=True)

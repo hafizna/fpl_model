@@ -103,6 +103,26 @@ The resolution is not start probability and does not directly multiply xPts. It 
 to mutually exclusive start, substitute-appearance, and absence scenarios. Resolution rows and the
 source snapshot remain immutable for later deadline-safe backtesting.
 
+#### Override expiry and schema migration caveat
+
+`availability_override.effective_until` and `appearance_scenario_override.effective_until` are
+required and constrained (`CHECK (effective_until >= observed_at)`) as of `SCHEMA_VERSION = 15` in
+`storage/database.py` -- a reviewed override can no longer be stored with an open-ended expiry.
+`context/availability.py` and `context/minutes.py` resolve a caller-omitted `effective_until` to the
+target Gameweek's own deadline, and reject a caller-supplied value beyond that deadline, before the
+row is ever written.
+
+This constraint applies at the SQL level only to a database created fresh under schema v15. DuckDB
+cannot `ALTER COLUMN ... SET NOT NULL` or add a `CHECK` constraint to a table while another table
+holds a foreign key into it (`player_availability_resolution.selected_override_id` references
+`availability_override`), so there is deliberately no `V14_TO_V15_SQL` migration. An existing
+database created under an earlier schema version keeps a nullable `effective_until` column at the
+SQL level. Both tables were empty in every database known at the time this was written, so there was
+nothing to backfill; the application-level validation in `store_reviewed_override` and
+`store_appearance_scenario_override` enforces the same rule regardless of the column's declared
+nullability. An operator upgrading a database that already holds override rows should re-initialise
+it (`scripts/init_local_db.py`) rather than assume the SQL constraint is active.
+
 ### Appearance-history import boundary
 
 Vaastav's per-GW rows can identify starts, substitute appearances, and played minutes, but a

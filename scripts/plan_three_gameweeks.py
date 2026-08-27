@@ -27,6 +27,7 @@ from fpl_model.validation.release_orchestration import (
     ReleaseGateFailure,
     enforce_release_gate,
 )
+from fpl_model.validation.role_state import load_role_states, role_state_report
 
 
 def _model_run(value: str) -> tuple[int, str]:
@@ -73,11 +74,17 @@ def _plan(
     plan: RollingPlan,
     names: dict[int, str],
     transparency_by_gameweek: dict[int, dict[int, object]],
+    role_state_by_gameweek: dict[int, dict[int, object]],
 ) -> dict[str, object]:
     def _transparency(gameweek: int, fpl_id: int | None) -> dict[str, object] | None:
         if fpl_id is None:
             return None
         return transparency_report(transparency_by_gameweek.get(gameweek, {}).get(fpl_id))
+
+    def _role_state(gameweek: int, fpl_id: int | None) -> dict[str, object] | None:
+        if fpl_id is None:
+            return None
+        return role_state_report(role_state_by_gameweek.get(gameweek, {}).get(fpl_id))
 
     return {
         "cumulative_net_xpts": plan.cumulative_net_xpts,
@@ -93,9 +100,11 @@ def _plan(
                 "outgoing_fpl_id": step.outgoing_fpl_id,
                 "outgoing_name": names.get(step.outgoing_fpl_id),
                 "outgoing_transparency": _transparency(step.gameweek, step.outgoing_fpl_id),
+                "outgoing_role_state": _role_state(step.gameweek, step.outgoing_fpl_id),
                 "incoming_fpl_id": step.incoming_fpl_id,
                 "incoming_name": names.get(step.incoming_fpl_id),
                 "incoming_transparency": _transparency(step.gameweek, step.incoming_fpl_id),
+                "incoming_role_state": _role_state(step.gameweek, step.incoming_fpl_id),
                 "free_transfers_before": step.free_transfers_before,
                 "free_transfers_after": step.free_transfers_after,
                 "bank_after_tenths": step.bank_after_tenths,
@@ -105,10 +114,15 @@ def _plan(
                 "captain_fpl_id": step.lineup.captain.fpl_id,
                 "captain_name": step.lineup.captain.player_name,
                 "captain_transparency": _transparency(step.gameweek, step.lineup.captain.fpl_id),
+                "captain_role_state": _role_state(step.gameweek, step.lineup.captain.fpl_id),
                 "vice_captain_fpl_id": step.lineup.vice_captain.fpl_id,
                 "starters": [player.fpl_id for player in step.lineup.starters],
                 "starters_transparency": [
                     _transparency(step.gameweek, player.fpl_id)
+                    for player in step.lineup.starters
+                ],
+                "starters_role_state": [
+                    _role_state(step.gameweek, player.fpl_id)
                     for player in step.lineup.starters
                 ],
                 "bench_goalkeeper": step.lineup.bench_goalkeeper.fpl_id,
@@ -154,6 +168,14 @@ def main() -> None:
             )
             for (gameweek, run_id), pool in zip(inputs.model_run_ids, inputs.pools, strict=True)
         }
+        role_state_by_gameweek = {
+            gameweek: load_role_states(
+                connection,
+                model_run_id=run_id,
+                fpl_ids=tuple(target.player.fpl_id for target in pool.players),
+            )
+            for (gameweek, run_id), pool in zip(inputs.model_run_ids, inputs.pools, strict=True)
+        }
     result = plan_three_gameweeks(
         inputs.lineup_inputs.squad,
         inputs.pools,
@@ -193,9 +215,12 @@ def main() -> None:
         "model_run_ids": dict(inputs.model_run_ids),
         "planning_as_of": inputs.planning_as_of.isoformat(),
         "model_version": inputs.model_version,
-        "recommended": _plan(result.recommended, names, transparency_by_gameweek),
+        "recommended": _plan(
+            result.recommended, names, transparency_by_gameweek, role_state_by_gameweek
+        ),
         "alternatives": [
-            _plan(plan, names, transparency_by_gameweek) for plan in result.alternatives
+            _plan(plan, names, transparency_by_gameweek, role_state_by_gameweek)
+            for plan in result.alternatives
         ],
         "coverage": [
             {

@@ -32,6 +32,7 @@ from fpl_model.validation.release_orchestration import (
     ReleaseGateFailure,
     enforce_release_gate,
 )
+from fpl_model.validation.role_state import load_role_states, role_state_report
 
 
 def _model_run(value: str) -> tuple[int, str]:
@@ -136,6 +137,7 @@ def parse_args() -> argparse.Namespace:
 def _plan(
     plan: InitialSquadPlan,
     transparency_by_gameweek: dict[int, dict[int, object]],
+    role_state_by_gameweek: dict[int, dict[int, object]],
     player_names: dict[int, str],
 ) -> dict[str, object]:
     return {
@@ -194,11 +196,22 @@ def _plan(
                         row.lineup.captain.fpl_id
                     )
                 ),
+                "captain_role_state": role_state_report(
+                    role_state_by_gameweek.get(row.gameweek, {}).get(
+                        row.lineup.captain.fpl_id
+                    )
+                ),
                 "vice_captain_fpl_id": row.lineup.vice_captain.fpl_id,
                 "starters": [player.fpl_id for player in row.lineup.starters],
                 "starters_transparency": [
                     transparency_report(
                         transparency_by_gameweek.get(row.gameweek, {}).get(player.fpl_id)
+                    )
+                    for player in row.lineup.starters
+                ],
+                "starters_role_state": [
+                    role_state_report(
+                        role_state_by_gameweek.get(row.gameweek, {}).get(player.fpl_id)
                     )
                     for player in row.lineup.starters
                 ],
@@ -235,6 +248,14 @@ def main() -> None:
         inputs = load_initial_squad_inputs(connection, model_run_ids=model_run_ids)
         transparency_by_gameweek = {
             gameweek: load_player_transparency(
+                connection,
+                model_run_id=run_id,
+                fpl_ids=tuple(target.player.fpl_id for target in pool.players),
+            )
+            for (gameweek, run_id), pool in zip(inputs.model_run_ids, inputs.pools, strict=True)
+        }
+        role_state_by_gameweek = {
+            gameweek: load_role_states(
                 connection,
                 model_run_id=run_id,
                 fpl_ids=tuple(target.player.fpl_id for target in pool.players),
@@ -295,9 +316,12 @@ def main() -> None:
         "model_run_ids": dict(inputs.model_run_ids),
         "planning_as_of": inputs.planning_as_of.isoformat(),
         "model_version": inputs.model_version,
-        "recommended": _plan(result.recommended, transparency_by_gameweek, player_names),
+        "recommended": _plan(
+            result.recommended, transparency_by_gameweek, role_state_by_gameweek, player_names
+        ),
         "alternatives": [
-            _plan(plan, transparency_by_gameweek, player_names) for plan in result.alternatives
+            _plan(plan, transparency_by_gameweek, role_state_by_gameweek, player_names)
+            for plan in result.alternatives
         ],
         "coverage": [
             {

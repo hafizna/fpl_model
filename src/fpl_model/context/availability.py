@@ -56,6 +56,15 @@ class AvailabilityInput:
 
 @dataclass(frozen=True, slots=True)
 class ReviewedAvailabilityOverride:
+    """``effective_until`` is intentionally still optional HERE: a reviewer
+    creating an override does not always know the exact deadline timestamp up
+    front. P0's "require ... one-deadline expiry for every override" is
+    enforced at STORE time instead (`store_reviewed_override` resolves a
+    ``None`` to the target Gameweek's own deadline before inserting) -- the
+    stored row is never left open-ended, even though the caller may omit
+    this field.
+    """
+
     override_id: str
     player_code: int
     target_gameweek: int
@@ -119,6 +128,7 @@ class AvailabilityOverrideStoreResult:
     override_id: str
     latest_causal_snapshot_at: datetime
     deadline: datetime
+    effective_until: datetime
     requires_fpl_refresh: bool
 
 
@@ -298,6 +308,17 @@ def store_reviewed_override(
         snapshot_at, deadline = snapshot
         if override.observed_at > deadline:
             raise ValueError("override observed after the target deadline")
+        # P0 "require ... one-deadline expiry": a caller that omitted
+        # effective_until gets the target Gameweek's own deadline -- the
+        # override can never silently outlive the Gameweek it was reviewed
+        # for. A caller-supplied effective_until beyond that deadline is
+        # rejected rather than silently clamped, since that would hide a
+        # reviewer's mistaken belief that the override applies further out.
+        effective_until = override.effective_until
+        if effective_until is None:
+            effective_until = deadline
+        elif effective_until > deadline:
+            raise ValueError("effective_until cannot extend past the target deadline")
 
         resolved_already = connection.execute(
             """
@@ -323,7 +344,7 @@ def store_reviewed_override(
                 override.player_code,
                 override.target_gameweek,
                 override.observed_at,
-                override.effective_until,
+                effective_until,
                 override.availability_probability,
                 override.is_eligible,
                 override.source,
@@ -335,6 +356,7 @@ def store_reviewed_override(
         override_id=override.override_id,
         latest_causal_snapshot_at=snapshot_at,
         deadline=deadline,
+        effective_until=effective_until,
         requires_fpl_refresh=(
             override.observed_at > snapshot_at or bool(resolved_already)
         ),
