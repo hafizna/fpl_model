@@ -26,10 +26,21 @@ from fpl_model.decision.lineup import (
 )
 from fpl_model.decision.lineup_store import combine_appearance_probability
 from fpl_model.decision.role_scenario_sensitivity import evaluate_role_scenario_sensitivity
+from fpl_model.decision.rolling import GameweekProjectionPool
 from fpl_model.decision.squad import CHIP_NAMES, SquadPlayer, validate_squad
+from fpl_model.decision.squad_rating import (
+    RATING_FORMULA_VERSION,
+    RATING_SCHEMA_VERSION,
+    SquadBenchmark,
+    build_squad_benchmark,
+    rate_squad,
+)
+from fpl_model.decision.transfer import TransferTarget
 from fpl_model.ingest.squad_snapshot import validate_entry_picks_payload
 from fpl_model.storage import DEFAULT_DATABASE_PATH
 from fpl_model.validation.role_state import RoleStateResult
+
+_SQUAD_BENCHMARK_CACHE: dict[tuple[str, int], SquadBenchmark] = {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -760,6 +771,7 @@ def _lineup_payload(
         "starting_xpts": recommendation.starting_xpts,
         "captain_bonus_xpts": recommendation.captain_bonus_xpts,
         "total_xpts": recommendation.total_xpts,
+        "uncertainty": recommendation.uncertainty,
         "captain": _payload(recommendation.captain),
         "vice_captain": _payload(recommendation.vice_captain),
         "starters": [_payload(player) for player in recommendation.starters],
@@ -772,6 +784,202 @@ def _lineup_payload(
         "role_scenario_sensitivity": sensitivity_report,
         "current_setup_comparison": current_setup_comparison,
     }
+
+
+def _rating_source_identity(
+    horizon: ResearchHorizon,
+    catalog: dict[int, dict[str, Any]],
+    projections: dict[int, dict[int, PlayerGameweekProjection]],
+    release_id: str | None,
+) -> str:
+    """Stable identity even in DB/local mode where no web release ID exists."""
+
+    if release_id is not None:
+        return release_id
+    payload = {
+        "source_ingestion_run_id": horizon.source_ingestion_run_id,
+        "model_version": horizon.model_version,
+        "planning_as_of": horizon.planning_as_of,
+        "model_runs": horizon.model_runs,
+        "players": [
+            {
+                "fpl_id": fpl_id,
+                "team_id": row["team_id"],
+                "position": row["position"],
+                "price_tenths": row["price_tenths"],
+                "status": row["status"],
+                "xpts": [
+                    projections[gameweek][fpl_id].expected_points
+                    for gameweek, _ in horizon.model_runs
+                ],
+            }
+            for fpl_id, row in sorted(catalog.items())
+        ],
+    }
+    digest = hashlib.sha256(
+        json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    return f"local_horizon_{digest[:16]}"
+
+
+def _rating_pools(
+    horizon: ResearchHorizon,
+    catalog: dict[int, dict[str, Any]],
+    projections: dict[int, dict[int, PlayerGameweekProjection]],
+) -> tuple[GameweekProjectionPool, ...]:
+    transferable = tuple(
+        sorted(fpl_id for fpl_id, row in catalog.items() if row["status"] in {"a", "d"})
+    )
+    targets_by_gameweek: list[GameweekProjectionPool] = []
+    for gameweek, _ in horizon.model_runs:
+        targets = tuple(
+            TransferTarget(
+                player=SquadPlayer(
+                    fpl_id=fpl_id,
+                    player_code=row.get("player_code"),
+                    player_name=row["name"],
+                    team_id=row["team_id"],
+                    position=row["position"],
+                    current_price_tenths=row["price_tenths"],
+                    purchase_price_tenths=row["price_tenths"],
+                    selling_price_tenths=row["price_tenths"],
+                    squad_position=1,
+                    is_captain=False,
+                    is_vice_captain=False,
+                ),
+                projection=projections[gameweek][fpl_id],
+            )
+            for fpl_id, row in sorted(catalog.items())
+        )
+        targets_by_gameweek.append(
+            GameweekProjectionPool(
+                gameweek=gameweek,
+                players=targets,
+                transferable_fpl_ids=transferable,
+            )
+        )
+    return tuple(targets_by_gameweek)
+
+
+def _rating_unavailable(
+    *,
+    source_identity: str,
+    budget_tenths: int,
+    lineups: list[dict[str, Any]],
+    release_health: str,
+    reviewed_scenario: bool,
+    squad_rule_flags: tuple[str, ...],
+    reason: str,
+) -> dict[str, Any]:
+    quality_flags = sorted({flag for row in lineups for flag in row["quality_flags"]})
+    uncertainty_values = tuple(row["uncertainty"] for row in lineups)
+    return {
+        "schema_version": RATING_SCHEMA_VERSION,
+        "display_label": "Model Score" if release_health == "production" else "Model Preview",
+        "formula_version": RATING_FORMULA_VERSION,
+        "available": False,
+        "benchmark": {
+            "benchmark_id": None,
+            "source_identity": source_identity,
+            "budget_tenths": budget_tenths,
+            "population_size": 0,
+        },
+        "input": {
+            "gameweeks": [row["gameweek"] for row in lineups],
+            "raw_gameweek_xpts": [row["total_xpts"] for row in lineups],
+            "raw_cumulative_xpts": sum(row["total_xpts"] for row in lineups),
+            "reviewed_scenario": reviewed_scenario,
+        },
+        "model_strength": None,
+        "release_gate": {
+            "health": release_health,
+            "production_approved": release_health == "production",
+        },
+        "data_confidence": {
+            "state": "review" if quality_flags else "clean",
+            "quality_flags": quality_flags,
+        },
+        "projection_uncertainty": {
+            "gameweek": [
+                {"gameweek": row["gameweek"], "uncertainty": row["uncertainty"]}
+                for row in lineups
+            ],
+            "cumulative_rss": (
+                None
+                if any(value is None for value in uncertainty_values)
+                else sqrt(sum(value**2 for value in uncertainty_values))
+            ),
+        },
+        "squad_rule_health": {
+            "state": "pass" if not squad_rule_flags else "review",
+            "flags": list(squad_rule_flags),
+        },
+        "explanation": f"Rating withheld: {reason}. Raw xPts remain available.",
+    }
+
+
+def _squad_rating_payload(
+    *,
+    horizon: ResearchHorizon,
+    catalog: dict[int, dict[str, Any]],
+    base_projections: dict[int, dict[int, PlayerGameweekProjection]],
+    release_id: str | None,
+    release_health: str,
+    fpl_ids: tuple[int, ...],
+    bank_tenths: int,
+    squad,
+    lineups: list[dict[str, Any]],
+    reviewed_scenario: bool,
+) -> dict[str, Any]:
+    source_identity = _rating_source_identity(
+        horizon, catalog, base_projections, release_id
+    )
+    benchmark_budget_tenths = (
+        sum(catalog[fpl_id]["price_tenths"] for fpl_id in fpl_ids) + bank_tenths
+    )
+    try:
+        cache_key = (source_identity, benchmark_budget_tenths)
+        benchmark = _SQUAD_BENCHMARK_CACHE.get(cache_key)
+        if benchmark is None:
+            benchmark = build_squad_benchmark(
+                _rating_pools(horizon, catalog, base_projections),
+                source_identity=source_identity,
+                budget_tenths=benchmark_budget_tenths,
+            )
+            _SQUAD_BENCHMARK_CACHE[cache_key] = benchmark
+        rating = rate_squad(
+            benchmark,
+            raw_gameweek_xpts=tuple(row["total_xpts"] for row in lineups),
+            gameweek_uncertainty=tuple(row["uncertainty"] for row in lineups),
+            quality_flags=tuple(
+                sorted({flag for row in lineups for flag in row["quality_flags"]})
+            ),
+            squad_rule_flags=squad.constraint_flags,
+            release_health=release_health,
+            reviewed_scenario=reviewed_scenario,
+        )
+    except ValueError as error:
+        rating = _rating_unavailable(
+            source_identity=source_identity,
+            budget_tenths=benchmark_budget_tenths,
+            lineups=lineups,
+            release_health=release_health,
+            reviewed_scenario=reviewed_scenario,
+            squad_rule_flags=squad.constraint_flags,
+            reason=str(error),
+        )
+    rating["input"]["squad_fpl_ids"] = sorted(fpl_ids)
+    rating["input"]["optimized_decisions"] = [
+        {
+            "gameweek": row["gameweek"],
+            "starter_fpl_ids": sorted(player["fpl_id"] for player in row["starters"]),
+            "captain_fpl_id": row["captain"]["fpl_id"],
+            "vice_captain_fpl_id": row["vice_captain"]["fpl_id"],
+            "formation": row["formation"],
+        }
+        for row in lineups
+    ]
+    return rating
 
 
 def recommend_web_lineups(
@@ -789,8 +997,12 @@ def recommend_web_lineups(
         database_path=database_path,
         release_path=release_path,
     )
+    # The benchmark always uses the frozen base release. Reviewed what-if
+    # overrides may alter the submitted squad's score, but never move the
+    # comparison population or redefine the scale.
+    base_projections = projections
     projections = apply_role_scenario_overrides(
-        projections, role_scenario_overrides, horizon=horizon
+        base_projections, role_scenario_overrides, horizon=horizon
     )
     squad = _validated_web_squad(
         catalog,
@@ -817,6 +1029,18 @@ def recommend_web_lineups(
         )
         for gameweek, _ in horizon.model_runs
     ]
+    rating = _squad_rating_payload(
+        horizon=horizon,
+        catalog=catalog,
+        base_projections=base_projections,
+        release_id=release_id,
+        release_health=health,
+        fpl_ids=fpl_ids,
+        bank_tenths=bank_tenths,
+        squad=squad,
+        lineups=lineups,
+        reviewed_scenario=bool(role_scenario_overrides),
+    )
     release_metadata = release_metadata or {}
     return {
         "health": health,
@@ -827,6 +1051,7 @@ def recommend_web_lineups(
         "horizon": [gameweek for gameweek, _ in horizon.model_runs],
         "lineups": lineups,
         "cumulative_xpts": sum(row["total_xpts"] for row in lineups),
+        "squad_rating": rating,
         "method_note": (
             "Exhaustive legal XI and captain search over one frozen research horizon."
             if not role_scenario_overrides
@@ -853,8 +1078,9 @@ def recommend_web_transfers(
         database_path=database_path,
         release_path=release_path,
     )
+    base_projections = projections
     projections = apply_role_scenario_overrides(
-        projections, role_scenario_overrides, horizon=horizon
+        base_projections, role_scenario_overrides, horizon=horizon
     )
     baseline_squad = _validated_web_squad(
         catalog,
@@ -872,6 +1098,18 @@ def recommend_web_transfers(
         for gameweek, _ in horizon.model_runs
     ]
     baseline_xpts = sum(row["total_xpts"] for row in baseline_lineups)
+    baseline_rating = _squad_rating_payload(
+        horizon=horizon,
+        catalog=catalog,
+        base_projections=base_projections,
+        release_id=release_id,
+        release_health=health,
+        fpl_ids=fpl_ids,
+        bank_tenths=bank_tenths,
+        squad=baseline_squad,
+        lineups=baseline_lineups,
+        reviewed_scenario=bool(role_scenario_overrides),
+    )
     owned = set(fpl_ids)
     suggestions: list[dict[str, Any]] = []
     for out_id in fpl_ids:
@@ -925,6 +1163,7 @@ def recommend_web_transfers(
         "coverage": release_metadata.get("coverage"),
         "freshness": release_metadata.get("freshness"),
         "baseline_cumulative_xpts": baseline_xpts,
+        "baseline_squad_rating": baseline_rating,
         "baseline_lineups": baseline_lineups,
         "recommendation": "hold"
         if not suggestions or suggestions[0]["net_xpts_gain"] <= 0

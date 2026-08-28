@@ -181,8 +181,32 @@ profit-sharing rule on price rises that cannot be reconstructed from a single pi
 CLI/persistence equivalent, for building an immutable `squad_snapshot` database row instead of a
 one-off browser fetch, is `ingest.squad_snapshot.import_squad_snapshot_from_entry`.
 
-The three-Gameweek screen deliberately says `outlook`, not `rating`. A benchmark-relative rating
-and percentile do not exist until the Sprint 7 score contract is implemented.
+## Sprint 7 score contract
+
+The three-Gameweek screen remains an `outlook`, but it now carries a versioned benchmark-relative
+`Model Score` (`Model Preview` while the release is not production-approved). The scale is not a
+min/max of open browser scenarios:
+
+- `optimized_xi_captain_percentile_v1` compares the submitted squad's optimized-XI-plus-captain
+  xPts with a deterministic rank-weighted sample of legal squads generated from the same frozen
+  base release and the exact same current-price budget cap; the sampler reinvests spare budget
+  into a £5m band below that cap and retains 128 distinct squads (minimum valid population 100);
+- the benchmark identity includes release/horizon identity, budget, candidate population, search
+  settings, and raw benchmark scores; reviewed role scenarios rescore the submitted squad but do
+  not move this benchmark;
+- each Gameweek percentile is calculated separately; the overall percentile is calculated from
+  cumulative raw 3GW xPts, never by averaging rounded Gameweek display ratings;
+- model strength, data-quality flags, projection uncertainty, legal-squad health, and release
+  approval are separate response fields and separate UI labels;
+- fewer than 100 legal benchmark squads causes the percentile to be withheld while raw xPts stays
+  available.
+
+The full rating payload (benchmark identity and inputs, raw scores, percentile, and explanation)
+is returned by the lineup API and retained only as `touchline-last-squad-rating` in browser local
+storage. This follows the app's existing privacy boundary: no manager-specific rating is written
+to the server. The same baseline rating is returned by Transfers, and Weekly uses the matching
+first-Gameweek percentile. `release_drift_v1` records percentile and benchmark-identity changes
+when a manager squad is supplied for provisional-to-final comparisons.
 
 ## Vercel boundary
 

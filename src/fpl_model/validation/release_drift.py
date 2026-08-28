@@ -35,6 +35,13 @@ def _top_transfer(result: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def _overall_percentile(result: dict[str, Any]) -> float | None:
+    rating = result.get("squad_rating")
+    if not rating or not rating.get("available"):
+        return None
+    return float(rating["model_strength"]["overall_3gw"]["percentile"])
+
+
 def compare_web_releases(
     *,
     before_path: str | Path,
@@ -175,6 +182,14 @@ def compare_web_releases(
                     "delta": (
                         after_lineups["cumulative_xpts"]
                         - before_lineups["cumulative_xpts"]
+                    ),
+                    "before_percentile": _overall_percentile(before_lineups),
+                    "after_percentile": _overall_percentile(after_lineups),
+                    "before_benchmark_id": before_lineups["squad_rating"]["benchmark"].get(
+                        "benchmark_id"
+                    ),
+                    "after_benchmark_id": after_lineups["squad_rating"]["benchmark"].get(
+                        "benchmark_id"
                     ),
                 },
                 "transfer": {

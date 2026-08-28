@@ -196,9 +196,12 @@ function renderSensitivityBanner(sensitivity, gameweek) {
 function renderWeekly() {
   if (!state.lineups) return;
   const lineup = state.lineups.lineups[0];
+  const weeklyPercentile = state.lineups.squad_rating?.available
+    ? state.lineups.squad_rating.model_strength.per_gameweek.find((row) => row.gameweek === lineup.gameweek)?.percentile
+    : null;
   $("#weekly-summary").classList.remove("skeleton");
   $("#weekly-summary").innerHTML = `
-    <div><span>GW${lineup.gameweek} xPts</span><strong>${points(lineup.total_xpts)}</strong></div>
+    <div><span>GW${lineup.gameweek} xPts${weeklyPercentile == null ? "" : ` · ${Math.round(weeklyPercentile)}th pct`}</span><strong>${points(lineup.total_xpts)}</strong></div>
     <div><span>Formation</span><strong>${lineup.formation}</strong></div>
     <div><span>Captain</span><strong>${lineup.captain.name}</strong></div>
     <div><span>Autosub EV</span><strong>${points(lineup.expected_autosub_value)}</strong></div>`;
@@ -252,17 +255,38 @@ function fixtureLabel(player) {
 
 function renderOutlook() {
   if (!state.lineups) return;
+  const rating = state.lineups.squad_rating;
+  const overallRating = rating?.available ? rating.model_strength.overall_3gw : null;
   $("#outlook-total").classList.remove("skeleton");
-  $("#outlook-total").innerHTML = `<span>Projected horizon score</span><strong>${points(state.lineups.cumulative_xpts)}</strong><small>captaincy included · raw mean xPts</small>`;
+  $("#outlook-total").innerHTML = `<div><span>Projected horizon score</span><strong>${points(state.lineups.cumulative_xpts)}</strong><small>captaincy included · cumulative raw xPts</small></div>${overallRating ? `<div class="rating-score"><span>${rating.display_label}</span><strong>${Math.round(overallRating.percentile)}</strong><small>percentile vs ${rating.benchmark.population_size} legal same-budget squads</small></div>` : `<div class="rating-score unavailable"><span>${rating?.display_label || "Model Preview"}</span><strong>—</strong><small>benchmark unavailable; raw xPts is still valid</small></div>`}`;
+  const perGameweekRating = new Map(
+    rating?.available
+      ? rating.model_strength.per_gameweek.map((row) => [row.gameweek, row.percentile])
+      : []
+  );
   $("#outlook-grid").innerHTML = state.lineups.lineups.map((lineup) => {
     const benchTotal = lineup.bench.reduce((sum, player) => sum + Number(player.xpts || 0), 0);
+    const percentile = perGameweekRating.get(lineup.gameweek);
     return `<article class="gw-card">
       <span>GW${lineup.gameweek}</span>
       <strong>${points(lineup.total_xpts)}</strong>
       <p>${lineup.formation} · ${lineup.captain.name} (C) · ${fixtureLabel(lineup.captain)}</p>
+      <p class="gw-percentile">${percentile == null ? "Rating withheld" : `${Math.round(percentile)}th percentile`}</p>
       <p class="bench-depth">Bench depth <b>${points(benchTotal)}</b> xPts</p>
     </article>`;
   }).join("");
+
+  const detail = $("#outlook-rating-detail");
+  detail.classList.remove("skeleton");
+  if (!rating?.available) {
+    detail.className = "rating-detail unavailable";
+    detail.innerHTML = `<strong>Why there is no rating yet</strong><p>${rating?.explanation || "No benchmark contract was returned."}</p>`;
+  } else {
+    const uncertainty = rating.projection_uncertainty.cumulative_rss;
+    const releaseGate = rating.release_gate.production_approved ? "Production approved" : `${rating.release_gate.health} release`;
+    detail.className = "rating-detail available";
+    detail.innerHTML = `<div><span>Model strength</span><strong>${Math.round(overallRating.percentile)}th percentile</strong></div><div><span>Data confidence</span><strong>${rating.data_confidence.state}</strong></div><div><span>Projection uncertainty</span><strong>${uncertainty == null ? "—" : `±${points(uncertainty)}`}</strong></div><div><span>Squad rules</span><strong>${rating.squad_rule_health.state}</strong></div><p>${releaseGate}. ${rating.explanation}</p>`;
+  }
 
   const totals = new Map();
   const fixturesByPlayer = new Map();
@@ -298,11 +322,15 @@ function renderTransfers() {
   // alternative). A hit scenario is therefore an explicit, whole-scan mode,
   // not something to sort per-card.
   const isHitScenario = suggestions.length > 0 && suggestions[0].hit_cost > 0;
+  const baselineRating = state.transfers.baseline_squad_rating;
+  const baselinePercentile = baselineRating?.available
+    ? baselineRating.model_strength.overall_3gw.percentile
+    : null;
   const modeBanner = suggestions.length === 0 ? "" : isHitScenario
     ? `<div class="transfer-mode hit">Hit scenario: no free transfer is available, so every suggested move below costs a ${suggestions[0].hit_cost}-point hit. Net gain already accounts for it.</div>`
     : `<div class="transfer-mode free">Free transfer available: every suggested move below costs no hit.</div>`;
   container.className = "transfer-list";
-  container.innerHTML = `${modeBanner}<article class="transfer-card hold ${state.transfers.recommendation === "hold" ? "recommended" : ""}"><div><span>Baseline</span><strong>Hold transfer</strong></div><div><span>3-GW xPts</span><strong>${points(state.transfers.baseline_cumulative_xpts)}</strong></div></article>${suggestions.map((row, index) => `<article class="transfer-card ${index === 0 && state.transfers.recommendation === "transfer" ? "recommended" : ""}">
+  container.innerHTML = `${modeBanner}<article class="transfer-card hold ${state.transfers.recommendation === "hold" ? "recommended" : ""}"><div><span>Baseline</span><strong>Hold transfer</strong><small>${baselinePercentile == null ? "rating withheld" : `${Math.round(baselinePercentile)}th percentile · ${baselineRating.display_label}`}</small></div><div><span>3-GW xPts</span><strong>${points(state.transfers.baseline_cumulative_xpts)}</strong></div></article>${suggestions.map((row, index) => `<article class="transfer-card ${index === 0 && state.transfers.recommendation === "transfer" ? "recommended" : ""}">
     <div class="transfer-move"><span>${index === 0 ? "Best retained move" : `Alternative ${index + 1}`}</span><strong>${row.out.name} <i>→</i> ${row.in.name}</strong><small>${row.out.position} · bank ${money(row.remaining_bank_tenths)}</small></div>
     <div><span>Net gain</span><strong class="${row.net_xpts_gain >= 0 ? "positive" : "negative"}">${row.net_xpts_gain >= 0 ? "+" : ""}${points(row.net_xpts_gain)}</strong><small>${row.hit_cost ? `includes −${row.hit_cost} hit` : "no hit"}</small></div>
   </article>`).join("")}`;
@@ -351,6 +379,7 @@ async function runLineups() {
   $("#refresh-lineup").disabled = true;
   try {
     state.lineups = await api("/api/recommend/lineups", { method: "POST", body: JSON.stringify(requestBody()) });
+    localStorage.setItem("touchline-last-squad-rating", JSON.stringify(state.lineups.squad_rating));
     renderWeekly();
     renderOutlook();
   } catch (error) {

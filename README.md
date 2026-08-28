@@ -889,16 +889,16 @@ This full percentile contract belongs to P3. P1 may ship raw per-Gameweek and cu
 confidence labels; until this contract passes, the UI should say `Model Preview` or `Model Score`,
 not `AI Score`.
 
-- [ ] Show raw optimized-XI-plus-captain xPts separately for GW, GW+1, and GW+2
-- [ ] Define one fixed, reproducible benchmark population of legal same-budget squads for each
+- [x] Show raw optimized-XI-plus-captain xPts separately for GW, GW+1, and GW+2
+- [x] Define one fixed, reproducible benchmark population of legal same-budget squads for each
       frozen release; do not min-max against whichever scenarios happen to be open in the UI
-- [ ] Define a per-Gameweek squad rating as a percentile against that release's benchmark
+- [x] Define a per-Gameweek squad rating as a percentile against that release's benchmark
       population
-- [ ] Define the overall three-Gameweek rating from cumulative optimized lineup xPts, not from the
+- [x] Define the overall three-Gameweek rating from cumulative optimized lineup xPts, not from the
       arithmetic mean of three rounded display ratings
-- [ ] Keep model strength, data confidence, projection uncertainty, and squad-rule health as
+- [x] Keep model strength, data confidence, projection uncertainty, and squad-rule health as
       separate fields and badges
-- [ ] Version the rating formula and persist benchmark identity, inputs, raw xPts, percentile, and
+- [x] Version the rating formula and persist benchmark identity, inputs, raw xPts, percentile, and
       explanation for reproducibility
 - [ ] Validate monotonicity, stability across reruns, provisional-to-final drift, and sensitivity
       to captaincy, bench structure, injuries, and fixture changes

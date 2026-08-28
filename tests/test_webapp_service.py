@@ -113,6 +113,16 @@ def test_web_bootstrap_and_lineups_use_latest_compatible_horizon(tmp_path: Path)
     assert len(result["lineups"]) == 3
     assert all(row["formation"] == "3-4-3" for row in result["lineups"])
     assert all(len(row["starters"]) == 11 for row in result["lineups"])
+    assert result["squad_rating"]["schema_version"] == "squad_rating_v1"
+    assert result["squad_rating"]["input"]["raw_cumulative_xpts"] == pytest.approx(
+        result["cumulative_xpts"]
+    )
+    assert result["squad_rating"]["input"]["squad_fpl_ids"] == sorted(fpl_ids)
+    assert len(result["squad_rating"]["input"]["optimized_decisions"]) == 3
+    # This deliberately tiny fixture has exactly one legal squad, below the
+    # production contract's minimum benchmark population.
+    assert result["squad_rating"]["available"] is False
+    assert result["squad_rating"]["model_strength"] is None
 
 
 def test_web_lineup_rejects_duplicate_squad_players(tmp_path: Path):

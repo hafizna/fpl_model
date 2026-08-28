@@ -95,6 +95,11 @@ def test_recommend_web_lineups_recomputes_from_an_override(tmp_path: Path):
     assert 8 in scenario_starters
     # Only GW2 was overridden -- GW3/GW4 must be untouched.
     assert scenario["lineups"][1]["total_xpts"] == baseline["lineups"][1]["total_xpts"]
+    assert (
+        scenario["squad_rating"]["benchmark"]["benchmark_id"]
+        == baseline["squad_rating"]["benchmark"]["benchmark_id"]
+    )
+    assert scenario["squad_rating"]["input"]["reviewed_scenario"] is True
 
 
 def test_recommend_web_transfers_recomputes_the_baseline_from_an_override(tmp_path: Path):
@@ -111,3 +116,7 @@ def test_recommend_web_transfers_recomputes_the_baseline_from_an_override(tmp_pa
     assert baseline["is_reviewed_scenario"] is False
     assert scenario["is_reviewed_scenario"] is True
     assert scenario["baseline_cumulative_xpts"] < baseline["baseline_cumulative_xpts"]
+    assert (
+        scenario["baseline_squad_rating"]["benchmark"]["benchmark_id"]
+        == baseline["baseline_squad_rating"]["benchmark"]["benchmark_id"]
+    )
