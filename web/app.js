@@ -19,6 +19,7 @@ const state = {
   lineups: null,
   transfers: null,
   alphaToken: sessionStorage.getItem("touchline-alpha-token"),
+  publicConfig: null,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -77,6 +78,46 @@ function showError(message) {
   const banner = $("#error-banner");
   banner.textContent = message;
   banner.hidden = !message;
+}
+
+function renderPublicConfig() {
+  const config = state.publicConfig;
+  if (!config) return;
+  const support = $("#support-link");
+  if (config.support_email) {
+    support.href = `mailto:${config.support_email}`;
+    support.hidden = false;
+  } else {
+    support.hidden = true;
+  }
+  $("#operator-label").textContent = config.operator_name
+    ? `Operated by ${config.operator_name}`
+    : "Operator details pending; not alpha-ready";
+}
+
+function renderDecisionReceipts() {
+  const bar = $("#decision-receipts");
+  const receipts = [
+    ["Weekly + outlook", state.lineups?.decision_receipt],
+    ["Transfers", state.transfers?.decision_receipt],
+  ].filter((row) => row[1]);
+  if (!receipts.length) {
+    bar.hidden = true;
+    bar.innerHTML = "";
+    return;
+  }
+  bar.hidden = false;
+  bar.innerHTML = `<strong>Decision receipts</strong>${receipts.map(([label, receipt]) => `<button class="button secondary" data-receipt-id="${receipt.decision_id}">${label} · ${receipt.decision_id.slice(-8)}</button>`).join("")}`;
+  bar.querySelectorAll("[data-receipt-id]").forEach((button) => button.addEventListener("click", () => {
+    const receipt = receipts.find((row) => row[1].decision_id === button.dataset.receiptId)?.[1];
+    if (!receipt) return;
+    const url = URL.createObjectURL(new Blob([JSON.stringify(receipt, null, 2)], { type: "application/json" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${receipt.decision_id}.json`;
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  }));
 }
 
 function playerById(id) {
@@ -162,6 +203,7 @@ function clearCurrentSetup() {
 
 function resetTransfersView() {
   state.transfers = null;
+  renderDecisionReceipts();
   const container = $("#transfer-results");
   container.className = "transfer-list empty-state";
   container.textContent = "Squad or scenario changed -- run the scan again to compare against the reviewed scenario.";
@@ -409,6 +451,7 @@ async function runLineups() {
     localStorage.setItem("touchline-last-squad-rating", JSON.stringify(state.lineups.squad_rating));
     renderWeekly();
     renderOutlook();
+    renderDecisionReceipts();
   } catch (error) {
     showError(error.message);
   } finally {
@@ -424,6 +467,7 @@ async function runTransfers() {
   try {
     state.transfers = await api("/api/recommend/transfers?top_n=8", { method: "POST", body: JSON.stringify(requestBody()) });
     renderTransfers();
+    renderDecisionReceipts();
   } catch (error) {
     showError(error.message);
   } finally {
@@ -473,6 +517,15 @@ async function loadWorkspace() {
   }
 }
 
+async function loadPublicConfig() {
+  try {
+    state.publicConfig = await api("/api/public-config");
+    renderPublicConfig();
+  } catch (error) {
+    showError(`Operator/support configuration unavailable: ${error.message}`);
+  }
+}
+
 async function submitAccessCode(event) {
   event.preventDefault();
   const code = $("#access-code").value.trim();
@@ -502,6 +555,7 @@ async function init() {
   $("#bank").addEventListener("change", runLineups);
   $("#free-transfers").addEventListener("change", resetTransfersView);
   $("#access-form").addEventListener("submit", submitAccessCode);
+  await loadPublicConfig();
   await loadWorkspace();
 }
 

@@ -42,6 +42,15 @@ def _use_release(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, **kwargs) -> N
     monkeypatch.setenv("FPL_DATABASE_PATH", str(tmp_path / "missing.duckdb"))
 
 
+def _configure_alpha_operations(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FPL_OPERATOR_NAME", "Touchline Test Operator")
+    monkeypatch.setenv("FPL_SUPPORT_EMAIL", "support@example.test")
+    monkeypatch.setenv("FPL_HOSTING_PROVIDER", "Test Host")
+    monkeypatch.setenv("FPL_HOSTING_REGION", "Indonesia")
+    monkeypatch.setenv("FPL_LOG_RETENTION_DAYS", "14")
+    monkeypatch.setenv("FPL_LEGAL_NOTICE_REVIEWED", "true")
+
+
 def _picks_payload(*, bank: int = 5, captain_fpl_id: int = 9, vice_fpl_id: int = 5) -> dict:
     pick_order = (1, 3, 4, 5, 8, 9, 10, 11, 12, 13, 14, 2, 6, 7, 15)
     return {
@@ -75,6 +84,42 @@ def test_health_reports_compact_release_mode(tmp_path: Path, monkeypatch: pytest
     assert payload["catalog_players"] == 15
     assert payload["alpha_access_enabled"] is False
     assert payload["alpha_rate_limit_scope"] is None
+    assert payload["alpha_operations_ready"] is False
+
+
+def test_public_config_exposes_operator_boundary_without_alpha_unlock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    _use_release(tmp_path, monkeypatch)
+    _configure_alpha_operations(monkeypatch)
+
+    response = client.get("/api/public-config")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ready"] is True
+    assert payload["operator_name"] == "Touchline Test Operator"
+    assert payload["support_email"] == "support@example.test"
+    assert payload["data_boundary"]["server_side_squad_storage"] is False
+
+
+def test_alpha_decisions_fail_closed_when_operator_privacy_boundary_is_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    _use_release(tmp_path, monkeypatch)
+    token = "alice-closed-alpha-code"
+    monkeypatch.setenv("FPL_REQUIRE_ALPHA_ACCESS", "true")
+    monkeypatch.setenv(
+        "FPL_ALPHA_ACCESS_TOKEN_HASHES", f"alice={hash_access_token(token)}"
+    )
+
+    ready = client.get("/api/ready")
+    bootstrap = client.get("/api/bootstrap", headers={TOKEN_HEADER: token})
+
+    assert ready.status_code == 503
+    assert "operator/privacy boundary" in ready.json()["detail"]
+    assert bootstrap.status_code == 503
+    assert "operator/privacy boundary" in bootstrap.json()["detail"]
 
 
 def test_alpha_gate_protects_decisions_but_not_monitoring(
@@ -82,6 +127,7 @@ def test_alpha_gate_protects_decisions_but_not_monitoring(
 ):
     _use_release(tmp_path, monkeypatch)
     token = "alice-closed-alpha-code"
+    _configure_alpha_operations(monkeypatch)
     monkeypatch.setenv("FPL_REQUIRE_ALPHA_ACCESS", "true")
     monkeypatch.setenv(
         "FPL_ALPHA_ACCESS_TOKEN_HASHES", f"alice={hash_access_token(token)}"
@@ -110,6 +156,7 @@ def test_required_alpha_gate_fails_readiness_when_no_codes_exist(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     _use_release(tmp_path, monkeypatch)
+    _configure_alpha_operations(monkeypatch)
     monkeypatch.setenv("FPL_REQUIRE_ALPHA_ACCESS", "true")
 
     ready = client.get("/api/ready")
@@ -126,6 +173,7 @@ def test_alpha_general_rate_limit_is_per_code(
     _use_release(tmp_path, monkeypatch)
     alice = "alice-closed-alpha-code"
     bob = "bob-closed-alpha-code-12"
+    _configure_alpha_operations(monkeypatch)
     monkeypatch.setenv(
         "FPL_ALPHA_ACCESS_TOKEN_HASHES",
         f"alice={hash_access_token(alice)},bob={hash_access_token(bob)}",
@@ -148,6 +196,7 @@ def test_alpha_transfer_scan_has_a_separate_stricter_limit(
 ):
     _use_release(tmp_path, monkeypatch)
     token = "alice-closed-alpha-code"
+    _configure_alpha_operations(monkeypatch)
     monkeypatch.setenv(
         "FPL_ALPHA_ACCESS_TOKEN_HASHES", f"alice={hash_access_token(token)}"
     )
@@ -416,6 +465,49 @@ def test_recommend_lineups_accepts_a_squad_resolved_from_an_entry(
     assert response.status_code == 200
     assert response.json()["horizon"] == [2, 3, 4]
     assert response.json()["lineups"][0]["current_setup_comparison"]["marginal_xpts"] == 10.0
+    receipt = response.json()["decision_receipt"]
+    assert receipt["decision_type"] == "lineup_outlook"
+    assert receipt["release_id"] == response.json()["release_id"]
+    assert receipt["server_persisted"] is False
+
+
+def test_decision_receipt_log_contains_no_squad_or_prices(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+):
+    _use_release(tmp_path, monkeypatch)
+    request = {
+        "fpl_ids": list(range(1, 16)),
+        "bank_tenths": 7,
+        "selling_prices": {str(fpl_id): 50 for fpl_id in range(1, 16)},
+    }
+
+    with caplog.at_level(logging.INFO, logger="fpl_model.web"):
+        response = client.post("/api/recommend/lineups", json=request)
+
+    assert response.status_code == 200
+    receipt_logs = [
+        record.message
+        for record in caplog.records
+        if '"event":"decision_receipt"' in record.message
+    ]
+    assert len(receipt_logs) == 1
+    assert response.json()["decision_receipt"]["decision_id"] in receipt_logs[0]
+    assert "fpl_ids" not in receipt_logs[0]
+    assert "selling_prices" not in receipt_logs[0]
+
+
+def test_legal_pages_are_public_static_surfaces():
+    privacy = client.get("/privacy")
+    terms = client.get("/terms")
+    script = client.get("/legal.js")
+
+    assert privacy.status_code == 200
+    assert "Pemberitahuan Privasi" in privacy.text
+    assert terms.status_code == 200
+    assert "Ketentuan Closed Alpha" in terms.text
+    assert script.status_code == 200
 
 
 def test_recommend_lineups_recomputes_from_a_role_scenario_override(

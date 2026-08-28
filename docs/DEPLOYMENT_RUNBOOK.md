@@ -58,6 +58,12 @@ store.
 | `FPL_ALPHA_ACCESS_TOKEN_HASHES` | omit | platform secret: `label=sha256,...` | yes |
 | `FPL_ALPHA_REQUESTS_PER_MINUTE` | `60` | start at `60` | no |
 | `FPL_ALPHA_TRANSFER_SCANS_PER_MINUTE` | `2` | start at `2` | no |
+| `FPL_OPERATOR_NAME` | omit | actual responsible operator/controller name | no (public) |
+| `FPL_SUPPORT_EMAIL` | omit | monitored privacy/support mailbox | no (public) |
+| `FPL_HOSTING_PROVIDER` | omit | actual provider displayed in notice | no (public) |
+| `FPL_HOSTING_REGION` | omit | actual processing/storage region | no (public) |
+| `FPL_LOG_RETENTION_DAYS` | omit | provider-enforced application-log retention, 1-365 | no |
+| `FPL_LEGAL_NOTICE_REVIEWED` | `false` | `true` only after operator/counsel review | no |
 
 The current stateless alpha has no application secret because it has no account system, payment
 provider, cron endpoint, or server-side manager database. Do not invent a shared frontend API key:
@@ -92,6 +98,22 @@ request returns HTTP 429 plus `Retry-After`; successful gated responses identify
 `X-RateLimit-Scope: process`. This is suitable only for a controlled single-instance alpha. It is
 not a distributed/global rate limiter: before public or horizontally scaled use, enforce limits in a
 shared gateway/store and replace tester codes with real authentication and entitlement.
+
+Alpha access being technically configured is not sufficient. When
+`FPL_REQUIRE_ALPHA_ACCESS=true`, both readiness and protected decision routes also require the actual
+operator name, monitored support/privacy email, hosting provider and region, bounded application-log
+retention, and `FPL_LEGAL_NOTICE_REVIEWED=true`. `/api/public-config`, `/privacy`, and `/terms` expose
+the non-secret values and versioned notices. Missing metadata fails closed; do not insert fictional
+defaults merely to pass readiness. The repository notice is a reviewed-data-flow draft, not legal
+advice or proof of compliance. Re-review it whenever hosting, logging, accounts, analytics, payments,
+or the data flow changes.
+
+Every successful lineup/outlook or transfer response includes a `decision_receipt_v1`. Its stable
+decision ID fingerprints the exact request and response against one immutable release and records
+the privacy/terms versions. The receipt deliberately contains no squad list, Team ID, selling price,
+or access code and is not persisted by the app server. The UI lets the tester download it; structured
+logs record only its ID, decision type, release ID/health, and non-persistence flag. Ask testers to
+include the decision ID—not private squad/access data—in support reports.
 
 ## Platform-neutral container path
 
@@ -208,6 +230,8 @@ Use a monitor outside Vercel so a Vercel-wide incident cannot report itself as h
   bodies, squad lists, or Team IDs.
 - Assert `alpha_access_required=true` and `alpha_access_enabled=true` for a closed-alpha deployment;
   never weaken the gate merely to make a failed readiness check green.
+- Assert `alpha_operations_ready=true`, record the privacy/terms versions, and confirm the public
+  operator/support/hosting/retention values match the reviewed notices.
 
 ## Cost limits
 

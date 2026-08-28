@@ -18,6 +18,7 @@
         <input id="access-code" type="password" minlength="16" maxlength="256" autocomplete="current-password" required />
         <button id="access-submit" class="button primary" type="submit">Open workspace</button>
         <p id="access-message" class="access-message" aria-live="polite"></p>
+        <p class="access-legal">Review the closed-alpha <a href="/terms" target="_blank" rel="noopener">terms</a> and <a href="/privacy" target="_blank" rel="noopener">privacy notice</a> before continuing.</p>
       </form>
     </section>
     <div class="app-shell">
@@ -40,6 +41,10 @@
           <p id="release-coverage"></p>
           <p id="release-freshness"></p>
         </div>
+        <footer class="legal-links">
+          <a href="/privacy">Privacy</a><a href="/terms">Terms</a><a id="support-link" href="#" hidden>Support</a>
+          <small id="operator-label"></small>
+        </footer>
       </aside>
 
       <main>
@@ -55,6 +60,7 @@
         </header>
 
         <div id="error-banner" class="error-banner" hidden></div>
+        <section id="decision-receipts" class="decision-receipts" hidden aria-live="polite"></section>
 
         <section class="workspace">
           <div class="content-column">

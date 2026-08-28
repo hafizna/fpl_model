@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Pemberitahuan privasi closed alpha Touchline." />
+    <title>Privasi — Touchline</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body data-legal-document="privacy">
+    <main class="legal-shell">
+      <header class="legal-header">
+        <a class="brand" href="/"><span class="brand-mark">T</span><span><strong>Touchline</strong><small>Decision Lab</small></span></a>
+        <div class="eyebrow">Closed alpha · <span data-version></span></div>
+        <h1>Pemberitahuan Privasi</h1>
+      </header>
+      <div id="legal-status" class="legal-status">Memuat konfigurasi operator…</div>
+      <article class="legal-content">
+        <p>Dokumen ini menjelaskan batas data pada closed alpha. Ini adalah artefak produk yang harus ditinjau penasihat hukum operator sebelum tester nyata diundang; keberadaannya sendiri bukan bukti kepatuhan hukum.</p>
+        <div class="legal-meta">
+          <span>Operator</span><strong data-operator></strong>
+          <span>Kontak privasi/support</span><a data-support></a>
+          <span>Hosting</span><strong><span data-host></span> · <span data-region></span></strong>
+          <span>Retensi log aplikasi</span><strong data-retention></strong>
+        </div>
+
+        <h2>Data yang diproses</h2>
+        <ul>
+          <li>Kode akses tester dikirim melalui header HTTPS. Plaintext disimpan hanya di <code>sessionStorage</code> browser; server dikonfigurasi dengan digest SHA-256.</li>
+          <li>FPL Team ID yang Anda masukkan dipakai untuk meminta squad publik dari API FPL. Aplikasi tidak menyimpan Team ID atau squad tersebut dalam database server.</li>
+          <li>Squad, estimasi selling price, susunan terakhir, dan rating terakhir disimpan di <code>localStorage</code> browser Anda dan dapat dihapus melalui pengaturan site data browser.</li>
+          <li>Log aplikasi memuat request ID acak, template route, metode, status, dan durasi. Log tidak memuat URL mentah, Team ID, request body, squad, atau kode akses.</li>
+          <li>Receipt rekomendasi memuat hash input/output, ID release, dan ID keputusan—bukan Team ID atau daftar squad. Receipt tidak dipersistenkan oleh server.</li>
+        </ul>
+
+        <h2>Tujuan dan pihak lain</h2>
+        <p>Data diproses untuk membuka akses alpha, mengambil squad publik yang Anda minta, menghitung rekomendasi, mencegah penyalahgunaan, dan mendiagnosis insiden. FPL menyediakan sumber squad publik; penyedia hosting yang tercantum di atas dapat memproses data jaringan dan log sesuai konfigurasi operator. Tidak ada akun, payment, iklan, analytics, atau cookie pemasaran pada build ini.</p>
+
+        <h2>Retensi, keamanan, dan pilihan Anda</h2>
+        <p>State squad berada di browser sampai Anda menghapus site data. Log aplikasi dipertahankan selama periode di atas. Tutup sesi/tab dan hapus site data untuk menghapus kode akses dan state lokal. Hubungi alamat support untuk permintaan akses, koreksi, pembatasan, atau penghapusan data yang mungkin dikuasai operator, serta untuk melaporkan insiden.</p>
+
+        <h2>Dasar regulasi dan perubahan</h2>
+        <p>Operator harus mengonfirmasi dasar pemrosesan, peran pengendali/prosesor, transfer lintas negara, prosedur hak subjek, dan respons insiden sebelum alpha nyata. Referensi utama adalah <a href="https://jdih.komdigi.go.id/produk_hukum/view/id/832/t/crc32/" target="_blank" rel="noopener">UU Nomor 27 Tahun 2022 tentang Pelindungan Data Pribadi</a>. Versi notice akan berubah bila data flow, hosting, analytics, account, atau payment berubah.</p>
+      </article>
+    </main>
+    <script src="/legal.js" defer></script>
+  </body>
+</html>

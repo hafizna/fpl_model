@@ -115,6 +115,12 @@ def gated_live_server(live_server, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv(
         "FPL_ALPHA_ACCESS_TOKEN_HASHES", f"browser={hash_access_token(token)}"
     )
+    monkeypatch.setenv("FPL_OPERATOR_NAME", "Touchline Test Operator")
+    monkeypatch.setenv("FPL_SUPPORT_EMAIL", "support@example.test")
+    monkeypatch.setenv("FPL_HOSTING_PROVIDER", "Test Host")
+    monkeypatch.setenv("FPL_HOSTING_REGION", "Indonesia")
+    monkeypatch.setenv("FPL_LOG_RETENTION_DAYS", "14")
+    monkeypatch.setenv("FPL_LEGAL_NOTICE_REVIEWED", "true")
     ALPHA_RATE_LIMITER.clear()
     try:
         yield live_server, token
@@ -197,6 +203,15 @@ def test_team_id_loads_a_squad_and_renders_a_weekly_lineup(live_server, browser)
         assert "changes vs your current setup" in marginal_text.lower()
         assert "+10.00 xPts" in marginal_text
         assert "Player 9 → Player 15" in marginal_text
+        assert page.locator("#decision-receipts [data-receipt-id]").count() == 1
+        assert "Decision receipts" in page.inner_text("#decision-receipts")
+        with page.expect_download() as download_info:
+            page.click("#decision-receipts [data-receipt-id]")
+        download = download_info.value
+        receipt = json.loads(Path(download.path()).read_text(encoding="utf-8"))
+        assert receipt["decision_id"] in download.suggested_filename
+        assert receipt["server_persisted"] is False
+        assert "fpl_ids" not in receipt
     finally:
         page.close()
 
@@ -260,11 +275,31 @@ def test_transfer_scan_labels_free_and_hit_modes_before_suggestions(live_server,
         assert "Free transfer available" in page.inner_text("#transfer-results .transfer-mode")
         assert "no hit" in page.inner_text("#transfer-results")
         assert "Model Preview" in page.inner_text("#transfer-results")
+        assert page.locator("#decision-receipts [data-receipt-id]").count() == 2
 
         page.select_option("#free-transfers", "0")
         page.click("#run-transfers")
         page.wait_for_selector("#transfer-results .transfer-mode.hit", timeout=30000)
         assert "Hit scenario" in page.inner_text("#transfer-results .transfer-mode")
         assert "4-point hit" in page.inner_text("#transfer-results .transfer-mode")
+    finally:
+        page.close()
+
+
+def test_public_legal_pages_render_reviewed_operator_metadata(gated_live_server, browser):
+    base_url, _token = gated_live_server
+    page = browser.new_page()
+    try:
+        page.goto(f"{base_url}/privacy", wait_until="networkidle", timeout=15000)
+        page.wait_for_selector("#legal-status.ready", timeout=5000)
+
+        assert "Touchline Test Operator" in page.inner_text(".legal-meta")
+        assert "support@example.test" in page.inner_text(".legal-meta")
+        assert "14 hari" in page.inner_text(".legal-meta")
+
+        page.goto(f"{base_url}/terms", wait_until="networkidle", timeout=15000)
+        page.wait_for_selector("#legal-status.ready", timeout=5000)
+        assert "Ketentuan Closed Alpha" in page.inner_text("h1")
+        assert "Touchline Test Operator" in page.inner_text(".legal-meta")
     finally:
         page.close()

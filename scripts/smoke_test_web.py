@@ -79,6 +79,8 @@ def check_web_runtime(
         raise ValueError("readiness and bootstrap catalog sizes differ or are empty")
     if ready.get("rating_benchmark_status") != "ready":
         raise ValueError("materialized squad-rating benchmark is not ready")
+    if ready.get("alpha_access_required") is True and ready.get("alpha_operations_ready") is not True:
+        raise ValueError("closed-alpha operator/privacy boundary is not ready")
 
     return {
         "contract": "web_runtime_smoke_v1",
@@ -89,6 +91,10 @@ def check_web_runtime(
         "horizon": horizon,
         "catalog_players": len(players),
         "rating_benchmark_id": ready.get("rating_benchmark_id"),
+        "alpha_access_required": ready.get("alpha_access_required", False),
+        "alpha_operations_ready": ready.get("alpha_operations_ready", False),
+        "privacy_notice_version": ready.get("privacy_notice_version"),
+        "terms_version": ready.get("terms_version"),
     }
 
 

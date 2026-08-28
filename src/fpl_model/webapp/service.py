@@ -1209,6 +1209,7 @@ def recommend_web_transfers(
         "is_reviewed_scenario": bool(role_scenario_overrides),
         "coverage": release_metadata.get("coverage"),
         "freshness": release_metadata.get("freshness"),
+        "horizon": [gameweek for gameweek, _ in horizon.model_runs],
         "baseline_cumulative_xpts": baseline_xpts,
         "baseline_squad_rating": baseline_rating,
         "baseline_lineups": baseline_lineups,

@@ -288,3 +288,15 @@ in the browser's `sessionStorage` for that session only. Decision/catalog routes
 protected requests and two transfer scans per minute by default), so this boundary is intentionally
 limited to a small single-instance alpha and is not presented as public authentication or global
 abuse protection.
+
+`/api/public-config`, `/privacy`, and `/terms` form the public closed-alpha operations boundary. A
+required alpha cannot serve protected decisions unless operator name, support email, host/region,
+log retention, and the explicit legal-review flag are configured. These pages describe the current
+no-account/no-payment/no-analytics data flow and link the official Indonesian PDP law; they still
+require review against the actual operator and chosen host before testers are invited.
+
+Each lineup/outlook and transfer response also carries `decision_receipt_v1`. The stable decision ID
+hashes the exact request/response and immutable release while the downloadable receipt exposes only
+hashes, release/horizon, notice versions, and non-persistence status—not the squad, Team ID, selling
+prices, or access code. This gives support a reproducible reference without creating a server-side
+manager-history database.

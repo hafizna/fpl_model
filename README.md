@@ -871,9 +871,13 @@ rank improvement, or a production-approved `AI Score`.
       ([x] controlled-alpha boundary only: individually labelled tester codes are checked against
       server-side SHA-256 digests, protected routes are rate-limited per code/process, the browser
       keeps the plaintext code in `sessionStorage` only, monitoring routes stay public, and required
-      access fails readiness closed when no codes exist. This is deliberately not checked as the
-      full item: accounts, global/distributed abuse protection, entitlement, legal/privacy flows,
-      support, deletion, and payment remain unbuilt)
+      access fails readiness closed when no codes exist. A versioned Indonesian privacy notice and
+      closed-alpha terms now expose configured operator/support/hosting/retention metadata; protected
+      decisions and readiness both fail closed until those fields plus an explicit legal-review flag
+      are present. This is deliberately not checked as the full item: counsel approval and actual
+      operator details are external gates, while accounts, global/distributed abuse protection,
+      entitlement, server-side rights-request workflow, payment, and consumer/refund terms remain
+      unbuilt)
 - [ ] Run a 10-20 user closed alpha across at least three deadlines; record conflicts,
       recommendation flips, failures, support load, and next-deadline return usage
 - [ ] Open a clearly labelled founder beta only after the alpha gates pass; payment validates
@@ -888,6 +892,12 @@ rank improvement, or a production-approved `AI Score`.
 - [ ] Complete the versioned percentile rating contract below; raw xPts remains visible
 - [ ] Complete operational sign-off for stale-data handling, incidents, rollback, privacy, support,
       and recommendation audit trails
+      ([x] repository-side recommendation receipt contract: every web lineup/outlook and transfer
+      response carries a stable `decision_receipt_v1` ID derived from the immutable release plus
+      exact input/output hashes, legal-notice versions, and a non-persistence statement. Only the
+      privacy-minimised receipt ID/type/release is logged; users can download the receipt in the UI.
+      [ ] real operational sign-off still needs a chosen host, configured log retention/support,
+      incident drill, reviewed legal notices, and alpha evidence across actual deadlines)
 - [ ] After retention is proven, resume multi-transfer/chip optimization, ownership/EO objectives,
       five-plus-GW branching plans, licensed enrichment, and editable non-minutes beliefs
 - [ ] Treat any LLM as a presentation or structured-input layer, never as the projection or

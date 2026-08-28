@@ -190,6 +190,7 @@ def _release_file(path: Path, *, player_one_xpts: float = 0.5) -> tuple[int, ...
     payload = {
         "schema_version": "fpl_web_release_v1",
         "release": {
+            "release_id": f"web_release_{path.stem}",
             "health": "shadow",
             "source_ingestion_run_id": path.stem,
             "model_version": "web_test_v1",

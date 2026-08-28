@@ -30,6 +30,7 @@ def test_environment_example_contains_no_secret_value():
     assert "FPL_ALLOWED_RELEASE_HEALTH=research,shadow,production" in example
     assert "FPL_TRANSFER_SCAN_ENABLED=true" in example
     assert "FPL_REQUIRE_ALPHA_ACCESS=false" in example
+    assert "FPL_LEGAL_NOTICE_REVIEWED=false" in example
     assert "FPL_ALPHA_ACCESS_TOKEN_HASHES=<tester-label>=<sha256>" in example
     assert "FPL_ALPHA_ACCESS_TOKEN=" not in example
     assert "CRON_SECRET=" not in example

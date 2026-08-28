@@ -23,6 +23,8 @@ from fpl_model.webapp.alpha_access import (
     AlphaAccessConfig,
     ProcessRateLimiter,
 )
+from fpl_model.webapp.alpha_operations import AlphaOperationsConfig
+from fpl_model.webapp.decision_receipt import attach_decision_receipt
 from fpl_model.webapp.service import (
     CurrentSquadSetup,
     RoleScenarioOverride,
@@ -154,6 +156,10 @@ def _alpha_access_config() -> AlphaAccessConfig:
     return AlphaAccessConfig.from_environment(os.environ)
 
 
+def _alpha_operations_config() -> AlphaOperationsConfig:
+    return AlphaOperationsConfig.from_environment(os.environ)
+
+
 def _protected_alpha_path(path: str) -> bool:
     return path == "/api/bootstrap" or path.startswith(("/api/squad/", "/api/recommend/"))
 
@@ -162,6 +168,38 @@ def _private_alpha_response(response):
     response.headers["Cache-Control"] = "private, no-store"
     response.headers["Vary"] = TOKEN_HEADER
     return response
+
+
+def _request_payload(request: SquadRequest) -> dict[str, object]:
+    return request.model_dump(mode="json")
+
+
+def _attach_and_log_receipt(
+    payload: dict[str, object],
+    *,
+    request: SquadRequest,
+    decision_type: str,
+) -> dict[str, object]:
+    result = attach_decision_receipt(
+        payload,
+        decision_type=decision_type,
+        request_payload=_request_payload(request),
+    )
+    receipt = result["decision_receipt"]
+    LOGGER.info(
+        json.dumps(
+            {
+                "event": "decision_receipt",
+                "decision_id": receipt["decision_id"],
+                "decision_type": receipt["decision_type"],
+                "release_id": receipt["release_id"],
+                "release_health": receipt["release_health"],
+                "server_persisted": False,
+            },
+            separators=(",", ":"),
+        )
+    )
+    return result
 
 
 @app.middleware("http")
@@ -182,6 +220,24 @@ async def alpha_access_control(request: Request, call_next):
                 },
             )
         )
+    if config.required:
+        try:
+            alpha_operations = _alpha_operations_config()
+        except ValueError:
+            LOGGER.exception("invalid closed-alpha operator/privacy configuration")
+            return _private_alpha_response(
+                JSONResponse(
+                    status_code=503,
+                    content={"detail": "closed-alpha operator/privacy boundary is unavailable"},
+                )
+            )
+        if not alpha_operations.ready:
+            return _private_alpha_response(
+                JSONResponse(
+                    status_code=503,
+                    content={"detail": "closed-alpha operator/privacy boundary is not ready"},
+                )
+            )
     if not config.enabled:
         if config.required:
             return _private_alpha_response(
@@ -311,8 +367,14 @@ def _readiness_payload() -> dict[str, object]:
     release = bootstrap_payload["release"]
     allowed_health = _allowed_release_health()
     alpha_access = _alpha_access_config()
+    alpha_operations = _alpha_operations_config()
     if alpha_access.required and not alpha_access.enabled:
         raise ValueError("closed-alpha access is required but no tester codes are configured")
+    if alpha_access.required and not alpha_operations.ready:
+        raise ValueError(
+            "closed-alpha operator/privacy boundary is not ready: "
+            + "; ".join(alpha_operations.problems)
+        )
     if release["health"] not in allowed_health:
         raise ValueError(
             f"release health {release['health']!r} is not allowed in this environment"
@@ -343,6 +405,9 @@ def _readiness_payload() -> dict[str, object]:
         "alpha_access_enabled": alpha_access.enabled,
         "alpha_access_required": alpha_access.required,
         "alpha_rate_limit_scope": "process" if alpha_access.enabled else None,
+        "alpha_operations_ready": alpha_operations.ready,
+        "privacy_notice_version": alpha_operations.public_payload()["privacy_notice_version"],
+        "terms_version": alpha_operations.public_payload()["terms_version"],
     }
 
 
@@ -362,6 +427,16 @@ def bootstrap() -> dict[str, object]:
     try:
         return _bootstrap()
     except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.get("/api/public-config")
+def public_config() -> dict[str, object]:
+    """Expose non-secret operator/legal metadata even before alpha unlock."""
+
+    try:
+        return _alpha_operations_config().public_payload()
+    except ValueError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
@@ -414,7 +489,7 @@ def squad_from_entry(entry_id: int, gameweek: int | None = None) -> dict[str, ob
 @app.post("/api/recommend/lineups")
 def lineups(request: SquadRequest) -> dict[str, object]:
     try:
-        return recommend_web_lineups(
+        payload = recommend_web_lineups(
             tuple(request.fpl_ids),
             bank_tenths=request.bank_tenths,
             free_transfers=request.free_transfers,
@@ -427,6 +502,11 @@ def lineups(request: SquadRequest) -> dict[str, object]:
             ),
             database_path=_database_path(),
             release_path=_release_path(),
+        )
+        return _attach_and_log_receipt(
+            payload,
+            request=request,
+            decision_type="lineup_outlook",
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -441,7 +521,7 @@ def transfers(request: SquadRequest, top_n: int = 8) -> dict[str, object]:
     if not transfer_scan_enabled:
         raise HTTPException(status_code=503, detail="transfer scan is disabled by the operator")
     try:
-        return recommend_web_transfers(
+        payload = recommend_web_transfers(
             tuple(request.fpl_ids),
             bank_tenths=request.bank_tenths,
             free_transfers=request.free_transfers,
@@ -453,6 +533,11 @@ def transfers(request: SquadRequest, top_n: int = 8) -> dict[str, object]:
             database_path=_database_path(),
             release_path=_release_path(),
         )
+        return _attach_and_log_receipt(
+            payload,
+            request=request,
+            decision_type="single_transfer_scan",
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -462,8 +547,18 @@ def index() -> FileResponse:
     return FileResponse(WEB_ROOT / "index.html")
 
 
+@app.get("/privacy")
+def privacy() -> FileResponse:
+    return FileResponse(WEB_ROOT / "privacy.html")
+
+
+@app.get("/terms")
+def terms() -> FileResponse:
+    return FileResponse(WEB_ROOT / "terms.html")
+
+
 @app.get("/{asset_name}")
 def static_asset(asset_name: str) -> FileResponse:
-    if asset_name not in {"app.js", "styles.css"}:
+    if asset_name not in {"app.js", "legal.js", "styles.css"}:
         raise HTTPException(status_code=404)
     return FileResponse(WEB_ROOT / asset_name)
