@@ -47,6 +47,8 @@ store.
 |---|---|---|---|
 | `FPL_WEB_RELEASE_PATH` | omit to use packaged release | omit to use packaged release | no |
 | `FPL_DATABASE_PATH` | omit | omit | no |
+| `FPL_WEB_HOST` | `127.0.0.1` | `0.0.0.0` for a container | no |
+| `FPL_WEB_PORT` / `PORT` | `8000` | platform-assigned port or `8000` | no |
 | `FPL_EXPOSE_API_DOCS` | `true` | `false` | no |
 | `FPL_LOG_LEVEL` | `INFO` | `INFO` | no |
 | `FPL_ALLOWED_RELEASE_HEALTH` | `research,shadow,production` | `shadow,production` for alpha; `production` when approved | no |
@@ -58,6 +60,40 @@ provider, cron endpoint, or server-side manager database. Do not invent a shared
 anything shipped to browser JavaScript is public. Authentication/entitlement and a global platform
 rate limit are required before opening transfer scans beyond a controlled alpha. A future cron
 endpoint must use a server-side `CRON_SECRET` of at least 16 random characters.
+
+## Platform-neutral container path
+
+`Dockerfile` is the portable web-runtime contract. It installs only the application and web
+dependencies, includes the immutable `web/release.json`, excludes raw/processed databases and
+development artifacts through `.dockerignore`, runs as the unprivileged `fpl` user, and checks
+`/api/ready` rather than treating process liveness as decision readiness.
+
+```powershell
+docker build -t fpl-model-web:local .
+docker run --rm --read-only --tmpfs /tmp -p 8000:8000 `
+  -e FPL_ALLOWED_RELEASE_HEALTH=shadow,production `
+  fpl-model-web:local
+```
+
+The image is stateless and supports a read-only root filesystem. A new projection release means
+building a new immutable image; do not mount a mutable database into the public web process. Hosts
+that inject `PORT` can run `python scripts/run_web_app.py` directly or override the image's default
+port 8000 without rebuilding it.
+
+After any local, preview, or production start, verify release identity and the complete runtime
+boundary with the same command:
+
+```powershell
+.venv\Scripts\python.exe scripts\smoke_test_web.py `
+  --base-url http://127.0.0.1:8000 `
+  --expected-release-id <EXPECTED_RELEASE_ID> `
+  --allowed-health shadow,production
+```
+
+`web_runtime_smoke_v1` fails unless liveness, readiness, and bootstrap agree on one release ID,
+health state, three-Gameweek horizon, non-empty catalog, and ready rating benchmark. This command is
+the provider-independent promotion check; provider-specific logs, rollback, and cost alarms remain
+additional external setup.
 
 ## Release and preview procedure
 
@@ -101,6 +137,9 @@ endpoint must use a server-side `CRON_SECRET` of at least 16 random characters.
    The ready response must show the expected `release_id`, three consecutive Gameweeks, a non-empty
    catalog, and the intended `shadow` or `production` health. For a closed alpha, `shadow` must
    remain visibly labelled; it must not be relabelled as production.
+
+   Run `scripts/smoke_test_web.py` against the preview URL as the portable equivalent of these
+   release-consistency assertions.
 
 5. Smoke-test Team ID loading, Weekly, Outlook, one free-transfer scan, and one hit scan in the
    preview UI. Then promote:

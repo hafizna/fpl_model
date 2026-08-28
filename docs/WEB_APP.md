@@ -269,5 +269,13 @@ external transactional manager-state store.
 - no authentication or multi-user manager storage;
 - no general multi-transfer or chip-aware optimization;
 - transfer search is one move, evaluated over the frozen three-Gameweek horizon;
-- no official percentile rating yet;
-- no scheduled weekly materialisation/deployment job (the deterministic manual command exists).
+- percentile rating is implemented and reproducible, but remains labelled `Model Preview` until
+  the underlying model release earns production approval;
+- no externally configured scheduled materialisation/deployment job (the deterministic worker and
+  platform-neutral container/runtime contracts exist).
+
+The web runtime can be started directly with `scripts/run_web_app.py` (`FPL_WEB_HOST`,
+`FPL_WEB_PORT`, or conventional `PORT`) or through the repository `Dockerfile`. Regardless of host,
+`scripts/smoke_test_web.py` is the release-aware promotion check; it verifies that liveness,
+readiness, bootstrap, catalog, horizon, and materialized rating benchmark all describe the same
+immutable release.

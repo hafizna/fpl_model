@@ -850,10 +850,13 @@ rank improvement, or a production-approved `AI Score`.
       bundle exclusions, security headers, real release readiness, cheap liveness, privacy-safe
       request IDs/logging, transfer-scan kill switch, and `docs/DEPLOYMENT_RUNBOOK.md` covering
       preview/promotion, environment variables, external monitoring, rollback, stateless backup,
-      and cost policy; [ ] external work still required: create/link the Vercel project, configure
-      preview/production environments and alerts, run a real preview smoke test, promote, and record
-      the known-good deployment/release IDs. The stateful refresh worker remains separately operable
-      and is the next checklist item rather than being hidden inside the web function)
+      and cost policy. The same app now also has a host-neutral, non-root OCI container contract,
+      conventional `PORT` support, release-aware container healthcheck, and
+      `web_runtime_smoke_v1` verifier, so VPS/Render/Railway/Fly/Cloud Run-style hosting remains an
+      option without changing application logic; [ ] external work still required: choose a host,
+      configure preview/production environments and alerts, run a real preview smoke test, promote,
+      and record the known-good deployment/release IDs. The stateful refresh worker remains
+      separately operable and is not hidden inside the web runtime)
 - [ ] Schedule and alert the complete snapshot-to-release refresh before every deadline
       ([x] platform-neutral worker contract: `scripts/run_deadline_refresh.py` wraps the existing
       full materialization with an exclusive lock, optional timestamped DuckDB backup, validation

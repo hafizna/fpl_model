@@ -24,6 +24,8 @@ def test_vercel_python_version_is_explicit_and_supported():
 def test_environment_example_contains_no_secret_value():
     example = (ROOT / ".env.example").read_text(encoding="utf-8")
 
+    assert "FPL_WEB_HOST=127.0.0.1" in example
+    assert "FPL_WEB_PORT=8000" in example
     assert "FPL_EXPOSE_API_DOCS=true" in example
     assert "FPL_ALLOWED_RELEASE_HEALTH=research,shadow,production" in example
     assert "FPL_TRANSFER_SCAN_ENABLED=true" in example
