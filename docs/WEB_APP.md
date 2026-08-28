@@ -44,7 +44,8 @@ Implemented surfaces:
 - a visible `sensitive`-recommendation warning naming the exact rotation-risk player(s) whose
   blanking would change the starting XI or captain;
 - opponent/fixture (with home/away), bench depth, and confidence (projection uncertainty) on the
-  three-Gameweek outlook.
+  three-Gameweek outlook;
+- an explicit whole-scan "free transfer" vs "hit scenario" banner on the transfers view.
 
 ### Fixtures, bench depth, and confidence
 
@@ -65,6 +66,18 @@ Note: `combine_appearance_probability` (`decision/lineup_store.py`) is shared ac
 sites and unpacks its input as a fixed 5-element tuple -- fixture/opponent data is deliberately kept
 in a separate `opponent_rows` structure in `load_horizon_catalog` rather than widening that shared
 tuple, which would have broken every other caller.
+
+### Free transfer vs hit scenario
+
+`recommend_web_transfers`'s `hit_cost` is uniform across one scan -- `0 if free_transfers >= 1 else
+4` -- computed once from the manager's current free-transfer count, not per suggestion, since this
+app does not evaluate "wait a Gameweek for a free transfer" as an alternative (see `docs/WEB_APP.md`'s
+own "Current limits": no multi-Gameweek transfer planning). "Keep hit scenarios explicitly separate"
+therefore means labelling the whole scan's mode clearly, not sorting individual cards -- the
+frontend shows a whole-scan banner above every suggestion: green "Free transfer available" when
+`suggestions[0].hit_cost == 0`, red "Hit scenario: ... costs a N-point hit" otherwise, so a manager
+understands the mode before reading any individual move. This is a frontend-only change; the
+backend already exposed `hit_cost` on every suggestion.
 
 ### Sensitive-decision state
 

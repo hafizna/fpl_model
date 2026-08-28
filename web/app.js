@@ -252,8 +252,17 @@ function renderTransfers() {
   const container = $("#transfer-results");
   if (!state.transfers) return;
   const suggestions = state.transfers.suggestions;
+  // hit_cost is uniform across one scan -- it comes entirely from the
+  // manager's current free-transfer count, not per-suggestion (this app
+  // does not evaluate "wait a Gameweek for a free transfer" as an
+  // alternative). A hit scenario is therefore an explicit, whole-scan mode,
+  // not something to sort per-card.
+  const isHitScenario = suggestions.length > 0 && suggestions[0].hit_cost > 0;
+  const modeBanner = suggestions.length === 0 ? "" : isHitScenario
+    ? `<div class="transfer-mode hit">Hit scenario: no free transfer is available, so every suggested move below costs a ${suggestions[0].hit_cost}-point hit. Net gain already accounts for it.</div>`
+    : `<div class="transfer-mode free">Free transfer available: every suggested move below costs no hit.</div>`;
   container.className = "transfer-list";
-  container.innerHTML = `<article class="transfer-card hold ${state.transfers.recommendation === "hold" ? "recommended" : ""}"><div><span>Baseline</span><strong>Hold transfer</strong></div><div><span>3-GW xPts</span><strong>${points(state.transfers.baseline_cumulative_xpts)}</strong></div></article>${suggestions.map((row, index) => `<article class="transfer-card ${index === 0 && state.transfers.recommendation === "transfer" ? "recommended" : ""}">
+  container.innerHTML = `${modeBanner}<article class="transfer-card hold ${state.transfers.recommendation === "hold" ? "recommended" : ""}"><div><span>Baseline</span><strong>Hold transfer</strong></div><div><span>3-GW xPts</span><strong>${points(state.transfers.baseline_cumulative_xpts)}</strong></div></article>${suggestions.map((row, index) => `<article class="transfer-card ${index === 0 && state.transfers.recommendation === "transfer" ? "recommended" : ""}">
     <div class="transfer-move"><span>${index === 0 ? "Best retained move" : `Alternative ${index + 1}`}</span><strong>${row.out.name} <i>→</i> ${row.in.name}</strong><small>${row.out.position} · bank ${money(row.remaining_bank_tenths)}</small></div>
     <div><span>Net gain</span><strong class="${row.net_xpts_gain >= 0 ? "positive" : "negative"}">${row.net_xpts_gain >= 0 ? "+" : ""}${points(row.net_xpts_gain)}</strong><small>${row.hit_cost ? `includes −${row.hit_cost} hit` : "no hit"}</small></div>
   </article>`).join("")}`;

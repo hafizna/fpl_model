@@ -122,6 +122,9 @@ h2 { margin: 4px 0 0; font-size: 19px; letter-spacing: -0.02em; }
 .table-row strong small { display: block; margin-top: 2px; color: var(--muted); font-size: 8px; }
 .table-row .small { color: var(--muted); font-size: 10px; overflow-wrap: anywhere; }
 .transfer-intro { margin-bottom: 14px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 11px; background: var(--panel); color: var(--muted); font-size: 11px; line-height: 1.5; }
+.transfer-mode { padding: 10px 14px; border-radius: 10px; font-size: 11px; line-height: 1.5; font-weight: 600; }
+.transfer-mode.free { border: 1px solid rgba(61,224,143,.35); background: rgba(61,224,143,.08); color: #cdf5e0; }
+.transfer-mode.hit { border: 1px solid rgba(255,123,114,.35); background: rgba(255,123,114,.08); color: #ffc1bc; }
 .transfer-list { display: grid; gap: 10px; }
 .empty-state { min-height: 180px; place-items: center; padding: 30px; border: 1px dashed var(--line); border-radius: 13px; color: var(--muted); text-align: center; font-size: 12px; }
 .transfer-card { padding: 16px 18px; display: grid; grid-template-columns: 1fr 120px; gap: 20px; align-items: center; border: 1px solid var(--line); border-radius: 13px; background: var(--panel); }

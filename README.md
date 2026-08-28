@@ -767,8 +767,20 @@ rank improvement, or a production-approved `AI Score`.
       bug. `combine_appearance_probability`'s shared 5-element tuple contract (used by three other
       decision modules) was deliberately left unchanged; fixture/opponent data is tracked in a
       separate structure rather than widening it)
-- [ ] Transfers: rank hold and validated single-transfer alternatives, show no-hit first, and keep
-      hit scenarios, multi-transfer, and chips explicitly separate
+- [x] Transfers: rank hold and validated single-transfer alternatives, show no-hit first, and keep
+      hit scenarios, multi-transfer, and chips explicitly separate (ranking hold + single-transfer
+      alternatives by net xPts gain, and multi-transfer/chip optimization staying entirely out of
+      scope, were already true pre-session -- `docs/WEB_APP.md`'s own "Current limits" already
+      named "no general multi-transfer or chip-aware optimization", so nothing to conflate there.
+      This session added the missing half: `hit_cost` is uniform across one scan -- it comes
+      entirely from the manager's current free-transfer count
+      (`webapp/service.py`'s `recommend_web_transfers`), not per suggestion, since this app does
+      not evaluate "wait a Gameweek for a free transfer" as an alternative -- so "keep hit
+      scenarios explicitly separate" means labelling the WHOLE scan's mode clearly rather than
+      sorting individual cards. Added a whole-scan mode banner: green "Free transfer available"
+      when `hit_cost == 0`, red "Hit scenario: ... costs a N-point hit" when it does not, shown
+      above every suggestion card so a manager understands the mode before reading any individual
+      move. Frontend-only change, verified live in both modes)
 - [x] Recompute all three menus from a reviewed role scenario without overwriting the base release
       (`webapp/service.py`'s `apply_role_scenario_overrides`, called from `POST
       /api/recommend/lineups`/`POST /api/recommend/transfers` via a new `role_scenario_overrides`
