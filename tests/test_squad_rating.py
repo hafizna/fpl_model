@@ -8,6 +8,7 @@ from fpl_model.decision.squad_rating import (
     SquadBenchmark,
     SquadBenchmarkRow,
     benchmark_from_materialized_artifact,
+    build_materialized_benchmark_artifact,
     build_squad_benchmark,
     empirical_percentile,
     rate_squad,
@@ -162,3 +163,161 @@ def test_materialized_master_selects_a_reproducible_exact_budget_population():
     stale["formula_version"] = "obsolete_formula"
     with pytest.raises(ValueError, match="formula version is incompatible"):
         benchmark_from_materialized_artifact(stale, budget_tenths=980)
+
+
+# --- Sprint 7 sign-off: monotonicity, rerun stability, and input sensitivity ---
+#
+# The existing tests above prove the percentile formula itself and reproducibility
+# of one `build_squad_benchmark`/`benchmark_from_materialized_artifact` call. These
+# close the remaining Sprint 7 bullet: a rating must never reward a strictly worse
+# squad, must be bit-for-bit stable when the exact same release is rated again, and
+# must move in the correct direction (never invert) as captaincy, bench structure,
+# injuries, or fixtures change the raw xPts feeding it.
+
+
+def test_rating_is_monotonic_in_raw_cumulative_xpts_on_a_fixed_benchmark():
+    """A strictly higher cumulative xPts must never score a strictly lower percentile.
+
+    This is the general property the tie-handling test above only spot-checks at
+    one pair of values: sweep a wide range of cumulative totals, including values
+    that collide with population rows, and assert percentile never decreases as
+    the input strictly increases.
+    """
+
+    benchmark = _benchmark()
+    totals = [round(140.0 + step * 0.37, 2) for step in range(120)]
+
+    percentiles = [
+        rate_squad(
+            benchmark,
+            raw_gameweek_xpts=(total / 3, total / 3, total / 3),
+            gameweek_uncertainty=(None, None, None),
+            quality_flags=(),
+            squad_rule_flags=(),
+            release_health="shadow",
+            reviewed_scenario=False,
+        )["model_strength"]["overall_3gw"]["percentile"]
+        for total in totals
+    ]
+
+    assert all(
+        later >= earlier for earlier, later in zip(percentiles, percentiles[1:], strict=False)
+    )
+    # And the sweep must actually discriminate somewhere, not just be flat/withheld.
+    assert percentiles[0] < percentiles[-1]
+
+
+def test_rating_is_stable_across_reruns_of_the_same_frozen_release():
+    """Rating the same release twice, from scratch, must reproduce identical output.
+
+    Exercises the real end-to-end path a release refresh and a web request each
+    take -- materialize once, then select/rate independently -- rather than only
+    the narrower `build_squad_benchmark`-vs-itself check above.
+    """
+
+    artifact = build_materialized_benchmark_artifact(
+        _pools(),
+        source_identity="rating_stability_test",
+        budget_anchors=(1_000,),
+        target_population_per_anchor=100,
+        max_attempts_per_anchor=2_000,
+    )
+    assert artifact["status"] == "ready"
+
+    def _rate() -> dict[str, object]:
+        benchmark = benchmark_from_materialized_artifact(artifact, budget_tenths=1_000)
+        return rate_squad(
+            benchmark,
+            raw_gameweek_xpts=(45.0, 46.0, 47.0),
+            gameweek_uncertainty=(1.5, 1.5, 1.5),
+            quality_flags=(),
+            squad_rule_flags=(),
+            release_health="production",
+            reviewed_scenario=False,
+        )
+
+    first = _rate()
+    second = _rate()
+
+    assert first == second
+    assert first["benchmark"]["benchmark_id"] == second["benchmark"]["benchmark_id"]
+
+
+@pytest.mark.parametrize(
+    "delta,expected",
+    [
+        (6.0, "not_worse"),  # a captaincy upgrade or bench-structure improvement
+        (-6.0, "not_better"),  # an injury or a fixture turning unfavourable
+    ],
+)
+def test_rating_moves_in_the_correct_direction_when_raw_xpts_are_perturbed(delta, expected):
+    """Sensitivity to captaincy/bench/injury/fixture changes must never invert.
+
+    A caller who swaps the captain armband, promotes a bench player into the XI,
+    or revises a projection down after an injury/unfavourable fixture change only
+    ever changes the raw Gameweek xPts fed into `rate_squad` -- the rating itself
+    has no separate knobs for those events. So the contract to prove here is: the
+    percentile moves in the same direction as the raw input, never the opposite.
+    """
+
+    benchmark = _benchmark()
+    baseline_total = 164.0
+
+    def _percentile(total: float) -> float:
+        result = rate_squad(
+            benchmark,
+            raw_gameweek_xpts=(total / 3, total / 3, total / 3),
+            gameweek_uncertainty=(None, None, None),
+            quality_flags=(),
+            squad_rule_flags=(),
+            release_health="production",
+            reviewed_scenario=True,
+        )
+        return result["model_strength"]["overall_3gw"]["percentile"]
+
+    before = _percentile(baseline_total)
+    after = _percentile(baseline_total + delta)
+
+    if expected == "not_worse":
+        assert after >= before
+    else:
+        assert after <= before
+
+
+def test_provisional_to_final_health_transition_never_changes_the_percentile():
+    """Release health (research/shadow/production) must stay orthogonal to the rating.
+
+    Sprint 7 requires checking drift as a release moves from provisional to final;
+    the explicit design contract (see the module docstring) is that release health
+    and data-quality flags never blend into the percentile itself -- only the
+    `display_label` and `release_gate.production_approved` fields change. Prove
+    that invariant directly so a future change cannot silently couple them.
+    """
+
+    benchmark = _benchmark()
+    raw = (55.0, 56.0, 57.0)
+
+    results = {
+        health: rate_squad(
+            benchmark,
+            raw_gameweek_xpts=raw,
+            gameweek_uncertainty=(None, None, None),
+            quality_flags=(),
+            squad_rule_flags=(),
+            release_health=health,
+            reviewed_scenario=False,
+        )
+        for health in ("research", "shadow", "production")
+    }
+
+    percentiles = {
+        health: result["model_strength"]["overall_3gw"]["percentile"]
+        for health, result in results.items()
+    }
+    assert len(set(percentiles.values())) == 1
+
+    assert results["production"]["display_label"] == "Model Score"
+    assert results["research"]["display_label"] == "Model Preview"
+    assert results["shadow"]["display_label"] == "Model Preview"
+    assert results["production"]["release_gate"]["production_approved"] is True
+    assert results["research"]["release_gate"]["production_approved"] is False

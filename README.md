@@ -924,8 +924,17 @@ not `AI Score`.
       £90m to £115m, 128 legal scored squads each. Runtime exact-budget selection is lookup-only;
       production readiness fails closed without it. `web_latency_contract_v1` enforces ≤3s cold,
       ≤1s repeated, stable raw xPts/benchmark identity, and no runtime population build)
-- [ ] Validate monotonicity, stability across reruns, provisional-to-final drift, and sensitivity
+- [x] Validate monotonicity, stability across reruns, provisional-to-final drift, and sensitivity
       to captaincy, bench structure, injuries, and fixture changes
+      (`tests/test_squad_rating.py`: a 120-point sweep of cumulative xPts against one fixed
+      benchmark proves the percentile is non-decreasing in its input and actually discriminates;
+      rating the same materialized artifact twice end-to-end -- `build_materialized_benchmark_
+      artifact` -> `benchmark_from_materialized_artifact` -> `rate_squad` -- reproduces an
+      identical payload; a captaincy/bench-upgrade-style +6 xPts perturbation never scores worse
+      and an injury/unfavourable-fixture-style -6 xPts perturbation never scores better, since
+      those events only ever reach the rating as a raw-xPts change; and research/shadow/production
+      health is proven orthogonal to the percentile itself, changing only `display_label` and
+      `release_gate.production_approved`)
 - [x] Rating sign-off: values are comparable across all three menus and never conceal a failed
       projection-release or decision-policy gate
       (Weekly, Outlook, and Transfers consume the same versioned response; real-browser E2E checks
