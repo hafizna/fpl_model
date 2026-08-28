@@ -61,6 +61,28 @@ multiply an already expensive scan. `export_web_release.py` must be re-run whene
 rebuilt for this to stay current; a release built before this feature existed simply has no
 `role_state` field and the frontend banner stays hidden rather than erroring.
 
+### Freshness and coverage
+
+`build_web_release` stores the full `orchestrate_release_validation` freshness report (per-Gameweek
+snapshot age, fixture finality, `is_final`) as `release.freshness`, and a player-level coverage
+count as `release.coverage`:
+
+- `total_registered_players`: every player in the official snapshot this release's source ingestion
+  run captured;
+- `fully_covered_players`: how many of them have a projection in EVERY Gameweek of the release's
+  three-Gameweek horizon;
+- `excluded_missing_projection`: registered players absent from the release's catalog entirely (no
+  projection for any horizon Gameweek);
+- `excluded_partial_horizon_coverage`: players present in the catalog but missing one specific
+  Gameweek's projection (a postponed or blank fixture) -- these are excluded from the release rather
+  than shipped with a hole, since `load_release_catalog`'s read side requires every catalog player
+  to carry every horizon Gameweek.
+
+`webapp/service.py` threads both through `load_web_bootstrap`/`recommend_web_lineups`/
+`recommend_web_transfers` as `coverage`/`freshness` (`None` in database-connected mode, which has no
+precomputed freshness/coverage gate). The sidebar release card renders a compact summary, e.g.
+"594/612 players covered" and "0/3 GW final".
+
 ### Loading a squad by Team ID
 
 `GET /api/squad/from-entry/{entry_id}?gameweek=N` fetches live from FPL's public

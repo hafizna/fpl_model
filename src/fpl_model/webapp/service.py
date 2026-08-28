@@ -305,13 +305,29 @@ def _load_web_inputs(
     dict[int, dict[int, PlayerGameweekProjection]],
     str,
     str | None,
+    dict[str, Any] | None,
 ]:
+    """Return ``(horizon, catalog, projections, health, release_id, release_metadata)``.
+
+    ``release_metadata`` (``coverage``/``freshness``, see
+    `release_export.build_web_release`) is only computed at export time into
+    the compact release JSON -- it is ``None`` in database-connected mode,
+    which is for local research/dev use and does not carry the same
+    immutable-release freshness/coverage guarantee a shipped release does.
+    """
     if release_path is not None:
-        return load_release_catalog(release_path)
+        horizon, catalog, projections, health, release_id = load_release_catalog(release_path)
+        payload = json.loads(Path(release_path).read_text(encoding="utf-8"))
+        release_metadata = {
+            key: payload["release"][key]
+            for key in ("coverage", "freshness")
+            if key in payload["release"]
+        }
+        return horizon, catalog, projections, health, release_id, release_metadata or None
     with duckdb.connect(str(database_path), read_only=True) as connection:
         horizon = resolve_research_horizon(connection)
         catalog, projections = load_horizon_catalog(connection, horizon)
-    return horizon, catalog, projections, "research", None
+    return horizon, catalog, projections, "research", None, None
 
 
 def load_web_bootstrap(
@@ -319,10 +335,11 @@ def load_web_bootstrap(
     *,
     release_path: str | Path | None = None,
 ) -> dict[str, Any]:
-    horizon, catalog, _, health, release_id = _load_web_inputs(
+    horizon, catalog, _, health, release_id, release_metadata = _load_web_inputs(
         database_path=database_path,
         release_path=release_path,
     )
+    release_metadata = release_metadata or {}
     return {
         "release": {
             "health": health,
@@ -335,6 +352,8 @@ def load_web_bootstrap(
                 {"gameweek": gameweek, "model_run_id": run_id}
                 for gameweek, run_id in horizon.model_runs
             ],
+            "coverage": release_metadata.get("coverage"),
+            "freshness": release_metadata.get("freshness"),
         },
         "players": sorted(
             catalog.values(),
@@ -379,7 +398,7 @@ def resolve_entry_picks(
     # contract before re-multiplying by ten internally).
     bank_tenths = int(entry_history["bank"])
 
-    _, catalog, _, _, _ = _load_web_inputs(
+    _, catalog, _, _, _, _ = _load_web_inputs(
         database_path=database_path,
         release_path=release_path,
     )
@@ -553,7 +572,7 @@ def recommend_web_lineups(
     database_path: str | Path = DEFAULT_DATABASE_PATH,
     release_path: str | Path | None = None,
 ) -> dict[str, Any]:
-    horizon, catalog, projections, health, release_id = _load_web_inputs(
+    horizon, catalog, projections, health, release_id, release_metadata = _load_web_inputs(
         database_path=database_path,
         release_path=release_path,
     )
@@ -568,9 +587,12 @@ def recommend_web_lineups(
         _lineup_payload(squad, projections[gameweek], gameweek, catalog=catalog)
         for gameweek, _ in horizon.model_runs
     ]
+    release_metadata = release_metadata or {}
     return {
         "health": health,
         "release_id": release_id,
+        "coverage": release_metadata.get("coverage"),
+        "freshness": release_metadata.get("freshness"),
         "horizon": [gameweek for gameweek, _ in horizon.model_runs],
         "lineups": lineups,
         "cumulative_xpts": sum(row["total_xpts"] for row in lineups),
@@ -589,7 +611,7 @@ def recommend_web_transfers(
     release_path: str | Path | None = None,
 ) -> dict[str, Any]:
     selling_prices = {} if selling_prices is None else selling_prices
-    horizon, catalog, projections, health, release_id = _load_web_inputs(
+    horizon, catalog, projections, health, release_id, release_metadata = _load_web_inputs(
         database_path=database_path,
         release_path=release_path,
     )
@@ -654,9 +676,12 @@ def recommend_web_transfers(
     suggestions.sort(
         key=lambda row: (-row["net_xpts_gain"], -row["gross_xpts_gain"], row["in"]["name"])
     )
+    release_metadata = release_metadata or {}
     return {
         "health": health,
         "release_id": release_id,
+        "coverage": release_metadata.get("coverage"),
+        "freshness": release_metadata.get("freshness"),
         "baseline_cumulative_xpts": baseline_xpts,
         "baseline_lineups": baseline_lineups,
         "recommendation": "hold"

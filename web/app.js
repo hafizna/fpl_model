@@ -54,6 +54,21 @@ function renderRelease() {
   $("#release-meta").textContent = `${release.model_version} · ${new Date(release.planning_as_of).toLocaleString()}`;
   const gws = release.model_runs.map((row) => row.gameweek);
   $("#horizon-label").textContent = `GW${gws[0]}–GW${gws.at(-1)}`;
+
+  const coverage = release.coverage;
+  $("#release-coverage").textContent = coverage
+    ? `${coverage.fully_covered_players}/${coverage.total_registered_players} players covered`
+    : "";
+
+  const freshness = release.freshness;
+  if (freshness) {
+    const finalCount = freshness.gameweeks.filter((row) => row.fpl_finality?.is_final).length;
+    const summary = `${finalCount}/${freshness.gameweeks.length} GW final`;
+    $("#release-freshness").textContent = freshness.passes ? summary : `${summary} · ${freshness.problems.length} freshness issue(s)`;
+    $("#release-freshness").style.color = freshness.passes ? "" : "var(--red)";
+  } else {
+    $("#release-freshness").textContent = "";
+  }
 }
 
 function renderSquadEditor() {

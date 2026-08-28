@@ -163,3 +163,59 @@ def test_build_web_release_is_a_valid_signed_release(three_gameweek_release_db):
     assert export.release_id.startswith("web_release_")
     assert export.payload["release"]["start_gameweek"] == 1
     assert export.payload["release"]["end_gameweek"] == 3
+
+
+def test_build_web_release_reports_coverage_and_freshness(three_gameweek_release_db):
+    export = build_web_release(
+        model_run_ids=("model_gw1", "model_gw2", "model_gw3"),
+        database_path=three_gameweek_release_db,
+    )
+
+    coverage = export.payload["release"]["coverage"]
+    # Both fixture players (fpl_id 1 and 2) have a projection in all three
+    # horizon Gameweeks -- see _seed_one_gameweek's own player_fixture_projection
+    # rows, inserted once per Gameweek for both players.
+    assert coverage["total_registered_players"] == 2
+    assert coverage["fully_covered_players"] == 2
+    assert coverage["excluded_missing_projection"] == 0
+    assert coverage["excluded_partial_horizon_coverage"] == 0
+
+    freshness = export.payload["release"]["freshness"]
+    assert freshness["passes"] is True
+    assert freshness["problems"] == []
+    assert len(freshness["gameweeks"]) == 3
+
+
+def test_build_web_release_excludes_a_player_with_partial_horizon_coverage(
+    three_gameweek_release_db,
+):
+    """Regression case: a player projected in only 2 of 3 horizon Gameweeks
+    (a postponed or blank fixture in the third) must be excluded from the
+    release rather than crash the export or ship an incomplete entry
+    load_release_catalog's own read side would reject."""
+    with duckdb.connect(str(three_gameweek_release_db)) as connection:
+        connection.execute(
+            """
+            INSERT INTO player_snapshot (
+                ingestion_run_id, season, fpl_id, player_code, first_name,
+                second_name, web_name, team_id, fpl_position, price, fpl_status
+            ) VALUES ('official', '2026-27', 3, 1003, 'C', 'Partial', 'Partial', 1, 'FWD', 6.0, 'a');
+
+            -- Only GW1 and GW2 -- no GW3 row for player_code 1003 at all.
+            INSERT INTO player_fixture_projection VALUES
+                ('model_gw1', 1003, 101, 1, 2, TRUE, 0.9, 0.05, 85.0, 5.0, 0.0, 5.0, 0.5, '[]'),
+                ('model_gw2', 1003, 102, 1, 2, TRUE, 0.9, 0.05, 85.0, 5.0, 0.0, 5.0, 0.5, '[]');
+            """
+        )
+
+    export = build_web_release(
+        model_run_ids=("model_gw1", "model_gw2", "model_gw3"),
+        database_path=three_gameweek_release_db,
+    )
+
+    fpl_ids = {row["fpl_id"] for row in export.payload["players"]}
+    assert 3 not in fpl_ids
+    coverage = export.payload["release"]["coverage"]
+    assert coverage["total_registered_players"] == 3
+    assert coverage["fully_covered_players"] == 2
+    assert coverage["excluded_partial_horizon_coverage"] == 1

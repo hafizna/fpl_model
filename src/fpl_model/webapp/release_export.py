@@ -114,6 +114,25 @@ def build_web_release(
             )
 
         catalog, projections = load_horizon_catalog(connection, horizon)
+        # load_horizon_catalog adds a player as soon as they have a
+        # projection for AT LEAST one horizon Gameweek -- it does not
+        # guarantee every Gameweek (a postponed or blank fixture can leave
+        # one specific Gameweek unset for an otherwise-covered player).
+        # load_release_catalog's own read side requires every player in the
+        # release to carry every horizon Gameweek's projection, so such a
+        # partially-covered player is excluded here rather than shipped with
+        # a hole a reader would have to special-case -- this is the release's
+        # own player-level coverage gate, not merely a defensive check.
+        total_catalog_players = len(catalog)
+        horizon_gameweeks = tuple(gameweek for gameweek, _ in horizon.model_runs)
+        fully_covered_ids = {
+            fpl_id
+            for fpl_id in catalog
+            if all(fpl_id in projections[gameweek] for gameweek in horizon_gameweeks)
+        }
+        excluded_partial_coverage = sorted(set(catalog) - fully_covered_ids)
+        catalog = {fpl_id: catalog[fpl_id] for fpl_id in fully_covered_ids}
+
         all_fpl_ids = tuple(sorted(catalog))
         for gameweek, model_run_id in horizon.model_runs:
             transparency = load_player_transparency(
@@ -137,6 +156,17 @@ def build_web_release(
                     }
                 )
 
+        # Coverage: how many of this snapshot's registered players have a
+        # complete three-Gameweek projection in this release's catalog, out
+        # of every player the official snapshot knows about at all --
+        # distinct from excluded_partial_coverage above (a player IN the
+        # catalog missing one Gameweek), which counts players never in the
+        # catalog to begin with (no projection for any horizon Gameweek).
+        total_registered_players = connection.execute(
+            "SELECT count(*) FROM player_snapshot WHERE ingestion_run_id = ?",
+            [horizon.source_ingestion_run_id],
+        ).fetchone()[0]
+
     release = {
         "schema_version": "fpl_web_release_v1",
         "release": {
@@ -155,6 +185,15 @@ def build_web_release(
                 "passes": validation.passes,
                 "approval_status": validation.approval_status,
                 "manifest_id": validation.report["manifest"]["manifest_id"],
+            },
+            "freshness": validation.report["freshness"],
+            "coverage": {
+                "total_registered_players": int(total_registered_players),
+                "fully_covered_players": total_catalog_players - len(excluded_partial_coverage),
+                "excluded_missing_projection": (
+                    int(total_registered_players) - total_catalog_players
+                ),
+                "excluded_partial_horizon_coverage": len(excluded_partial_coverage),
             },
         },
         "players": sorted(

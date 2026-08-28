@@ -757,19 +757,28 @@ rank improvement, or a production-approved `AI Score`.
 - [ ] Transfers: rank hold and validated single-transfer alternatives, show no-hit first, and keep
       hit scenarios, multi-transfer, and chips explicitly separate
 - [ ] Recompute all three menus from a reviewed role scenario without overwriting the base release
-- [ ] Pin every response to an immutable release ID and expose status, capture time, freshness,
-      finality, coverage, and sensitive-decision state (`release_id`/`health` were already threaded
-      through every response before this session; capture time (`planning_as_of`) and status/label
-      were already surfaced in the sidebar release card. This session closed the sensitive-decision
-      half: `role_state` is now baked into `web/release.json` per player per Gameweek
-      (`webapp/release_export.py`, mirroring how `transparency` was already attached), and
-      `webapp/service.py`'s `_lineup_payload` computes `role_scenario_sensitivity` for the base
-      recommendation from it (deliberately baseline-only on the transfer-scan endpoint -- computing
-      it per candidate would multiply the cost of an already-expensive brute-force scan). Still
-      open: freshness/finality/coverage are not yet exposed as explicit UI-visible fields -- the
-      underlying `validation.passes`/`approval_status` data already exists in the release's own
-      `validation` block from `orchestrate_release_validation`, but the frontend does not render it
-      yet)
+- [x] Pin every response to an immutable release ID and expose status, capture time, freshness,
+      finality, coverage, and sensitive-decision state (`release_id`/`health` and capture time
+      (`planning_as_of`)/status label were already threaded through every response and surfaced in
+      the sidebar before this session. This session closed the remaining two halves:
+      - Sensitive-decision state: `role_state` is baked into `web/release.json` per player per
+        Gameweek (`webapp/release_export.py`, mirroring how `transparency` was already attached),
+        and `webapp/service.py`'s `_lineup_payload` computes `role_scenario_sensitivity` for the
+        base recommendation from it (deliberately baseline-only on the transfer-scan endpoint --
+        computing it per candidate would multiply the cost of an already-expensive brute-force
+        scan). The frontend shows an amber banner naming the exact rotation-risk player(s) driving
+        a `sensitive` label.
+      - Freshness/finality/coverage: `build_web_release` now stores the full
+        `orchestrate_release_validation` freshness report (per-Gameweek snapshot age, fixture
+        finality, `is_final`) and a new player-level coverage count (how many of the official
+        snapshot's registered players have a complete three-Gameweek projection in this release)
+        in the release payload; `webapp/service.py` threads both through `load_web_bootstrap`/
+        `recommend_web_lineups`/`recommend_web_transfers`, and the sidebar release card renders a
+        compact summary (e.g. "594/612 players covered", "0/3 GW final"). Along the way this found
+        and fixed a real pre-existing bug: a player with a projection in only some (not all) of the
+        three horizon Gameweeks -- a postponed or blank fixture -- would crash the release export
+        with a `KeyError`; such a player is now excluded from the release with a dedicated coverage
+        counter (`excluded_partial_horizon_coverage`) rather than crashing, with a regression test.)
 - [x] Add mobile-first interaction and end-to-end tests for Team ID to weekly decision without a CLI
       (`web/styles.css` mobile-first CSS -- `body { min-width: 1120px }` removed and replaced with
       `320px`; two new breakpoints at 860px and 480px collapse the sidebar into a horizontal
