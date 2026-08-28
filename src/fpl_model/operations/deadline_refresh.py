@@ -235,6 +235,7 @@ def run_deadline_refresh(
             stage = "publish"
             _atomic_write(config.web_release_output, _json_bytes(exported.payload))
             finished_at = now()
+            rating_benchmark = exported.payload.get("release", {}).get("rating_benchmark")
             report = {
                 "schema_version": "deadline_refresh_status_v1",
                 "run_id": run_id,
@@ -247,6 +248,16 @@ def run_deadline_refresh(
                 "previous_release_id": previous_release_id,
                 "release_id": exported.release_id,
                 "release_health": exported.health,
+                "rating_benchmark_id": (
+                    None
+                    if not isinstance(rating_benchmark, dict)
+                    else rating_benchmark.get("artifact_id")
+                ),
+                "rating_benchmark_status": (
+                    None
+                    if not isinstance(rating_benchmark, dict)
+                    else rating_benchmark.get("status")
+                ),
                 "model_run_ids": list(materialized.model_run_ids),
                 "web_release_output": str(config.web_release_output),
                 "materialization_report_output": str(config.materialization_report_output),
@@ -284,6 +295,8 @@ def run_deadline_refresh(
                 "previous_release_id",
                 "release_id",
                 "release_health",
+                "rating_benchmark_id",
+                "rating_benchmark_status",
                 "error",
             )
             if key in report

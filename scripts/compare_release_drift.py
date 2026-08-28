@@ -18,6 +18,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--free-transfers", type=int, default=1)
     parser.add_argument("--xpts-threshold", type=float, default=0.25)
     parser.add_argument("--appearance-threshold", type=float, default=0.05)
+    parser.add_argument("--skip-transfers", action="store_true")
     parser.add_argument("--output", type=Path)
     return parser.parse_args()
 
@@ -32,6 +33,7 @@ def main() -> None:
         free_transfers=args.free_transfers,
         xpts_threshold=args.xpts_threshold,
         appearance_threshold=args.appearance_threshold,
+        include_transfer_scan=not args.skip_transfers,
     )
     output = json.dumps(result.report, indent=2, sort_keys=True) + "\n"
     if args.output is not None:

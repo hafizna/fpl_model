@@ -10,6 +10,7 @@ earlier test's stale bootstrap.
 
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 
@@ -19,7 +20,7 @@ from fastapi.testclient import TestClient
 
 from api.index import _allowed_release_health, _bootstrap, app
 from fpl_model.ingest.fpl import FPLClient
-from tests.test_webapp_service import _release_file
+from tests.test_webapp_service import _ready_rating_artifact, _release_file
 
 client = TestClient(app)
 
@@ -108,6 +109,42 @@ def test_readiness_fails_closed_when_release_health_is_not_allowed(
 
     assert response.status_code == 503
     assert "release health 'shadow' is not allowed" in response.json()["detail"]
+
+
+def test_production_readiness_requires_materialized_rating_benchmark(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    release_path = tmp_path / "production.json"
+    _release_file(release_path)
+    payload = json.loads(release_path.read_text(encoding="utf-8"))
+    payload["release"]["health"] = "production"
+    release_path.write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setenv("FPL_WEB_RELEASE_PATH", str(release_path))
+    monkeypatch.setenv("FPL_DATABASE_PATH", str(tmp_path / "missing.duckdb"))
+
+    response = client.get("/api/ready")
+
+    assert response.status_code == 503
+    assert "materialized squad benchmark" in response.json()["detail"]
+
+
+def test_production_readiness_exposes_materialized_benchmark_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    release_path = tmp_path / "production.json"
+    _release_file(release_path)
+    payload = json.loads(release_path.read_text(encoding="utf-8"))
+    payload["release"]["health"] = "production"
+    payload["release"]["rating_benchmark"] = _ready_rating_artifact()
+    release_path.write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setenv("FPL_WEB_RELEASE_PATH", str(release_path))
+    monkeypatch.setenv("FPL_DATABASE_PATH", str(tmp_path / "missing.duckdb"))
+
+    response = client.get("/api/ready")
+
+    assert response.status_code == 200
+    assert response.json()["rating_benchmark_status"] == "ready"
+    assert response.json()["rating_benchmark_id"] == "squad_benchmark_master_test"
 
 
 def test_vercel_default_never_allows_a_research_release(monkeypatch: pytest.MonkeyPatch):

@@ -211,6 +211,13 @@ def _readiness_payload() -> dict[str, object]:
         raise ValueError(
             f"release health {release['health']!r} is not allowed in this environment"
         )
+    rating_benchmark = release.get("rating_benchmark")
+    if release["health"] == "production" and (
+        not isinstance(rating_benchmark, dict)
+        or rating_benchmark.get("status") != "ready"
+        or rating_benchmark.get("compatible") is not True
+    ):
+        raise ValueError("production release lacks a ready materialized squad benchmark")
     return {
         "ok": True,
         "ready": True,
@@ -221,6 +228,12 @@ def _readiness_payload() -> dict[str, object]:
         "horizon": [row["gameweek"] for row in release["model_runs"]],
         "catalog_players": len(bootstrap_payload["players"]),
         "database_exists": database_path.exists(),
+        "rating_benchmark_status": (
+            None if not isinstance(rating_benchmark, dict) else rating_benchmark.get("status")
+        ),
+        "rating_benchmark_id": (
+            None if not isinstance(rating_benchmark, dict) else rating_benchmark.get("artifact_id")
+        ),
     }
 
 

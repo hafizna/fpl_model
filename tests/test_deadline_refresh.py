@@ -61,7 +61,14 @@ def _exported() -> WebReleaseExport:
     return WebReleaseExport(
         payload={
             "schema_version": "fpl_web_release_v1",
-            "release": {"release_id": "web_release_new", "health": "shadow"},
+            "release": {
+                "release_id": "web_release_new",
+                "health": "shadow",
+                "rating_benchmark": {
+                    "artifact_id": "squad_benchmark_master_test",
+                    "status": "ready",
+                },
+            },
             "players": [],
         }
     )
@@ -102,6 +109,8 @@ def test_success_backs_up_database_and_atomically_publishes_release(tmp_path: Pa
     assert result.exit_code == 0
     assert result.report["previous_release_id"] == "web_release_previous"
     assert result.report["release_id"] == "web_release_new"
+    assert result.report["rating_benchmark_id"] == "squad_benchmark_master_test"
+    assert result.report["rating_benchmark_status"] == "ready"
     assert result.report["alert"] == {"status": "delivered", "http_status": 204}
     assert json.loads(config.web_release_output.read_text(encoding="utf-8"))["release"][
         "release_id"

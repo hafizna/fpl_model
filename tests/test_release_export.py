@@ -163,6 +163,10 @@ def test_build_web_release_is_a_valid_signed_release(three_gameweek_release_db):
     assert export.release_id.startswith("web_release_")
     assert export.payload["release"]["start_gameweek"] == 1
     assert export.payload["release"]["end_gameweek"] == 3
+    rating_benchmark = export.payload["release"]["rating_benchmark"]
+    assert rating_benchmark["schema_version"] == "squad_benchmark_master_v1"
+    assert rating_benchmark["status"] == "unavailable"
+    assert rating_benchmark["population"] == []
 
 
 def test_build_web_release_reports_coverage_and_freshness(three_gameweek_release_db):

@@ -201,12 +201,33 @@ min/max of open browser scenarios:
 - fewer than 100 legal benchmark squads causes the percentile to be withheld while raw xPts stays
   available.
 
+`build_web_release` now materializes six reusable budget-anchor populations (£90m through £115m,
+128 squads each) into `release.rating_benchmark`. At request time the service selects a frozen
+128-squad population whose members are all legal under the manager's exact current-price budget
+cap. This removes lineup-population optimization from the request path. A legacy research/shadow
+release may temporarily fall back to an in-process runtime cache; a production release may not:
+`/api/ready` fails and the score is withheld unless the materialized artifact is `ready`.
+
 The full rating payload (benchmark identity and inputs, raw scores, percentile, and explanation)
 is returned by the lineup API and retained only as `touchline-last-squad-rating` in browser local
 storage. This follows the app's existing privacy boundary: no manager-specific rating is written
 to the server. The same baseline rating is returned by Transfers, and Weekly uses the matching
 first-Gameweek percentile. `release_drift_v1` records percentile and benchmark-identity changes
 when a manager squad is supplied for provisional-to-final comparisons.
+
+Validate the request-path contract before promotion:
+
+```powershell
+.venv\Scripts\python.exe scripts\check_web_latency.py `
+  --release web\release.json `
+  --fpl-id <repeat exactly 15 times> `
+  --output outputs\web_latency_report.json
+```
+
+`web_latency_contract_v1` requires a stable materialized benchmark, stable raw xPts, an available
+rating, cold decision latency no more than 3 seconds, and the repeated/cached decision no more than
+1 second. It stores no Team ID and only records squad size, timings, release/benchmark identities,
+and pass/fail checks.
 
 ## Vercel boundary
 

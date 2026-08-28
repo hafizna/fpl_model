@@ -52,6 +52,7 @@ def compare_web_releases(
     selling_prices: dict[int, int] | None = None,
     xpts_threshold: float = 0.25,
     appearance_threshold: float = 0.05,
+    include_transfer_scan: bool = True,
 ) -> ReleaseDriftResult:
     """Report material player and optional manager-decision changes."""
 
@@ -145,33 +146,37 @@ def compare_web_releases(
                     "after_formation": after_row["formation"],
                 }
             )
-        before_transfers = recommend_web_transfers(
-            owned_fpl_ids,
-            bank_tenths=bank_tenths,
-            free_transfers=free_transfers,
-            selling_prices=selling_prices,
-            top_n=3,
-            release_path=before_path,
-        )
-        after_transfers = recommend_web_transfers(
-            owned_fpl_ids,
-            bank_tenths=bank_tenths,
-            free_transfers=free_transfers,
-            selling_prices=selling_prices,
-            top_n=3,
-            release_path=after_path,
-        )
-        before_top = _top_transfer(before_transfers)
-        after_top = _top_transfer(after_transfers)
-        transfer_changed = (
-            None
-            if before_top is None
-            else (before_top["out_fpl_id"], before_top["in_fpl_id"])
-        ) != (
-            None
-            if after_top is None
-            else (after_top["out_fpl_id"], after_top["in_fpl_id"])
-        )
+        before_top = None
+        after_top = None
+        transfer_changed = False
+        if include_transfer_scan:
+            before_transfers = recommend_web_transfers(
+                owned_fpl_ids,
+                bank_tenths=bank_tenths,
+                free_transfers=free_transfers,
+                selling_prices=selling_prices,
+                top_n=3,
+                release_path=before_path,
+            )
+            after_transfers = recommend_web_transfers(
+                owned_fpl_ids,
+                bank_tenths=bank_tenths,
+                free_transfers=free_transfers,
+                selling_prices=selling_prices,
+                top_n=3,
+                release_path=after_path,
+            )
+            before_top = _top_transfer(before_transfers)
+            after_top = _top_transfer(after_transfers)
+            transfer_changed = (
+                None
+                if before_top is None
+                else (before_top["out_fpl_id"], before_top["in_fpl_id"])
+            ) != (
+                None
+                if after_top is None
+                else (after_top["out_fpl_id"], after_top["in_fpl_id"])
+            )
         decision_changed = decision_changed or transfer_changed
         decisions.update(
             {
@@ -193,6 +198,7 @@ def compare_web_releases(
                     ),
                 },
                 "transfer": {
+                    "evaluated": include_transfer_scan,
                     "changed": transfer_changed,
                     "before": before_top,
                     "after": after_top,
@@ -217,6 +223,7 @@ def compare_web_releases(
         "thresholds": {
             "xpts": xpts_threshold,
             "appearance_probability": appearance_threshold,
+            "include_transfer_scan": include_transfer_scan,
         },
         "players": {
             "material_change_count": len(player_changes),

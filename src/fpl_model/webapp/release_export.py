@@ -10,6 +10,7 @@ from typing import Any
 
 import duckdb
 
+from fpl_model.decision.squad_rating import build_materialized_benchmark_artifact
 from fpl_model.storage import DEFAULT_DATABASE_PATH
 from fpl_model.validation.decision_transparency import (
     load_player_transparency,
@@ -21,6 +22,7 @@ from fpl_model.validation.role_state import load_role_states, role_state_report
 from fpl_model.webapp.service import (
     ResearchHorizon,
     load_horizon_catalog,
+    rating_pools_from_catalog,
     resolve_research_horizon,
 )
 
@@ -167,6 +169,22 @@ def build_web_release(
             [horizon.source_ingestion_run_id],
         ).fetchone()[0]
 
+    rating_source_inputs = {
+        "source_ingestion_run_id": horizon.source_ingestion_run_id,
+        "model_version": horizon.model_version,
+        "planning_as_of": horizon.planning_as_of,
+        "model_runs": list(horizon.model_runs),
+    }
+    rating_source_identity = (
+        f"rating_source_{hashlib.sha256(_canonical_json(rating_source_inputs)).hexdigest()[:16]}"
+    )
+    rating_benchmark = build_materialized_benchmark_artifact(
+        rating_pools_from_catalog(horizon, catalog, projections),
+        source_identity=rating_source_identity,
+    )
+    if require_production and rating_benchmark["status"] != "ready":
+        raise ValueError("production release requires a ready materialized rating benchmark")
+
     release = {
         "schema_version": "fpl_web_release_v1",
         "release": {
@@ -195,6 +213,7 @@ def build_web_release(
                 ),
                 "excluded_partial_horizon_coverage": len(excluded_partial_coverage),
             },
+            "rating_benchmark": rating_benchmark,
         },
         "players": sorted(
             catalog.values(),
@@ -205,4 +224,3 @@ def build_web_release(
     release["release"]["release_id"] = f"web_release_{digest[:16]}"
     release["release"]["content_sha256"] = digest
     return WebReleaseExport(payload=release)
-

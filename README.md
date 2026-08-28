@@ -857,7 +857,8 @@ rank improvement, or a production-approved `AI Score`.
 - [ ] Schedule and alert the complete snapshot-to-release refresh before every deadline
       ([x] platform-neutral worker contract: `scripts/run_deadline_refresh.py` wraps the existing
       full materialization with an exclusive lock, optional timestamped DuckDB backup, validation
-      fail-close, atomic `web/release.json` publication, `deadline_refresh_status_v1`, distinct
+      fail-close, release-time materialization of six reusable rating-budget anchors, atomic
+      `web/release.json` publication, `deadline_refresh_status_v1`, distinct
       pipeline/alert exit codes, and an environment-only generic alert webhook; failure-path tests
       prove the previous release is retained. [ ] external adapter still required: choose and
       configure Windows Task Scheduler, persistent CI runner, VPS timer, or managed job runner for
@@ -900,10 +901,17 @@ not `AI Score`.
       separate fields and badges
 - [x] Version the rating formula and persist benchmark identity, inputs, raw xPts, percentile, and
       explanation for reproducibility
+      (`squad_benchmark_master_v1` is now built during compact release export: six anchors from
+      £90m to £115m, 128 legal scored squads each. Runtime exact-budget selection is lookup-only;
+      production readiness fails closed without it. `web_latency_contract_v1` enforces ≤3s cold,
+      ≤1s repeated, stable raw xPts/benchmark identity, and no runtime population build)
 - [ ] Validate monotonicity, stability across reruns, provisional-to-final drift, and sensitivity
       to captaincy, bench structure, injuries, and fixture changes
-- [ ] Rating sign-off: values are comparable across all three menus and never conceal a failed
+- [x] Rating sign-off: values are comparable across all three menus and never conceal a failed
       projection-release or decision-policy gate
+      (Weekly, Outlook, and Transfers consume the same versioned response; real-browser E2E checks
+      the percentile label in all three menus. Production `/api/ready` and the rating response both
+      fail closed without a ready materialized benchmark, while release health remains separate)
 
 ### Sprint 8 — Application experience: three primary menus
 

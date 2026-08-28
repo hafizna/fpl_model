@@ -118,6 +118,8 @@ Use a monitor outside Vercel so a Vercel-wide incident cannot report itself as h
 
 - Request `/api/live` and `/api/ready` every five minutes. Alert after two consecutive failures.
 - Assert the expected release ID and horizon; HTTP 200 alone is insufficient.
+- Assert `rating_benchmark_status=ready` and record `rating_benchmark_id`; production readiness
+  fails closed when the benchmark is missing or stale.
 - Alert on any readiness 503, more than five HTTP 5xx responses in five minutes, or transfer-scan
   duration over 25 seconds.
 - Before every deadline, alert separately if the scheduled refresh did not publish the expected
@@ -133,6 +135,9 @@ not page views, dominate compute. Ten to twenty controlled alpha users are reaso
 are not yet an evidence-backed launch target.
 
 - Keep `maxDuration` at 30 seconds.
+- Run `scripts/check_web_latency.py` before promotion. The lineup/rating path must use
+  `release_artifact`, stay below 3 seconds cold and 1 second repeated, and return stable raw xPts
+  plus benchmark identity.
 - Use the transfer kill switch during abuse or unexpected latency.
 - Do not advertise a public transfer endpoint until authentication and platform-global rate limits
   exist.

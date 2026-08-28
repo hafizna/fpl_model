@@ -28,6 +28,8 @@ DEFAULT_BENCHMARK_POPULATION = 128
 DEFAULT_BENCHMARK_MAX_ATTEMPTS = 20_000
 DEFAULT_BENCHMARK_SPEND_BAND_TENTHS = 50
 MINIMUM_BENCHMARK_POPULATION = 100
+MATERIALIZED_BENCHMARK_SCHEMA_VERSION = "squad_benchmark_master_v1"
+DEFAULT_MATERIALIZED_BUDGET_ANCHORS = (900, 950, 1_000, 1_050, 1_100, 1_150)
 
 _POSITION_ORDER = ("FWD",) * 3 + ("MID",) * 5 + ("DEF",) * 5 + ("GK",) * 2
 
@@ -51,6 +53,7 @@ class SquadBenchmark:
     target_population: int
     max_attempts: int
     spend_band_tenths: int
+    materialization_mode: str = "runtime_cache"
 
     @property
     def population_size(self) -> int:
@@ -442,6 +445,173 @@ def build_squad_benchmark(
     )
 
 
+def build_materialized_benchmark_artifact(
+    pools: tuple[GameweekProjectionPool, ...],
+    *,
+    source_identity: str,
+    budget_anchors: tuple[int, ...] = DEFAULT_MATERIALIZED_BUDGET_ANCHORS,
+    target_population_per_anchor: int = DEFAULT_BENCHMARK_POPULATION,
+    max_attempts_per_anchor: int = DEFAULT_BENCHMARK_MAX_ATTEMPTS,
+    spend_band_tenths: int = DEFAULT_BENCHMARK_SPEND_BAND_TENTHS,
+) -> dict[str, object]:
+    """Materialize reusable scored squads during release refresh, not web requests."""
+
+    if not budget_anchors or tuple(sorted(set(budget_anchors))) != budget_anchors:
+        raise ValueError("materialized benchmark budget anchors must be unique and ascending")
+    rows_by_squad: dict[tuple[int, ...], SquadBenchmarkRow] = {}
+    anchor_reports: list[dict[str, object]] = []
+    problems: list[str] = []
+    eligible_player_count = 0
+    gameweeks = tuple(pool.gameweek for pool in pools)
+    for budget_tenths in budget_anchors:
+        try:
+            benchmark = build_squad_benchmark(
+                pools,
+                source_identity=source_identity,
+                budget_tenths=budget_tenths,
+                target_population=target_population_per_anchor,
+                max_attempts=max_attempts_per_anchor,
+                spend_band_tenths=spend_band_tenths,
+            )
+        except ValueError as error:
+            anchor_reports.append(
+                {
+                    "budget_tenths": budget_tenths,
+                    "population_size": 0,
+                    "status": "unavailable",
+                    "reason": str(error),
+                }
+            )
+            problems.append(f"budget {budget_tenths}: {error}")
+            continue
+        eligible_player_count = max(eligible_player_count, benchmark.eligible_player_count)
+        for row in benchmark.population:
+            rows_by_squad[row.fpl_ids] = row
+        anchor_status = "ready" if benchmark.is_eligible else "unavailable"
+        anchor_reports.append(
+            {
+                "budget_tenths": budget_tenths,
+                "population_size": benchmark.population_size,
+                "status": anchor_status,
+            }
+        )
+        if anchor_status != "ready":
+            problems.append(
+                f"budget {budget_tenths}: population {benchmark.population_size} is below "
+                f"minimum {MINIMUM_BENCHMARK_POPULATION}"
+            )
+
+    population = [
+        {
+            "fpl_ids": list(row.fpl_ids),
+            "squad_cost_tenths": row.squad_cost_tenths,
+            "gameweek_xpts": list(row.gameweek_xpts),
+            "cumulative_xpts": row.cumulative_xpts,
+        }
+        for _, row in sorted(rows_by_squad.items())
+    ]
+    ready_anchors = sum(row["status"] == "ready" for row in anchor_reports)
+    unsigned = {
+        "schema_version": MATERIALIZED_BENCHMARK_SCHEMA_VERSION,
+        "formula_version": RATING_FORMULA_VERSION,
+        "population_policy_version": BENCHMARK_POLICY_VERSION,
+        "source_identity": source_identity,
+        "status": "ready" if ready_anchors == len(budget_anchors) else "unavailable",
+        "gameweeks": list(gameweeks),
+        "budget_anchors_tenths": list(budget_anchors),
+        "target_population_per_anchor": target_population_per_anchor,
+        "minimum_runtime_population": MINIMUM_BENCHMARK_POPULATION,
+        "max_attempts_per_anchor": max_attempts_per_anchor,
+        "spend_band_tenths": spend_band_tenths,
+        "eligible_player_count": eligible_player_count,
+        "anchor_reports": anchor_reports,
+        "population": population,
+        "problems": problems,
+    }
+    return {
+        **unsigned,
+        "artifact_id": f"squad_benchmark_master_{_canonical_digest(unsigned)[:16]}",
+    }
+
+
+def benchmark_from_materialized_artifact(
+    artifact: dict[str, object], *, budget_tenths: int
+) -> SquadBenchmark:
+    """Select one exact-budget benchmark from a frozen master population."""
+
+    if artifact.get("schema_version") != MATERIALIZED_BENCHMARK_SCHEMA_VERSION:
+        raise ValueError("unsupported materialized squad benchmark schema")
+    if artifact.get("formula_version") != RATING_FORMULA_VERSION:
+        raise ValueError("materialized squad benchmark formula version is incompatible")
+    if artifact.get("population_policy_version") != BENCHMARK_POLICY_VERSION:
+        raise ValueError("materialized squad benchmark population policy is incompatible")
+    if artifact.get("status") != "ready":
+        raise ValueError("materialized squad benchmark is not ready")
+    if budget_tenths <= 0:
+        raise ValueError("benchmark budget must be positive")
+    raw_population = artifact.get("population")
+    if not isinstance(raw_population, list):
+        raise ValueError("materialized squad benchmark population is missing")
+    rows: list[SquadBenchmarkRow] = []
+    for raw in raw_population:
+        if not isinstance(raw, dict):
+            raise ValueError("materialized squad benchmark row must be an object")
+        cost = int(raw["squad_cost_tenths"])
+        if cost > budget_tenths:
+            continue
+        gameweek_xpts = tuple(float(value) for value in raw["gameweek_xpts"])
+        fpl_ids = tuple(int(value) for value in raw["fpl_ids"])
+        rows.append(
+            SquadBenchmarkRow(
+                squad_cost_tenths=cost,
+                gameweek_xpts=gameweek_xpts,
+                cumulative_xpts=float(raw["cumulative_xpts"]),
+                fpl_ids=fpl_ids,
+            )
+        )
+    spend_band_tenths = int(artifact["spend_band_tenths"])
+    target_population = int(artifact["target_population_per_anchor"])
+    rows.sort(
+        key=lambda row: (
+            row.squad_cost_tenths < budget_tenths - spend_band_tenths,
+            -row.squad_cost_tenths,
+            row.fpl_ids,
+        )
+    )
+    population = tuple(rows[:target_population])
+    source_identity = str(artifact["source_identity"])
+    gameweeks = tuple(int(value) for value in artifact["gameweeks"])
+    identity_inputs = {
+        "schema_version": RATING_SCHEMA_VERSION,
+        "formula_version": RATING_FORMULA_VERSION,
+        "population_policy_version": BENCHMARK_POLICY_VERSION,
+        "master_artifact_id": artifact.get("artifact_id"),
+        "source_identity": source_identity,
+        "budget_tenths": budget_tenths,
+        "population": [
+            {
+                "fpl_ids": row.fpl_ids,
+                "cost": row.squad_cost_tenths,
+                "gameweek_xpts": row.gameweek_xpts,
+                "cumulative_xpts": row.cumulative_xpts,
+            }
+            for row in population
+        ],
+    }
+    return SquadBenchmark(
+        benchmark_id=f"squad_benchmark_{_canonical_digest(identity_inputs)[:16]}",
+        source_identity=source_identity,
+        budget_tenths=budget_tenths,
+        gameweeks=gameweeks,
+        population=population,
+        eligible_player_count=int(artifact["eligible_player_count"]),
+        target_population=target_population,
+        max_attempts=int(artifact["max_attempts_per_anchor"]),
+        spend_band_tenths=spend_band_tenths,
+        materialization_mode="release_artifact",
+    )
+
+
 def rate_squad(
     benchmark: SquadBenchmark,
     *,
@@ -474,6 +644,7 @@ def rate_squad(
             "target_population": benchmark.target_population,
             "max_attempts": benchmark.max_attempts,
             "spend_band_tenths": benchmark.spend_band_tenths,
+            "materialization_mode": benchmark.materialization_mode,
         },
         "input": {
             "gameweeks": list(benchmark.gameweeks),

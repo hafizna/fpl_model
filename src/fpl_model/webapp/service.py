@@ -29,9 +29,12 @@ from fpl_model.decision.role_scenario_sensitivity import evaluate_role_scenario_
 from fpl_model.decision.rolling import GameweekProjectionPool
 from fpl_model.decision.squad import CHIP_NAMES, SquadPlayer, validate_squad
 from fpl_model.decision.squad_rating import (
+    BENCHMARK_POLICY_VERSION,
+    MATERIALIZED_BENCHMARK_SCHEMA_VERSION,
     RATING_FORMULA_VERSION,
     RATING_SCHEMA_VERSION,
     SquadBenchmark,
+    benchmark_from_materialized_artifact,
     build_squad_benchmark,
     rate_squad,
 )
@@ -446,7 +449,7 @@ def _load_web_inputs(
 ]:
     """Return ``(horizon, catalog, projections, health, release_id, release_metadata)``.
 
-    ``release_metadata`` (``coverage``/``freshness``, see
+    ``release_metadata`` (``coverage``/``freshness``/``rating_benchmark``, see
     `release_export.build_web_release`) is only computed at export time into
     the compact release JSON -- it is ``None`` in database-connected mode,
     which is for local research/dev use and does not carry the same
@@ -457,7 +460,7 @@ def _load_web_inputs(
         payload = json.loads(Path(release_path).read_text(encoding="utf-8"))
         release_metadata = {
             key: payload["release"][key]
-            for key in ("coverage", "freshness")
+            for key in ("coverage", "freshness", "rating_benchmark")
             if key in payload["release"]
         }
         return horizon, catalog, projections, health, release_id, release_metadata or None
@@ -477,6 +480,27 @@ def load_web_bootstrap(
         release_path=release_path,
     )
     release_metadata = release_metadata or {}
+    rating_benchmark = release_metadata.get("rating_benchmark")
+    rating_benchmark_summary = (
+        None
+        if not isinstance(rating_benchmark, dict)
+        else {
+            "schema_version": rating_benchmark.get("schema_version"),
+            "artifact_id": rating_benchmark.get("artifact_id"),
+            "status": rating_benchmark.get("status"),
+            "budget_anchors_tenths": rating_benchmark.get("budget_anchors_tenths"),
+            "minimum_runtime_population": rating_benchmark.get(
+                "minimum_runtime_population"
+            ),
+            "compatible": (
+                rating_benchmark.get("schema_version")
+                == MATERIALIZED_BENCHMARK_SCHEMA_VERSION
+                and rating_benchmark.get("formula_version") == RATING_FORMULA_VERSION
+                and rating_benchmark.get("population_policy_version")
+                == BENCHMARK_POLICY_VERSION
+            ),
+        }
+    )
     return {
         "release": {
             "health": health,
@@ -491,6 +515,7 @@ def load_web_bootstrap(
             ],
             "coverage": release_metadata.get("coverage"),
             "freshness": release_metadata.get("freshness"),
+            "rating_benchmark": rating_benchmark_summary,
         },
         "players": sorted(
             catalog.values(),
@@ -822,7 +847,7 @@ def _rating_source_identity(
     return f"local_horizon_{digest[:16]}"
 
 
-def _rating_pools(
+def rating_pools_from_catalog(
     horizon: ResearchHorizon,
     catalog: dict[int, dict[str, Any]],
     projections: dict[int, dict[int, PlayerGameweekProjection]],
@@ -930,6 +955,7 @@ def _squad_rating_payload(
     squad,
     lineups: list[dict[str, Any]],
     reviewed_scenario: bool,
+    materialized_artifact: dict[str, Any] | None,
 ) -> dict[str, Any]:
     source_identity = _rating_source_identity(
         horizon, catalog, base_projections, release_id
@@ -938,15 +964,27 @@ def _squad_rating_payload(
         sum(catalog[fpl_id]["price_tenths"] for fpl_id in fpl_ids) + bank_tenths
     )
     try:
-        cache_key = (source_identity, benchmark_budget_tenths)
-        benchmark = _SQUAD_BENCHMARK_CACHE.get(cache_key)
-        if benchmark is None:
-            benchmark = build_squad_benchmark(
-                _rating_pools(horizon, catalog, base_projections),
-                source_identity=source_identity,
+        if materialized_artifact is not None and materialized_artifact.get("status") == "ready":
+            benchmark = benchmark_from_materialized_artifact(
+                materialized_artifact,
                 budget_tenths=benchmark_budget_tenths,
             )
-            _SQUAD_BENCHMARK_CACHE[cache_key] = benchmark
+            if benchmark.gameweeks != tuple(gameweek for gameweek, _ in horizon.model_runs):
+                raise ValueError("materialized squad benchmark horizon is stale")
+        else:
+            if release_health == "production":
+                raise ValueError(
+                    "production release lacks a ready materialized squad benchmark"
+                )
+            cache_key = (source_identity, benchmark_budget_tenths)
+            benchmark = _SQUAD_BENCHMARK_CACHE.get(cache_key)
+            if benchmark is None:
+                benchmark = build_squad_benchmark(
+                    rating_pools_from_catalog(horizon, catalog, base_projections),
+                    source_identity=source_identity,
+                    budget_tenths=benchmark_budget_tenths,
+                )
+                _SQUAD_BENCHMARK_CACHE[cache_key] = benchmark
         rating = rate_squad(
             benchmark,
             raw_gameweek_xpts=tuple(row["total_xpts"] for row in lineups),
@@ -979,6 +1017,13 @@ def _squad_rating_payload(
         }
         for row in lineups
     ]
+    benchmark_mode = rating["benchmark"].get("materialization_mode")
+    rating["performance_contract"] = {
+        "cached_decision_target_ms": 1_000,
+        "benchmark_mode": benchmark_mode or "unavailable",
+        "cold_request_build_allowed": release_health != "production",
+        "passes": benchmark_mode == "release_artifact" or release_health != "production",
+    }
     return rating
 
 
@@ -997,6 +1042,7 @@ def recommend_web_lineups(
         database_path=database_path,
         release_path=release_path,
     )
+    release_metadata = release_metadata or {}
     # The benchmark always uses the frozen base release. Reviewed what-if
     # overrides may alter the submitted squad's score, but never move the
     # comparison population or redefine the scale.
@@ -1040,8 +1086,8 @@ def recommend_web_lineups(
         squad=squad,
         lineups=lineups,
         reviewed_scenario=bool(role_scenario_overrides),
+        materialized_artifact=release_metadata.get("rating_benchmark"),
     )
-    release_metadata = release_metadata or {}
     return {
         "health": health,
         "release_id": release_id,
@@ -1078,6 +1124,7 @@ def recommend_web_transfers(
         database_path=database_path,
         release_path=release_path,
     )
+    release_metadata = release_metadata or {}
     base_projections = projections
     projections = apply_role_scenario_overrides(
         base_projections, role_scenario_overrides, horizon=horizon
@@ -1109,6 +1156,7 @@ def recommend_web_transfers(
         squad=baseline_squad,
         lineups=baseline_lineups,
         reviewed_scenario=bool(role_scenario_overrides),
+        materialized_artifact=release_metadata.get("rating_benchmark"),
     )
     owned = set(fpl_ids)
     suggestions: list[dict[str, Any]] = []
@@ -1155,7 +1203,6 @@ def recommend_web_transfers(
     suggestions.sort(
         key=lambda row: (-row["net_xpts_gain"], -row["gross_xpts_gain"], row["in"]["name"])
     )
-    release_metadata = release_metadata or {}
     return {
         "health": health,
         "release_id": release_id,

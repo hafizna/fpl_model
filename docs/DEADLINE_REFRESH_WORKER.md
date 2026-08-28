@@ -14,10 +14,12 @@ DuckDB file, inspect its exit code, and retain the JSON artifacts.
 3. `materialize_inseason_release` fetches official data, builds the three-Gameweek horizon, attaches
    calibration/uncertainty, and runs the release gates.
 4. A failed materialization or validation never calls the compact exporter.
-5. The compact release is fully built beside the published file and moved into place atomically.
+5. Compact export also materializes the versioned squad-rating master benchmark. Production export
+   fails unless all budget anchors are ready; no user request is expected to build this population.
+6. The compact release is fully built beside the published file and moved into place atomically.
    Until that final replace, the previous `web/release.json` remains byte-for-byte unchanged.
-6. A machine-readable status file is written atomically on success or pipeline failure.
-7. An optional generic webhook receives a privacy-safe summary. Its URL comes only from an
+7. A machine-readable status file is written atomically on success or pipeline failure.
+8. An optional generic webhook receives a privacy-safe summary. Its URL comes only from an
    environment variable and is never written to status/log output.
 
 Immutable rows written to DuckDB before a later stage fails remain for diagnosis; no existing run
@@ -73,6 +75,7 @@ Status schema `deadline_refresh_status_v1` includes:
 - success/failure stage plus a concise error type/message;
 - previous and newly published release IDs;
 - release health and model-run lineage on success;
+- materialized rating-benchmark ID and readiness status;
 - backup/report/output paths;
 - alert status (`delivered`, `failed`, or `not_configured`).
 

@@ -25,7 +25,7 @@ from playwright.sync_api import sync_playwright
 
 from api.index import _bootstrap, app
 from fpl_model.ingest.fpl import FPLClient
-from tests.test_webapp_service import _release_file
+from tests.test_webapp_service import _ready_rating_artifact, _release_file
 
 
 def _free_port() -> int:
@@ -81,6 +81,7 @@ def live_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
                 },
             }
         )
+    payload["release"]["rating_benchmark"] = _ready_rating_artifact()
     release_path.write_text(json.dumps(payload), encoding="utf-8")
     monkeypatch.setenv("FPL_WEB_RELEASE_PATH", str(release_path))
     monkeypatch.setenv("FPL_DATABASE_PATH", str(tmp_path / "missing.duckdb"))
@@ -153,6 +154,7 @@ def test_team_id_loads_a_squad_and_renders_a_weekly_lineup(live_server, browser)
 
         summary_text = page.inner_text("#weekly-summary")
         assert "GW2 xPts" in summary_text
+        assert "pct" in summary_text
         marginal_text = page.inner_text("#marginal-changes")
         assert "changes vs your current setup" in marginal_text.lower()
         assert "+10.00 xPts" in marginal_text
@@ -178,6 +180,8 @@ def test_team_id_squad_flows_into_the_outlook_and_transfers_menus(live_server, b
         page.wait_for_selector("#outlook-total:not(.skeleton)", timeout=15000)
         outlook_text = page.inner_text("#outlook-total")
         assert "Projected horizon score" in outlook_text
+        assert "Model Preview" in outlook_text
+        assert "percentile" in outlook_text
 
         # Each of the 15 squad slots renders its own <select data-player-id="...">
         # with the currently-selected player as its team-chip label.
@@ -217,6 +221,7 @@ def test_transfer_scan_labels_free_and_hit_modes_before_suggestions(live_server,
         page.wait_for_selector("#transfer-results .transfer-mode.free", timeout=30000)
         assert "Free transfer available" in page.inner_text("#transfer-results .transfer-mode")
         assert "no hit" in page.inner_text("#transfer-results")
+        assert "Model Preview" in page.inner_text("#transfer-results")
 
         page.select_option("#free-transfers", "0")
         page.click("#run-transfers")
