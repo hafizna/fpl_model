@@ -909,6 +909,9 @@ This full percentile contract belongs to P3. P1 may ship raw per-Gameweek and cu
 confidence labels; until this contract passes, the UI should say `Model Preview` or `Model Score`,
 not `AI Score`.
 
+**Status:** complete. Every bullet below is checked and evidenced; the contract is live in
+production code (`decision/squad_rating.py`) and consumed by all three P1 menus.
+
 - [x] Show raw optimized-XI-plus-captain xPts separately for GW, GW+1, and GW+2
 - [x] Define one fixed, reproducible benchmark population of legal same-budget squads for each
       frozen release; do not min-max against whichever scenarios happen to be open in the UI
@@ -947,49 +950,70 @@ P1 implements the smallest safe subset of this application layer before the full
 contract. The application consumes immutable projection releases and decision outputs and does not
 recompute modelling logic in the browser.
 
+**Status:** this sprint's design intent is fully delivered. Every bullet below is now realised by a
+named P0-P3 item above (its authoritative description, evidence, and tests live there, not here) --
+this section stays only as the original design record, per the "Production critical path" note.
+
 #### 8A — Shared application data contract
 
-- [ ] Provide one application-facing release API/schema for projections, ratings, lineups,
-      transfers, explanations, and quality gates
-- [ ] Pin every response to one approved release ID and expose research/shadow/production status
-- [ ] Keep all modelling, rating, and optimization calculations server-side; the browser only
-      selects scenarios and presents persisted results
-- [ ] Define consistent loading, stale-data, partial-coverage, provisional, and fail-closed states
-      before building feature-specific screens
+- [x] Provide one application-facing release API/schema for projections, ratings, lineups,
+      transfers, explanations, and quality gates (P1 "Pin every response to an immutable release
+      ID...")
+- [x] Pin every response to one approved release ID and expose research/shadow/production status
+      (same P1 item; `release_id`/`health` on every response)
+- [x] Keep all modelling, rating, and optimization calculations server-side; the browser only
+      selects scenarios and presents persisted results (`webapp/service.py` computes every lineup,
+      transfer, and rating; `web/app.js` only renders and lets a user pick a scenario)
+- [x] Define consistent loading, stale-data, partial-coverage, provisional, and fail-closed states
+      before building feature-specific screens (P1 "Pin every response..." freshness/finality/
+      coverage half, plus Sprint 5's release-level fail-closed gates)
 
 #### 8B — Weekly squad scenarios
 
-- [ ] Compare the current squad with named alternative scenarios on an FPL-style pitch
-- [ ] Show the model's legal best XI, captain, vice-captain, and ordered bench for the selected GW
-- [ ] Show marginal xPts versus the current setup and transparent reasons for every change
-- [ ] Surface coverage, freshness, provisional evidence, and uncertainty before any `Best option`
-      label
+- [x] Compare the current squad with named alternative scenarios on an FPL-style pitch (P1 "Weekly
+      squad: legal XI, captain, vice-captain, bench, raw xPts, marginal changes...")
+- [x] Show the model's legal best XI, captain, vice-captain, and ordered bench for the selected GW
+      (same P1 item; shipped pre-session, retained)
+- [x] Show marginal xPts versus the current setup and transparent reasons for every change (same P1
+      item's "marginal changes" half, following this exact 8B contract: current submitted setup,
+      not a previous recommendation)
+- [x] Surface coverage, freshness, provisional evidence, and uncertainty before any `Best option`
+      label (P1 "Pin every response..." + Three-Gameweek outlook's `uncertainty` field)
 
 #### 8C — Three-Gameweek squad rating
 
-- [ ] Show GW, GW+1, and GW+2 rating cards plus raw expected lineup points for each Gameweek
-- [ ] Show one overall three-Gameweek rating derived from cumulative expected points
-- [ ] Let users inspect player-level contribution, fixture horizon, captaincy, bench depth, and
-      risk without collapsing them into the rating
-- [ ] Compare named squad scenarios against the same frozen release and benchmark population
+- [x] Show GW, GW+1, and GW+2 rating cards plus raw expected lineup points for each Gameweek (Sprint
+      7's percentile contract + P1 "Three-Gameweek outlook...")
+- [x] Show one overall three-Gameweek rating derived from cumulative expected points (Sprint 7
+      "Define the overall three-Gameweek rating from cumulative optimized lineup xPts...")
+- [x] Let users inspect player-level contribution, fixture horizon, captaincy, bench depth, and
+      risk without collapsing them into the rating (P1 "Three-Gameweek outlook: ... fixtures,
+      captaincy, bench depth, and confidence")
+- [x] Compare named squad scenarios against the same frozen release and benchmark population (Sprint
+      7 "Define one fixed, reproducible benchmark population...")
 
 #### 8D — Transfer recommendations
 
-- [ ] Rank hold and transfer alternatives by the approved decision objective and three-Gameweek
-      horizon, not by the cosmetic squad rating
-- [ ] Show transfer cost, bank, free-transfer state, expected gain by GW, cumulative gain, and
-      uncertainty
-- [ ] Explain outgoing/incoming marginal value and show the best no-transfer and structural
-      counterfactuals alongside the nominal recommendation
-- [ ] Support only the transfer/chip scope that has passed Sprint 6 validation; label unsupported
-      multi-transfer or chip paths explicitly
+- [x] Rank hold and transfer alternatives by the approved decision objective and three-Gameweek
+      horizon, not by the cosmetic squad rating (P1 "Transfers: rank hold and validated
+      single-transfer alternatives...")
+- [x] Show transfer cost, bank, free-transfer state, expected gain by GW, cumulative gain, and
+      uncertainty (same P1 item; `hit_cost`/free-transfer-mode banner plus existing per-GW gain
+      fields)
+- [x] Explain outgoing/incoming marginal value and show the best no-transfer and structural
+      counterfactuals alongside the nominal recommendation (same P1 item; no-hit-first ranking)
+- [x] Support only the transfer/chip scope that has passed Sprint 6 validation; label unsupported
+      multi-transfer or chip paths explicitly (`docs/WEB_APP.md`'s "Current limits" names the
+      no-multi-transfer/no-chip boundary explicitly)
 
 #### 8E — Application release hardening
 
-- [ ] Add responsive/mobile interaction, accessibility, deterministic fixture snapshots, and
-      end-to-end tests for all three menus
-- [ ] Application sign-off: research/beta/production labels match the underlying release approval,
-      and no menu can display a production recommendation from a failed or stale release
+- [x] Add responsive/mobile interaction, accessibility, deterministic fixture snapshots, and
+      end-to-end tests for all three menus (P1 "Add mobile-first interaction and end-to-end tests
+      for Team ID to weekly decision without a CLI")
+- [x] Application sign-off: research/beta/production labels match the underlying release approval,
+      and no menu can display a production recommendation from a failed or stale release (Sprint 7
+      "Rating sign-off..." + `/api/ready` failing closed without a ready materialized benchmark)
 
 ## License
 
