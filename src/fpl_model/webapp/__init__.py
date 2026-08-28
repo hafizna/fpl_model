@@ -2,6 +2,8 @@
 
 from fpl_model.webapp.service import (
     ResearchHorizon,
+    RoleScenarioOverride,
+    apply_role_scenario_overrides,
     load_release_catalog,
     load_web_bootstrap,
     recommend_web_lineups,
@@ -11,6 +13,8 @@ from fpl_model.webapp.service import (
 
 __all__ = [
     "ResearchHorizon",
+    "RoleScenarioOverride",
+    "apply_role_scenario_overrides",
     "load_release_catalog",
     "load_web_bootstrap",
     "recommend_web_lineups",

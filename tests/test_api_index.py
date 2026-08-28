@@ -198,3 +198,62 @@ def test_recommend_lineups_accepts_a_squad_resolved_from_an_entry(
 
     assert response.status_code == 200
     assert response.json()["horizon"] == [2, 3, 4]
+
+
+def test_recommend_lineups_recomputes_from_a_role_scenario_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    _use_release(tmp_path, monkeypatch)
+    fpl_ids = list(range(1, 16))
+
+    baseline = client.post(
+        "/api/recommend/lineups", json={"fpl_ids": fpl_ids}
+    ).json()
+    scenario = client.post(
+        "/api/recommend/lineups",
+        json={
+            "fpl_ids": fpl_ids,
+            "role_scenario_overrides": [{"fpl_id": 11, "gameweek": 2, "xpts": 0.0}],
+        },
+    ).json()
+
+    assert baseline["is_reviewed_scenario"] is False
+    assert scenario["is_reviewed_scenario"] is True
+    baseline_starters = {row["fpl_id"] for row in baseline["lineups"][0]["starters"]}
+    scenario_starters = {row["fpl_id"] for row in scenario["lineups"][0]["starters"]}
+    assert 11 in baseline_starters
+    assert 11 not in scenario_starters
+
+
+def test_recommend_lineups_rejects_an_out_of_horizon_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    _use_release(tmp_path, monkeypatch)
+
+    response = client.post(
+        "/api/recommend/lineups",
+        json={
+            "fpl_ids": list(range(1, 16)),
+            "role_scenario_overrides": [{"fpl_id": 11, "gameweek": 1, "xpts": 0.0}],
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_recommend_lineups_rejects_a_negative_override_xpts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    _use_release(tmp_path, monkeypatch)
+
+    response = client.post(
+        "/api/recommend/lineups",
+        json={
+            "fpl_ids": list(range(1, 16)),
+            "role_scenario_overrides": [{"fpl_id": 11, "gameweek": 2, "xpts": -1.0}],
+        },
+    )
+
+    # Rejected by Pydantic field validation (ge=0.0) before reaching the
+    # service layer, so this is a 422 from FastAPI's own request validation.
+    assert response.status_code == 422

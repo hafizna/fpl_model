@@ -756,7 +756,22 @@ rank improvement, or a production-approved `AI Score`.
       fixtures, captaincy, bench depth, and confidence; percentile rating is not an MVP blocker
 - [ ] Transfers: rank hold and validated single-transfer alternatives, show no-hit first, and keep
       hit scenarios, multi-transfer, and chips explicitly separate
-- [ ] Recompute all three menus from a reviewed role scenario without overwriting the base release
+- [x] Recompute all three menus from a reviewed role scenario without overwriting the base release
+      (`webapp/service.py`'s `apply_role_scenario_overrides`, called from `POST
+      /api/recommend/lineups`/`POST /api/recommend/transfers` via a new `role_scenario_overrides`
+      request field: `[{fpl_id, gameweek, xpts}]`. Scoped deliberately narrower than a full
+      appearance-scenario override -- the web app has no live re-projection pipeline to call per
+      request, so this replaces one already-projected xPts number rather than recomputing a
+      start/substitute/sixty-minute distribution. Returns a NEW projections mapping; the loaded
+      release/catalog is never mutated, verified by a dedicated test. Frontend: each rotation-risk
+      player named in a `sensitive` label gets a "Review: if NAME blanks" button; a green "Reviewed
+      scenario active" banner with a "Back to base release" control replaces the warning while
+      active. Weekly, 3-GW outlook, and transfers all recompute from the same `requestBody()`, so
+      one override point covers all three menus; stale transfer-scan results are visibly reset
+      (not just discarded in memory) whenever the scenario changes, since that endpoint is
+      user-triggered rather than automatic. Verified end-to-end with a real click-through:
+      GW2 xPts 119.00 -> 116.00 and 3-GW baseline 357.00 -> 354.00 after blanking one rotation-risk
+      player)
 - [x] Pin every response to an immutable release ID and expose status, capture time, freshness,
       finality, coverage, and sensitive-decision state (`release_id`/`health` and capture time
       (`planning_as_of`)/status label were already threaded through every response and surfaced in

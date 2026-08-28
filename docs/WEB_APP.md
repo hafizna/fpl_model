@@ -83,6 +83,32 @@ count as `release.coverage`:
 precomputed freshness/coverage gate). The sidebar release card renders a compact summary, e.g.
 "594/612 players covered" and "0/3 GW final".
 
+### Reviewed role-scenario overrides
+
+`POST /api/recommend/lineups`/`POST /api/recommend/transfers` accept an optional
+`role_scenario_overrides` list: `[{"fpl_id": ..., "gameweek": ..., "xpts": ...}]`. This is
+deliberately narrower than a full appearance-scenario override
+(`context/minutes.py`'s reviewed start/cameo distribution): the web app has no live re-projection
+pipeline to call from a request (projections are baked into the release at export time, and
+re-running the model is DB-only and expensive), so a reviewed scenario here can only replace one
+already-projected xPts number for one player in one Gameweek, not recompute it from a
+start/substitute/sixty-minute distribution.
+
+`webapp/service.py`'s `apply_role_scenario_overrides` returns a NEW projections mapping -- it never
+mutates the loaded release/catalog, so the base release stays exactly as published; only that one
+request's working copy differs. Every other field of the projection (uncertainty, appearance
+probability, quality flags) is left as the release's own original values, since this overrides a
+reviewed point estimate, not a new projection. A response built from at least one override sets
+`is_reviewed_scenario: true` and, on the lineups endpoint, an adjusted `method_note`.
+
+The frontend's sensitivity banner (see above) doubles as the entry point: each rotation-risk player
+named in a `sensitive` label gets a "Review: if NAME blanks" button that sets that player's xPts to
+0 for the current Gameweek and recomputes the weekly/outlook/transfer views from it. A green
+"Reviewed scenario active" banner replaces the warning while a scenario is active, with a "Back to
+base release" control that clears it. Stale transfer-scan results are invalidated (not just
+discarded in memory) whenever the scenario or free-transfer count changes, since `POST
+/api/recommend/transfers` is only re-run when the user explicitly re-scans.
+
 ### Loading a squad by Team ID
 
 `GET /api/squad/from-entry/{entry_id}?gameweek=N` fetches live from FPL's public

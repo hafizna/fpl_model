@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from fpl_model.ingest.fpl import FPLClient
 from fpl_model.storage import DEFAULT_DATABASE_PATH
 from fpl_model.webapp.service import (
+    RoleScenarioOverride,
     load_web_bootstrap,
     recommend_web_lineups,
     recommend_web_transfers,
@@ -36,11 +37,27 @@ def _release_path() -> Path | None:
     return candidate if candidate.is_file() else None
 
 
+class RoleScenarioOverrideRequest(BaseModel):
+    """One reviewed 'treat this player's this-Gameweek xPts as X' override.
+
+    See `webapp.service.RoleScenarioOverride`: applied entirely in memory
+    for one request, never written back to the release file or a database.
+    """
+
+    fpl_id: int = Field(gt=0)
+    gameweek: int = Field(ge=1, le=38)
+    xpts: float = Field(ge=0.0)
+
+    def to_override(self) -> RoleScenarioOverride:
+        return RoleScenarioOverride(fpl_id=self.fpl_id, gameweek=self.gameweek, xpts=self.xpts)
+
+
 class SquadRequest(BaseModel):
     fpl_ids: list[int] = Field(min_length=15, max_length=15)
     bank_tenths: int = Field(default=0, ge=0)
     free_transfers: int = Field(default=1, ge=0, le=5)
     selling_prices: dict[int, int] = Field(default_factory=dict)
+    role_scenario_overrides: list[RoleScenarioOverrideRequest] = Field(default_factory=list)
 
 
 app = FastAPI(
@@ -136,6 +153,9 @@ def lineups(request: SquadRequest) -> dict[str, object]:
             bank_tenths=request.bank_tenths,
             free_transfers=request.free_transfers,
             selling_prices=request.selling_prices,
+            role_scenario_overrides=tuple(
+                row.to_override() for row in request.role_scenario_overrides
+            ),
             database_path=_database_path(),
             release_path=_release_path(),
         )
@@ -151,6 +171,9 @@ def transfers(request: SquadRequest, top_n: int = 8) -> dict[str, object]:
             bank_tenths=request.bank_tenths,
             free_transfers=request.free_transfers,
             selling_prices=request.selling_prices,
+            role_scenario_overrides=tuple(
+                row.to_override() for row in request.role_scenario_overrides
+            ),
             top_n=max(1, min(top_n, 20)),
             database_path=_database_path(),
             release_path=_release_path(),

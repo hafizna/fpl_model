@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from math import sqrt
 from pathlib import Path
@@ -295,6 +295,69 @@ def load_release_catalog(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class RoleScenarioOverride:
+    """One reviewed 'treat this player's this-Gameweek xPts as X' override.
+
+    This is deliberately narrower than a full appearance-scenario override
+    (`context/minutes.py`): the web app has no live re-projection pipeline to
+    call (projections are baked into the release at export time, and
+    re-running the model is DB-only and expensive), so a reviewed scenario
+    here can only replace one already-projected number, not recompute it
+    from a start/substitute/sixty-minute distribution. It is applied
+    entirely in memory for one request; it never writes back to the release
+    file or any database.
+    """
+
+    fpl_id: int
+    gameweek: int
+    xpts: float
+
+    def __post_init__(self) -> None:
+        if self.fpl_id <= 0:
+            raise ValueError("fpl_id must be positive")
+        if not 1 <= self.gameweek <= 38:
+            raise ValueError("gameweek must be between 1 and 38")
+        if self.xpts < 0.0:
+            raise ValueError("xpts must be non-negative")
+
+
+def apply_role_scenario_overrides(
+    projections: dict[int, dict[int, PlayerGameweekProjection]],
+    overrides: tuple[RoleScenarioOverride, ...],
+    *,
+    horizon: ResearchHorizon,
+) -> dict[int, dict[int, PlayerGameweekProjection]]:
+    """Return a NEW projections mapping with each override's xPts applied.
+
+    Never mutates ``projections`` in place -- the base release/horizon a
+    request loaded stays exactly as it was; only this one request's working
+    copy changes. Every field of `PlayerGameweekProjection` other than
+    `expected_points` is left untouched (uncertainty, appearance
+    probability, and quality flags still describe the ORIGINAL projection,
+    since this is a reviewed points override, not a new projection run).
+    """
+    if not overrides:
+        return projections
+    horizon_gameweeks = {gameweek for gameweek, _ in horizon.model_runs}
+    result = {gameweek: dict(by_id) for gameweek, by_id in projections.items()}
+    for override in overrides:
+        if override.gameweek not in horizon_gameweeks:
+            raise ValueError(
+                f"override targets GW{override.gameweek}, outside this release's horizon "
+                f"{sorted(horizon_gameweeks)}"
+            )
+        existing = result[override.gameweek].get(override.fpl_id)
+        if existing is None:
+            raise ValueError(
+                f"fpl_id {override.fpl_id} has no GW{override.gameweek} projection to override"
+            )
+        result[override.gameweek][override.fpl_id] = replace(
+            existing, expected_points=override.xpts
+        )
+    return result
+
+
 def _load_web_inputs(
     *,
     database_path: str | Path,
@@ -569,12 +632,16 @@ def recommend_web_lineups(
     bank_tenths: int = 0,
     free_transfers: int = 1,
     selling_prices: dict[int, int] | None = None,
+    role_scenario_overrides: tuple[RoleScenarioOverride, ...] = (),
     database_path: str | Path = DEFAULT_DATABASE_PATH,
     release_path: str | Path | None = None,
 ) -> dict[str, Any]:
     horizon, catalog, projections, health, release_id, release_metadata = _load_web_inputs(
         database_path=database_path,
         release_path=release_path,
+    )
+    projections = apply_role_scenario_overrides(
+        projections, role_scenario_overrides, horizon=horizon
     )
     squad = _validated_web_squad(
         catalog,
@@ -591,12 +658,19 @@ def recommend_web_lineups(
     return {
         "health": health,
         "release_id": release_id,
+        "is_reviewed_scenario": bool(role_scenario_overrides),
         "coverage": release_metadata.get("coverage"),
         "freshness": release_metadata.get("freshness"),
         "horizon": [gameweek for gameweek, _ in horizon.model_runs],
         "lineups": lineups,
         "cumulative_xpts": sum(row["total_xpts"] for row in lineups),
-        "method_note": "Exhaustive legal XI and captain search over one frozen research horizon.",
+        "method_note": (
+            "Exhaustive legal XI and captain search over one frozen research horizon."
+            if not role_scenario_overrides
+            else "Exhaustive legal XI and captain search recomputed from one or more reviewed "
+            "xPts overrides over the same frozen research horizon. The underlying release is "
+            "unchanged; this is a what-if scenario, not a new projection run."
+        ),
     }
 
 
@@ -606,6 +680,7 @@ def recommend_web_transfers(
     bank_tenths: int = 0,
     free_transfers: int = 1,
     selling_prices: dict[int, int] | None = None,
+    role_scenario_overrides: tuple[RoleScenarioOverride, ...] = (),
     top_n: int = 8,
     database_path: str | Path = DEFAULT_DATABASE_PATH,
     release_path: str | Path | None = None,
@@ -614,6 +689,9 @@ def recommend_web_transfers(
     horizon, catalog, projections, health, release_id, release_metadata = _load_web_inputs(
         database_path=database_path,
         release_path=release_path,
+    )
+    projections = apply_role_scenario_overrides(
+        projections, role_scenario_overrides, horizon=horizon
     )
     baseline_squad = _validated_web_squad(
         catalog,
@@ -680,6 +758,7 @@ def recommend_web_transfers(
     return {
         "health": health,
         "release_id": release_id,
+        "is_reviewed_scenario": bool(role_scenario_overrides),
         "coverage": release_metadata.get("coverage"),
         "freshness": release_metadata.get("freshness"),
         "baseline_cumulative_xpts": baseline_xpts,

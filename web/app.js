@@ -10,6 +10,11 @@ const state = {
   selected: JSON.parse(localStorage.getItem("touchline-squad") || "null") || DEFAULT_SQUAD,
   sellingPrices: JSON.parse(localStorage.getItem("touchline-selling-prices") || "null") || {},
   sellingPriceIsEstimated: JSON.parse(localStorage.getItem("touchline-selling-estimated") || "false"),
+  // Reviewed role-scenario overrides: {fpl_id, gameweek, xpts}[]. Applied
+  // entirely client-side per request -- never persisted server-side or
+  // written back to the release, and NOT saved to localStorage (a scenario
+  // is deliberately a this-session-only what-if, not private squad state).
+  roleScenarioOverrides: [],
   lineups: null,
   transfers: null,
 };
@@ -25,6 +30,7 @@ function requestBody() {
     bank_tenths: Math.round(Number($("#bank").value || 0) * 10),
     free_transfers: Number($("#free-transfers").value),
     selling_prices: state.sellingPrices,
+    role_scenario_overrides: state.roleScenarioOverrides,
   };
 }
 
@@ -119,20 +125,64 @@ function playerCard(player, captainId, viceId) {
   </article>`;
 }
 
-function renderSensitivityBanner(sensitivity) {
+function resetTransfersView() {
+  state.transfers = null;
+  const container = $("#transfer-results");
+  container.className = "transfer-list empty-state";
+  container.textContent = "Squad or scenario changed -- run the scan again to compare against the reviewed scenario.";
+}
+
+async function applyBlankScenario(fplId, gameweek) {
+  state.roleScenarioOverrides = [
+    ...state.roleScenarioOverrides.filter(
+      (row) => !(row.fpl_id === fplId && row.gameweek === gameweek)
+    ),
+    { fpl_id: fplId, gameweek, xpts: 0.0 },
+  ];
+  resetTransfersView();
+  await runLineups();
+}
+
+async function clearRoleScenarioOverrides() {
+  state.roleScenarioOverrides = [];
+  resetTransfersView();
+  await runLineups();
+}
+
+function renderSensitivityBanner(sensitivity, gameweek) {
   const banner = $("#sensitivity-banner");
+  if (state.roleScenarioOverrides.length > 0) {
+    banner.hidden = false;
+    banner.className = "sensitivity-banner scenario-active";
+    const names = state.roleScenarioOverrides
+      .map((row) => playerById(row.fpl_id)?.name || `#${row.fpl_id}`)
+      .join(", ");
+    banner.innerHTML = `<strong>Reviewed scenario active.</strong> Assuming ${names} blanks. This does not change the underlying release -- it is a what-if, recomputed for this view only. <button type="button" id="clear-scenario" class="button secondary">Back to base release</button>`;
+    $("#clear-scenario").addEventListener("click", clearRoleScenarioOverrides);
+    return;
+  }
   if (!sensitivity || sensitivity.label !== "sensitive") {
     banner.hidden = true;
     banner.className = "";
     banner.innerHTML = "";
     return;
   }
-  const players = sensitivity.scenarios_that_change_the_recommendation
-    .map((row) => row.player_name)
-    .join(", ");
+  const flagged = sensitivity.scenarios_that_change_the_recommendation;
+  const players = flagged.map((row) => row.player_name).join(", ");
+  const buttons = flagged
+    .map(
+      (row) =>
+        `<button type="button" class="button secondary review-scenario" data-fpl-id="${row.fpl_id}" data-gameweek="${gameweek}">Review: if ${row.player_name} blanks</button>`
+    )
+    .join(" ");
   banner.hidden = false;
   banner.className = "sensitivity-banner";
-  banner.innerHTML = `<strong>Sensitive recommendation.</strong> This lineup depends on ${players || "a rotation-risk player"}'s involvement -- if they blank, the starting XI or captain would change. Review before treating this as an unconditional best option.`;
+  banner.innerHTML = `<strong>Sensitive recommendation.</strong> This lineup depends on ${players || "a rotation-risk player"}'s involvement -- if they blank, the starting XI or captain would change. ${buttons}`;
+  $$(".review-scenario").forEach((button) =>
+    button.addEventListener("click", () =>
+      applyBlankScenario(Number(button.dataset.fplId), Number(button.dataset.gameweek))
+    )
+  );
 }
 
 function renderWeekly() {
@@ -144,7 +194,7 @@ function renderWeekly() {
     <div><span>Formation</span><strong>${lineup.formation}</strong></div>
     <div><span>Captain</span><strong>${lineup.captain.name}</strong></div>
     <div><span>Autosub EV</span><strong>${points(lineup.expected_autosub_value)}</strong></div>`;
-  renderSensitivityBanner(lineup.role_scenario_sensitivity);
+  renderSensitivityBanner(lineup.role_scenario_sensitivity, lineup.gameweek);
   const rows = ["GK", "DEF", "MID", "FWD"].map((position) => {
     const players = lineup.starters.filter((player) => player.position === position);
     return `<div class="pitch-line ${position.toLowerCase()}">${players.map((player) => playerCard(player, lineup.captain.fpl_id, lineup.vice_captain.fpl_id)).join("")}</div>`;
@@ -255,7 +305,7 @@ async function init() {
   $("#load-team-id").addEventListener("click", loadFromTeamId);
   $("#team-id").addEventListener("keydown", (event) => { if (event.key === "Enter") loadFromTeamId(); });
   $("#bank").addEventListener("change", runLineups);
-  $("#free-transfers").addEventListener("change", () => { state.transfers = null; });
+  $("#free-transfers").addEventListener("change", resetTransfersView);
   try {
     state.bootstrap = await api("/api/bootstrap");
     if (state.selected.some((id) => !playerById(id))) {
