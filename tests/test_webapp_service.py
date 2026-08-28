@@ -47,7 +47,9 @@ def _database(path: Path) -> tuple[int, ...]:
             uncertainty DOUBLE,
             data_quality_flags VARCHAR,
             start_probability DOUBLE,
-            substitute_appearance_probability DOUBLE
+            substitute_appearance_probability DOUBLE,
+            opponent_team_id INTEGER,
+            is_home BOOLEAN
         );
         """
     )
@@ -75,14 +77,23 @@ def _database(path: Path) -> tuple[int, ...]:
     fpl_ids = tuple(range(1, 16))
     for fpl_id, position in zip(fpl_ids, positions, strict=True):
         team_id = ((fpl_id - 1) % 6) + 1
+        opponent_team_id = (team_id % 6) + 1  # a distinct team in the same 6-team pool
         connection.execute(
             "INSERT INTO player_snapshot VALUES (?, ?, ?, ?, ?, ?, ?, 'a')",
             [source_id, fpl_id, 10_000 + fpl_id, f"Player {fpl_id}", team_id, position, 5.0],
         )
         for gameweek in (2, 3, 4):
             connection.execute(
-                "INSERT INTO player_fixture_projection VALUES (?, ?, ?, ?, NULL, '[]', 0.9, 0.05)",
-                [f"run_gw{gameweek}", 10_000 + fpl_id, gameweek * 100 + fpl_id, fpl_id / 2],
+                "INSERT INTO player_fixture_projection VALUES "
+                "(?, ?, ?, ?, NULL, '[]', 0.9, 0.05, ?, ?)",
+                [
+                    f"run_gw{gameweek}",
+                    10_000 + fpl_id,
+                    gameweek * 100 + fpl_id,
+                    fpl_id / 2,
+                    opponent_team_id,
+                    fpl_id % 2 == 0,
+                ],
             )
     connection.close()
     return fpl_ids

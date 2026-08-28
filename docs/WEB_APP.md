@@ -42,7 +42,29 @@ Implemented surfaces:
 - every legal, affordable same-position single transfer rescored over the same horizon;
 - explicit `RESEARCH_ONLY`/`SHADOW`/`PRODUCTION` release status and pinned model-run metadata;
 - a visible `sensitive`-recommendation warning naming the exact rotation-risk player(s) whose
-  blanking would change the starting XI or captain.
+  blanking would change the starting XI or captain;
+- opponent/fixture (with home/away), bench depth, and confidence (projection uncertainty) on the
+  three-Gameweek outlook.
+
+### Fixtures, bench depth, and confidence
+
+`load_horizon_catalog`'s SQL query now also selects `player_fixture_projection.opponent_team_id`/
+`is_home` (joined a second time against `team_snapshot` for the opponent's short name), attaching a
+`fixtures: [{opponent_team_id, opponent, is_home}]` list to each player's own
+`gameweeks[gw]` entry -- a list rather than a single fixture, since a double Gameweek genuinely has
+more than one. This is threaded through `_player_payload` (now also carrying `uncertainty` from
+`PlayerGameweekProjection`, which already existed but was not previously surfaced) via a new
+`_fixtures_for_gameweek` helper, so every player object in a lineup/outlook response --
+captain, vice-captain, starters, bench -- carries its own Gameweek's fixture(s) and uncertainty. The
+outlook view renders the captain's fixture on each Gameweek card, a "Bench depth" line (summed bench
+xPts for that Gameweek), and a Fixtures/Confidence column in the player table (confidence shows `—`
+when uncertainty is `null`, which is the current production release's own shadow-stage state --
+calibrated uncertainty is not yet applied to production projections).
+
+Note: `combine_appearance_probability` (`decision/lineup_store.py`) is shared across four call
+sites and unpacks its input as a fixed 5-element tuple -- fixture/opponent data is deliberately kept
+in a separate `opponent_rows` structure in `load_horizon_catalog` rather than widening that shared
+tuple, which would have broken every other caller.
 
 ### Sensitive-decision state
 

@@ -752,8 +752,21 @@ rank improvement, or a production-approved `AI Score`.
       `role_scenario_sensitivity` returns `sensitive`, naming the exact rotation-risk player(s)
       driving it. Still open: "marginal changes" -- comparing this week's recommendation against a
       previous one -- is not built yet)
-- [ ] Three-Gameweek outlook: raw optimized-lineup xPts per GW and cumulative, player contribution,
+- [x] Three-Gameweek outlook: raw optimized-lineup xPts per GW and cumulative, player contribution,
       fixtures, captaincy, bench depth, and confidence; percentile rating is not an MVP blocker
+      (raw per-GW/cumulative xPts, player contribution table, and captaincy already shipped
+      pre-session. This session added the three still-missing fields: `load_horizon_catalog`'s SQL
+      now selects `opponent_team_id`/`is_home` from `player_fixture_projection` -- previously
+      selected nowhere at all -- attaching a `fixtures` list (handles a double Gameweek's multiple
+      fixtures) to every player's own `gameweeks[gw]` entry; `_player_payload` now also carries
+      `uncertainty` (already computed, never surfaced); each Gameweek card shows the captain's
+      fixture and a "Bench depth" line (summed bench xPts); the player table gained
+      Fixtures/Confidence columns, collapsed on mobile to keep the table usable at phone width.
+      `uncertainty` correctly shows `—`/`null` for the current shadow-stage release, since
+      calibrated uncertainty is not yet applied to production projections -- this is honest, not a
+      bug. `combine_appearance_probability`'s shared 5-element tuple contract (used by three other
+      decision modules) was deliberately left unchanged; fixture/opponent data is tracked in a
+      separate structure rather than widening it)
 - [ ] Transfers: rank hold and validated single-transfer alternatives, show no-hit first, and keep
       hit scenarios, multi-transfer, and chips explicitly separate
 - [x] Recompute all three menus from a reviewed role scenario without overwriting the base release

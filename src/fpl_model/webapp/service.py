@@ -112,7 +112,9 @@ def load_horizon_catalog(
                ps.team_id, COALESCE(ts.short_name, CAST(ps.team_id AS VARCHAR)),
                ps.fpl_position, ps.price, ps.fpl_status,
                p.final_xpts, p.uncertainty, p.data_quality_flags,
-               p.start_probability, p.substitute_appearance_probability
+               p.start_probability, p.substitute_appearance_probability,
+               p.opponent_team_id, p.is_home,
+               COALESCE(ots.short_name, CAST(p.opponent_team_id AS VARCHAR))
         FROM player_fixture_projection AS p
         JOIN model_run AS mr USING (model_run_id)
         JOIN player_snapshot AS ps
@@ -121,6 +123,9 @@ def load_horizon_catalog(
         LEFT JOIN team_snapshot AS ts
           ON ts.ingestion_run_id = ps.ingestion_run_id
          AND ts.team_id = ps.team_id
+        LEFT JOIN team_snapshot AS ots
+          ON ots.ingestion_run_id = ps.ingestion_run_id
+         AND ots.team_id = p.opponent_team_id
         WHERE p.model_run_id IN ({placeholders})
         ORDER BY ps.fpl_id, mr.target_gameweek, p.fixture_id
         """,
@@ -128,7 +133,16 @@ def load_horizon_catalog(
     ).fetchall()
 
     catalog: dict[int, dict[str, Any]] = {}
-    fixture_rows: dict[tuple[int, int], list[tuple[float, float | None, str | None, float, float]]] = {}
+    # Kept at exactly the 5-element shape combine_appearance_probability's own
+    # shared, positionally-unpacking contract requires (also used by
+    # decision/lineup_store.py, rolling_store.py, transfer_store.py) --
+    # opponent/fixture metadata is tracked in the separate opponent_rows dict
+    # below rather than widening this tuple, which would break every other
+    # caller of that shared function.
+    fixture_rows: dict[
+        tuple[int, int], list[tuple[float, float | None, str | None, float, float]]
+    ] = {}
+    opponent_rows: dict[tuple[int, int], list[dict[str, Any]]] = {}
     for row in rows:
         (
             gameweek,
@@ -145,6 +159,9 @@ def load_horizon_catalog(
             flags,
             start_probability,
             substitute_probability,
+            opponent_team_id,
+            is_home,
+            opponent_short,
         ) = row
         fpl_id = int(fpl_id)
         catalog.setdefault(
@@ -170,6 +187,13 @@ def load_horizon_catalog(
                 float(substitute_probability),
             )
         )
+        opponent_rows.setdefault((int(gameweek), fpl_id), []).append(
+            {
+                "opponent_team_id": int(opponent_team_id),
+                "opponent": str(opponent_short),
+                "is_home": bool(is_home),
+            }
+        )
 
     projections: dict[int, dict[int, PlayerGameweekProjection]] = {
         gameweek: {} for gameweek in run_by_gameweek
@@ -194,6 +218,7 @@ def load_horizon_catalog(
         catalog[fpl_id]["gameweeks"][str(gameweek)] = {
             "xpts": projection.expected_points,
             "appearance_probability": projection.appearance_probability,
+            "fixtures": opponent_rows[(gameweek, fpl_id)],
         }
     return catalog, projections
 
@@ -538,7 +563,12 @@ def _validated_web_squad(
     )
 
 
-def _player_payload(player: SquadPlayer, projection: PlayerGameweekProjection) -> dict[str, Any]:
+def _player_payload(
+    player: SquadPlayer,
+    projection: PlayerGameweekProjection,
+    *,
+    fixtures: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     return {
         "fpl_id": player.fpl_id,
         "name": player.player_name,
@@ -546,7 +576,9 @@ def _player_payload(player: SquadPlayer, projection: PlayerGameweekProjection) -
         "position": player.position,
         "price_tenths": player.current_price_tenths,
         "xpts": projection.expected_points,
+        "uncertainty": projection.uncertainty,
         "appearance_probability": projection.appearance_probability,
+        "fixtures": fixtures or [],
     }
 
 
@@ -568,6 +600,16 @@ def _role_state_by_id_for_gameweek(
             continue
         result[fpl_id] = RoleStateResult(role_state=row["role_state"], reason=row["reason"])
     return result
+
+
+def _fixtures_for_gameweek(
+    catalog: dict[int, dict[str, Any]] | None, fpl_id: int, gameweek: int
+) -> list[dict[str, Any]]:
+    if catalog is None:
+        return []
+    return catalog.get(fpl_id, {}).get("gameweeks", {}).get(str(gameweek), {}).get(
+        "fixtures", []
+    )
 
 
 def _lineup_payload(
@@ -596,29 +638,26 @@ def _lineup_payload(
                 base_recommendation=recommendation,
             )
             sensitivity_report = sensitivity.report
+
+    def _payload(player: SquadPlayer) -> dict[str, Any]:
+        return _player_payload(
+            player,
+            projection_by_id[player.fpl_id],
+            fixtures=_fixtures_for_gameweek(catalog, player.fpl_id, gameweek),
+        )
+
     return {
         "gameweek": gameweek,
         "formation": recommendation.formation,
         "starting_xpts": recommendation.starting_xpts,
         "captain_bonus_xpts": recommendation.captain_bonus_xpts,
         "total_xpts": recommendation.total_xpts,
-        "captain": _player_payload(
-            recommendation.captain, projection_by_id[recommendation.captain.fpl_id]
-        ),
-        "vice_captain": _player_payload(
-            recommendation.vice_captain,
-            projection_by_id[recommendation.vice_captain.fpl_id],
-        ),
-        "starters": [
-            _player_payload(player, projection_by_id[player.fpl_id])
-            for player in recommendation.starters
-        ],
+        "captain": _payload(recommendation.captain),
+        "vice_captain": _payload(recommendation.vice_captain),
+        "starters": [_payload(player) for player in recommendation.starters],
         "bench": [
-            _player_payload(recommendation.bench_goalkeeper, projection_by_id[recommendation.bench_goalkeeper.fpl_id]),
-            *[
-                _player_payload(player, projection_by_id[player.fpl_id])
-                for player in recommendation.outfield_bench_order
-            ],
+            _payload(recommendation.bench_goalkeeper),
+            *[_payload(player) for player in recommendation.outfield_bench_order],
         ],
         "expected_autosub_value": autosub.total_expected_bench_value,
         "quality_flags": list(recommendation.data_quality_flags),

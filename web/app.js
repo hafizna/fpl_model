@@ -204,18 +204,48 @@ function renderWeekly() {
   $("#bench").innerHTML = `<div class="bench-title">Bench order</div>${lineup.bench.map((player, index) => `<div class="bench-player"><span>${index || "GK"}</span><strong>${player.name}</strong><small>${points(player.xpts)} xPts</small></div>`).join("")}`;
 }
 
+function fixtureLabel(player) {
+  const fixtures = player.fixtures || [];
+  if (fixtures.length === 0) return "no fixture";
+  return fixtures.map((row) => `${row.is_home ? "" : "@"}${row.opponent}`).join(", ");
+}
+
 function renderOutlook() {
   if (!state.lineups) return;
   $("#outlook-total").classList.remove("skeleton");
   $("#outlook-total").innerHTML = `<span>Projected horizon score</span><strong>${points(state.lineups.cumulative_xpts)}</strong><small>captaincy included · raw mean xPts</small>`;
-  $("#outlook-grid").innerHTML = state.lineups.lineups.map((lineup) => `<article class="gw-card"><span>GW${lineup.gameweek}</span><strong>${points(lineup.total_xpts)}</strong><p>${lineup.formation} · ${lineup.captain.name} (C)</p></article>`).join("");
+  $("#outlook-grid").innerHTML = state.lineups.lineups.map((lineup) => {
+    const benchTotal = lineup.bench.reduce((sum, player) => sum + Number(player.xpts || 0), 0);
+    return `<article class="gw-card">
+      <span>GW${lineup.gameweek}</span>
+      <strong>${points(lineup.total_xpts)}</strong>
+      <p>${lineup.formation} · ${lineup.captain.name} (C) · ${fixtureLabel(lineup.captain)}</p>
+      <p class="bench-depth">Bench depth <b>${points(benchTotal)}</b> xPts</p>
+    </article>`;
+  }).join("");
 
   const totals = new Map();
+  const fixturesByPlayer = new Map();
+  const uncertaintyByPlayer = new Map();
   state.lineups.lineups.forEach((lineup) => {
-    [...lineup.starters, ...lineup.bench].forEach((player) => totals.set(player.fpl_id, (totals.get(player.fpl_id) || 0) + player.xpts));
+    [...lineup.starters, ...lineup.bench].forEach((player) => {
+      totals.set(player.fpl_id, (totals.get(player.fpl_id) || 0) + Number(player.xpts || 0));
+      const existing = fixturesByPlayer.get(player.fpl_id) || [];
+      fixturesByPlayer.set(player.fpl_id, [...existing, `GW${lineup.gameweek} ${fixtureLabel(player)}`]);
+      if (player.uncertainty != null) {
+        const values = uncertaintyByPlayer.get(player.fpl_id) || [];
+        uncertaintyByPlayer.set(player.fpl_id, [...values, player.uncertainty]);
+      }
+    });
   });
   const rows = state.selected.map(playerById).filter(Boolean).sort((a, b) => (totals.get(b.fpl_id) || 0) - (totals.get(a.fpl_id) || 0));
-  $("#player-outlook").innerHTML = `<div class="table-head"><span>Player</span><span>Position</span><span>3-GW xPts</span></div>${rows.map((player) => `<div class="table-row"><strong>${player.name}<small>${player.team}</small></strong><span>${player.position}</span><span>${points(totals.get(player.fpl_id))}</span></div>`).join("")}`;
+  $("#player-outlook").innerHTML = `<div class="table-head"><span>Player</span><span>Fixtures</span><span>Confidence</span><span>3-GW xPts</span></div>${rows.map((player) => {
+    const uncertaintyValues = uncertaintyByPlayer.get(player.fpl_id);
+    const confidence = uncertaintyValues && uncertaintyValues.length
+      ? `±${points(uncertaintyValues.reduce((a, b) => a + b, 0) / uncertaintyValues.length)}`
+      : "—";
+    return `<div class="table-row outlook-row"><strong>${player.name}<small>${player.team}</small></strong><span class="small">${(fixturesByPlayer.get(player.fpl_id) || []).join(" · ")}</span><span>${confidence}</span><span>${points(totals.get(player.fpl_id))}</span></div>`;
+  }).join("")}`;
 }
 
 function renderTransfers() {

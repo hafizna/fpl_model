@@ -113,11 +113,14 @@ h2 { margin: 4px 0 0; font-size: 19px; letter-spacing: -0.02em; }
 .gw-card span { color: var(--muted); font-size: 10px; }
 .gw-card strong { display: block; margin-top: 7px; font-size: 26px; }
 .gw-card p { margin: 5px 0 0; color: var(--muted); font-size: 10px; }
+.gw-card p.bench-depth { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.gw-card p.bench-depth b { color: var(--ink); font-weight: 700; }
 .table-card { border: 1px solid var(--line); border-radius: 13px; overflow: hidden; background: var(--panel); }
-.table-head, .table-row { padding: 11px 15px; display: grid; grid-template-columns: 1fr 100px 100px; align-items: center; }
+.table-head, .table-row { padding: 11px 15px; display: grid; grid-template-columns: 1fr 1.4fr 70px 80px; gap: 8px; align-items: center; }
 .table-head { background: #18221d; color: var(--muted); font-size: 9px; text-transform: uppercase; }
 .table-row { border-top: 1px solid var(--line); font-size: 11px; }
 .table-row strong small { display: block; margin-top: 2px; color: var(--muted); font-size: 8px; }
+.table-row .small { color: var(--muted); font-size: 10px; overflow-wrap: anywhere; }
 .transfer-intro { margin-bottom: 14px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 11px; background: var(--panel); color: var(--muted); font-size: 11px; line-height: 1.5; }
 .transfer-list { display: grid; gap: 10px; }
 .empty-state { min-height: 180px; place-items: center; padding: 30px; border: 1px dashed var(--line); border-radius: 13px; color: var(--muted); text-align: center; font-size: 12px; }
@@ -171,7 +174,9 @@ h2 { margin: 4px 0 0; font-size: 19px; letter-spacing: -0.02em; }
   .hero-score { padding: 20px; }
   .hero-score strong { font-size: 36px; }
 
-  .table-head, .table-row { grid-template-columns: 1fr 70px 70px; padding: 10px 12px; }
+  .table-head, .table-row { grid-template-columns: 1fr 70px; padding: 10px 12px; }
+  .table-head span:nth-child(2), .table-head span:nth-child(3),
+  .table-row .small, .table-row span:nth-child(3) { display: none; }
 
   .transfer-card { grid-template-columns: 1fr; gap: 10px; }
   .transfer-card > div:last-child { text-align: left; }
@@ -197,7 +202,7 @@ h2 { margin: 4px 0 0; font-size: 19px; letter-spacing: -0.02em; }
 
   .outlook-grid { grid-template-columns: 1fr; }
 
-  .table-head, .table-row { grid-template-columns: 1fr 56px 56px; padding: 9px 10px; font-size: 10px; }
+  .table-head, .table-row { grid-template-columns: 1fr 56px; padding: 9px 10px; font-size: 10px; }
   .table-row { font-size: 10px; }
 
   .squad-player { grid-template-columns: 28px minmax(0, 1fr) 32px; }
