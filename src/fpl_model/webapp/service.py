@@ -19,7 +19,11 @@ from typing import Any
 import duckdb
 
 from fpl_model.decision.autosub import compute_expected_autosub_value
-from fpl_model.decision.lineup import PlayerGameweekProjection, recommend_lineup
+from fpl_model.decision.lineup import (
+    PlayerGameweekProjection,
+    is_legal_starting_xi,
+    recommend_lineup,
+)
 from fpl_model.decision.lineup_store import combine_appearance_probability
 from fpl_model.decision.role_scenario_sensitivity import evaluate_role_scenario_sensitivity
 from fpl_model.decision.squad import CHIP_NAMES, SquadPlayer, validate_squad
@@ -42,6 +46,40 @@ class ResearchHorizon:
     @property
     def end_gameweek(self) -> int:
         return self.model_runs[-1][0]
+
+
+@dataclass(frozen=True, slots=True)
+class CurrentSquadSetup:
+    """The manager's submitted picks for the first Gameweek in the horizon.
+
+    This is not recommendation history. It is the public FPL picks snapshot
+    loaded by Team ID, carried back with a lineup request so the decision
+    service can score the manager's actual XI on the same projections as the
+    recommendation.
+    """
+
+    gameweek: int
+    starter_fpl_ids: tuple[int, ...]
+    bench_fpl_ids: tuple[int, ...]
+    captain_fpl_id: int
+    vice_captain_fpl_id: int
+
+    def __post_init__(self) -> None:
+        if not 1 <= self.gameweek <= 38:
+            raise ValueError("current setup gameweek must be between 1 and 38")
+        if len(self.starter_fpl_ids) != 11 or len(set(self.starter_fpl_ids)) != 11:
+            raise ValueError("current setup must contain 11 unique starters")
+        if len(self.bench_fpl_ids) != 4 or len(set(self.bench_fpl_ids)) != 4:
+            raise ValueError("current setup must contain 4 unique bench players")
+        all_ids = (*self.starter_fpl_ids, *self.bench_fpl_ids)
+        if len(set(all_ids)) != 15 or any(fpl_id <= 0 for fpl_id in all_ids):
+            raise ValueError("current setup must contain 15 unique positive player IDs")
+        if self.captain_fpl_id not in self.starter_fpl_ids:
+            raise ValueError("current setup captain must be a starter")
+        if self.vice_captain_fpl_id not in self.starter_fpl_ids:
+            raise ValueError("current setup vice-captain must be a starter")
+        if self.captain_fpl_id == self.vice_captain_fpl_id:
+            raise ValueError("current setup captain and vice-captain must differ")
 
 
 def _flags(value: str | None) -> set[str]:
@@ -490,6 +528,7 @@ def resolve_entry_picks(
         database_path=database_path,
         release_path=release_path,
     )
+    private_rows = private_rows.sort_values("squad_position")
     fpl_ids = [int(value) for value in private_rows["fpl_id"]]
     missing = sorted(set(fpl_ids) - set(catalog))
     if missing:
@@ -504,6 +543,8 @@ def resolve_entry_picks(
         "selling_prices": selling_prices,
         "captain_fpl_id": int(captain_row["fpl_id"]),
         "vice_captain_fpl_id": int(vice_captain_row["fpl_id"]),
+        "starter_fpl_ids": fpl_ids[:11],
+        "bench_fpl_ids": fpl_ids[11:],
         "selling_price_is_estimated": True,
     }
 
@@ -618,6 +659,7 @@ def _lineup_payload(
     gameweek: int,
     *,
     catalog: dict[int, dict[str, Any]] | None = None,
+    current_setup: CurrentSquadSetup | None = None,
 ) -> dict[str, Any]:
     squad_ids = {player.fpl_id for player in squad.players}
     projection_by_id = {
@@ -646,6 +688,72 @@ def _lineup_payload(
             fixtures=_fixtures_for_gameweek(catalog, player.fpl_id, gameweek),
         )
 
+    current_setup_comparison = None
+    if current_setup is not None:
+        player_by_id = {player.fpl_id: player for player in squad.players}
+        current_starters = tuple(player_by_id[fpl_id] for fpl_id in current_setup.starter_fpl_ids)
+        current_bench = tuple(player_by_id[fpl_id] for fpl_id in current_setup.bench_fpl_ids)
+        if not is_legal_starting_xi(current_starters):
+            raise ValueError("current setup does not contain a legal FPL starting XI")
+        if current_bench[0].position != "GK" or any(
+            player.position == "GK" for player in current_bench[1:]
+        ):
+            raise ValueError("current setup bench must place its goalkeeper first")
+
+        current_starting_xpts = sum(
+            projection_by_id[player.fpl_id].expected_points for player in current_starters
+        )
+        current_captain = player_by_id[current_setup.captain_fpl_id]
+        current_vice = player_by_id[current_setup.vice_captain_fpl_id]
+        current_captain_bonus = projection_by_id[current_captain.fpl_id].expected_points
+        current_total_xpts = current_starting_xpts + current_captain_bonus
+        recommended_starter_ids = {player.fpl_id for player in recommendation.starters}
+        current_starter_ids = set(current_setup.starter_fpl_ids)
+        recommended_bench = (
+            recommendation.bench_goalkeeper,
+            *recommendation.outfield_bench_order,
+        )
+        formation_counts = {
+            position: sum(player.position == position for player in current_starters)
+            for position in ("DEF", "MID", "FWD")
+        }
+        current_setup_comparison = {
+            "basis": "loaded_fpl_picks",
+            "current_formation": (
+                f"{formation_counts['DEF']}-{formation_counts['MID']}-{formation_counts['FWD']}"
+            ),
+            "current_starting_xpts": current_starting_xpts,
+            "current_captain_bonus_xpts": current_captain_bonus,
+            "current_total_xpts": current_total_xpts,
+            "recommended_total_xpts": recommendation.total_xpts,
+            "marginal_xpts": recommendation.total_xpts - current_total_xpts,
+            "starting_xpts_gain": recommendation.starting_xpts - current_starting_xpts,
+            "captain_xpts_gain": recommendation.captain_bonus_xpts - current_captain_bonus,
+            "started": [
+                _payload(player)
+                for player in recommendation.starters
+                if player.fpl_id not in current_starter_ids
+            ],
+            "benched": [
+                _payload(player)
+                for player in current_starters
+                if player.fpl_id not in recommended_starter_ids
+            ],
+            "captain_change": (
+                None
+                if recommendation.captain.fpl_id == current_captain.fpl_id
+                else {"from": _payload(current_captain), "to": _payload(recommendation.captain)}
+            ),
+            "vice_captain_change": (
+                None
+                if recommendation.vice_captain.fpl_id == current_vice.fpl_id
+                else {"from": _payload(current_vice), "to": _payload(recommendation.vice_captain)}
+            ),
+            "bench_order_changed": tuple(player.fpl_id for player in current_bench)
+            != tuple(player.fpl_id for player in recommended_bench),
+            "current_bench": [_payload(player) for player in current_bench],
+        }
+
     return {
         "gameweek": gameweek,
         "formation": recommendation.formation,
@@ -662,6 +770,7 @@ def _lineup_payload(
         "expected_autosub_value": autosub.total_expected_bench_value,
         "quality_flags": list(recommendation.data_quality_flags),
         "role_scenario_sensitivity": sensitivity_report,
+        "current_setup_comparison": current_setup_comparison,
     }
 
 
@@ -672,6 +781,7 @@ def recommend_web_lineups(
     free_transfers: int = 1,
     selling_prices: dict[int, int] | None = None,
     role_scenario_overrides: tuple[RoleScenarioOverride, ...] = (),
+    current_setup: CurrentSquadSetup | None = None,
     database_path: str | Path = DEFAULT_DATABASE_PATH,
     release_path: str | Path | None = None,
 ) -> dict[str, Any]:
@@ -689,8 +799,22 @@ def recommend_web_lineups(
         free_transfers=free_transfers,
         selling_prices={} if selling_prices is None else selling_prices,
     )
+    if current_setup is not None:
+        if current_setup.gameweek != horizon.start_gameweek:
+            raise ValueError(
+                "current setup gameweek must match the first Gameweek in the projection horizon"
+            )
+        setup_ids = set((*current_setup.starter_fpl_ids, *current_setup.bench_fpl_ids))
+        if setup_ids != set(fpl_ids):
+            raise ValueError("current setup players must exactly match the submitted squad")
     lineups = [
-        _lineup_payload(squad, projections[gameweek], gameweek, catalog=catalog)
+        _lineup_payload(
+            squad,
+            projections[gameweek],
+            gameweek,
+            catalog=catalog,
+            current_setup=current_setup if gameweek == horizon.start_gameweek else None,
+        )
         for gameweek, _ in horizon.model_runs
     ]
     release_metadata = release_metadata or {}

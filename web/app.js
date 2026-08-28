@@ -10,6 +10,7 @@ const state = {
   selected: JSON.parse(localStorage.getItem("touchline-squad") || "null") || DEFAULT_SQUAD,
   sellingPrices: JSON.parse(localStorage.getItem("touchline-selling-prices") || "null") || {},
   sellingPriceIsEstimated: JSON.parse(localStorage.getItem("touchline-selling-estimated") || "false"),
+  currentSetup: JSON.parse(localStorage.getItem("touchline-current-setup") || "null"),
   // Reviewed role-scenario overrides: {fpl_id, gameweek, xpts}[]. Applied
   // entirely client-side per request -- never persisted server-side or
   // written back to the release, and NOT saved to localStorage (a scenario
@@ -31,6 +32,7 @@ function requestBody() {
     free_transfers: Number($("#free-transfers").value),
     selling_prices: state.sellingPrices,
     role_scenario_overrides: state.roleScenarioOverrides,
+    current_setup: state.currentSetup,
   };
 }
 
@@ -108,6 +110,7 @@ function renderSquadEditor() {
         return;
       }
       state.selected = state.selected.map((id) => id === oldId ? newId : id);
+      clearCurrentSetup();
       localStorage.setItem("touchline-squad", JSON.stringify(state.selected));
       renderSquadEditor();
       await runLineups();
@@ -123,6 +126,11 @@ function playerCard(player, captainId, viceId) {
     <strong>${player.name}</strong>
     <span>${player.position} · ${points(player.xpts)} xPts</span>
   </article>`;
+}
+
+function clearCurrentSetup() {
+  state.currentSetup = null;
+  localStorage.removeItem("touchline-current-setup");
 }
 
 function resetTransfersView() {
@@ -195,6 +203,7 @@ function renderWeekly() {
     <div><span>Captain</span><strong>${lineup.captain.name}</strong></div>
     <div><span>Autosub EV</span><strong>${points(lineup.expected_autosub_value)}</strong></div>`;
   renderSensitivityBanner(lineup.role_scenario_sensitivity, lineup.gameweek);
+  renderMarginalChanges(lineup);
   const rows = ["GK", "DEF", "MID", "FWD"].map((position) => {
     const players = lineup.starters.filter((player) => player.position === position);
     return `<div class="pitch-line ${position.toLowerCase()}">${players.map((player) => playerCard(player, lineup.captain.fpl_id, lineup.vice_captain.fpl_id)).join("")}</div>`;
@@ -202,6 +211,37 @@ function renderWeekly() {
   $("#pitch").classList.remove("skeleton");
   $("#pitch").innerHTML = rows.join("");
   $("#bench").innerHTML = `<div class="bench-title">Bench order</div>${lineup.bench.map((player, index) => `<div class="bench-player"><span>${index || "GK"}</span><strong>${player.name}</strong><small>${points(player.xpts)} xPts</small></div>`).join("")}`;
+}
+
+function renderMarginalChanges(lineup) {
+  const container = $("#marginal-changes");
+  const comparison = lineup.current_setup_comparison;
+  if (!comparison) {
+    container.className = "marginal-changes unavailable";
+    container.innerHTML = `<div><span>No-chip changes vs your current setup</span><strong>Load your Team ID to compare</strong></div><p>The model needs your submitted XI, captain, vice-captain, and bench order — a squad list alone is not enough.</p>`;
+    return;
+  }
+
+  const marginal = Number(comparison.marginal_xpts || 0);
+  const changeRows = [];
+  if (comparison.started.length > 0) {
+    changeRows.push(`<li><strong>XI</strong><span>Start ${comparison.started.map((row) => row.name).join(", ")}; bench ${comparison.benched.map((row) => row.name).join(", ")}.</span><small>Best legal formation raises starting-XI score by ${comparison.starting_xpts_gain >= 0 ? "+" : ""}${points(comparison.starting_xpts_gain)} xPts.</small></li>`);
+  }
+  if (comparison.captain_change) {
+    changeRows.push(`<li><strong>Captain</strong><span>${comparison.captain_change.from.name} → ${comparison.captain_change.to.name}</span><small>The higher projected captain adds ${comparison.captain_xpts_gain >= 0 ? "+" : ""}${points(comparison.captain_xpts_gain)} xPts.</small></li>`);
+  }
+  if (comparison.vice_captain_change) {
+    changeRows.push(`<li><strong>Vice</strong><span>${comparison.vice_captain_change.from.name} → ${comparison.vice_captain_change.to.name}</span><small>Next-highest projected starter is the fallback if the captain does not play.</small></li>`);
+  }
+  if (comparison.bench_order_changed) {
+    changeRows.push(`<li><strong>Bench</strong><span>${lineup.bench.map((row) => row.name).join(" → ")}</span><small>Goalkeeper first; outfield substitutes are ordered by projected points for autosubs.</small></li>`);
+  }
+  if (changeRows.length === 0) {
+    changeRows.push("<li><strong>No changes</strong><span>Your submitted XI, captain, vice-captain, and bench order already match the model.</span></li>");
+  }
+
+  container.className = "marginal-changes available";
+  container.innerHTML = `<div class="marginal-heading"><div><span>No-chip changes vs your current setup</span><strong>${points(comparison.current_total_xpts)} → ${points(comparison.recommended_total_xpts)} xPts</strong></div><b class="${marginal >= 0 ? "positive" : "negative"}">${marginal >= 0 ? "+" : ""}${points(marginal)} xPts</b></div><ul>${changeRows.join("")}</ul>`;
 }
 
 function fixtureLabel(player) {
@@ -284,9 +324,17 @@ async function loadFromTeamId() {
     state.selected = resolved.fpl_ids;
     state.sellingPrices = resolved.selling_prices;
     state.sellingPriceIsEstimated = resolved.selling_price_is_estimated;
+    state.currentSetup = {
+      gameweek: resolved.gameweek,
+      starter_fpl_ids: resolved.starter_fpl_ids,
+      bench_fpl_ids: resolved.bench_fpl_ids,
+      captain_fpl_id: resolved.captain_fpl_id,
+      vice_captain_fpl_id: resolved.vice_captain_fpl_id,
+    };
     localStorage.setItem("touchline-squad", JSON.stringify(state.selected));
     localStorage.setItem("touchline-selling-prices", JSON.stringify(state.sellingPrices));
     localStorage.setItem("touchline-selling-estimated", JSON.stringify(state.sellingPriceIsEstimated));
+    localStorage.setItem("touchline-current-setup", JSON.stringify(state.currentSetup));
     $("#bank").value = (resolved.bank_tenths / 10).toFixed(1);
     renderSquadEditor();
     await runLineups();
@@ -351,8 +399,22 @@ async function init() {
       state.selected = DEFAULT_SQUAD;
       state.sellingPrices = {};
       state.sellingPriceIsEstimated = false;
+      clearCurrentSetup();
       showError("A previously loaded squad no longer matches the current release; showing the default squad.");
     }
+    const firstGameweek = state.bootstrap.release.model_runs[0].gameweek;
+    const setupShapeIsValid = state.currentSetup
+      && Array.isArray(state.currentSetup.starter_fpl_ids)
+      && Array.isArray(state.currentSetup.bench_fpl_ids);
+    const setupIds = setupShapeIsValid
+      ? [...state.currentSetup.starter_fpl_ids, ...state.currentSetup.bench_fpl_ids]
+      : [];
+    if (state.currentSetup && (
+      !setupShapeIsValid
+      || state.currentSetup.gameweek !== firstGameweek
+      || setupIds.length !== 15
+      || setupIds.some((id) => !state.selected.includes(id))
+    )) clearCurrentSetup();
     renderRelease();
     renderSquadEditor();
     await runLineups();

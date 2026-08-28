@@ -1,6 +1,7 @@
 """Application-facing services for the browser recommender."""
 
 from fpl_model.webapp.service import (
+    CurrentSquadSetup,
     ResearchHorizon,
     RoleScenarioOverride,
     apply_role_scenario_overrides,
@@ -12,6 +13,7 @@ from fpl_model.webapp.service import (
 )
 
 __all__ = [
+    "CurrentSquadSetup",
     "ResearchHorizon",
     "RoleScenarioOverride",
     "apply_role_scenario_overrides",

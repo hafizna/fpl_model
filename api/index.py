@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from fpl_model.ingest.fpl import FPLClient
 from fpl_model.storage import DEFAULT_DATABASE_PATH
 from fpl_model.webapp.service import (
+    CurrentSquadSetup,
     RoleScenarioOverride,
     load_web_bootstrap,
     recommend_web_lineups,
@@ -52,12 +53,30 @@ class RoleScenarioOverrideRequest(BaseModel):
         return RoleScenarioOverride(fpl_id=self.fpl_id, gameweek=self.gameweek, xpts=self.xpts)
 
 
+class CurrentSetupRequest(BaseModel):
+    gameweek: int = Field(ge=1, le=38)
+    starter_fpl_ids: list[int] = Field(min_length=11, max_length=11)
+    bench_fpl_ids: list[int] = Field(min_length=4, max_length=4)
+    captain_fpl_id: int = Field(gt=0)
+    vice_captain_fpl_id: int = Field(gt=0)
+
+    def to_setup(self) -> CurrentSquadSetup:
+        return CurrentSquadSetup(
+            gameweek=self.gameweek,
+            starter_fpl_ids=tuple(self.starter_fpl_ids),
+            bench_fpl_ids=tuple(self.bench_fpl_ids),
+            captain_fpl_id=self.captain_fpl_id,
+            vice_captain_fpl_id=self.vice_captain_fpl_id,
+        )
+
+
 class SquadRequest(BaseModel):
     fpl_ids: list[int] = Field(min_length=15, max_length=15)
     bank_tenths: int = Field(default=0, ge=0)
     free_transfers: int = Field(default=1, ge=0, le=5)
     selling_prices: dict[int, int] = Field(default_factory=dict)
     role_scenario_overrides: list[RoleScenarioOverrideRequest] = Field(default_factory=list)
+    current_setup: CurrentSetupRequest | None = None
 
 
 app = FastAPI(
@@ -155,6 +174,9 @@ def lineups(request: SquadRequest) -> dict[str, object]:
             selling_prices=request.selling_prices,
             role_scenario_overrides=tuple(
                 row.to_override() for row in request.role_scenario_overrides
+            ),
+            current_setup=(
+                None if request.current_setup is None else request.current_setup.to_setup()
             ),
             database_path=_database_path(),
             release_path=_release_path(),

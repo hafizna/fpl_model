@@ -38,19 +38,20 @@ def _use_release(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, **kwargs) -> N
 
 
 def _picks_payload(*, bank: int = 5, captain_fpl_id: int = 9, vice_fpl_id: int = 5) -> dict:
+    pick_order = (1, 3, 4, 5, 8, 9, 10, 11, 12, 13, 14, 2, 6, 7, 15)
     return {
         "active_chip": None,
         "entry_history": {"event": 2, "bank": bank, "value": 1005},
         "picks": [
             {
                 "element": fpl_id,
-                "position": fpl_id,
+                "position": position,
                 "multiplier": 2 if fpl_id == captain_fpl_id else 1,
                 "is_captain": fpl_id == captain_fpl_id,
                 "is_vice_captain": fpl_id == vice_fpl_id,
                 "element_type": 1,
             }
-            for fpl_id in range(1, 16)
+            for position, fpl_id in enumerate(pick_order, start=1)
         ],
     }
 
@@ -193,11 +194,19 @@ def test_recommend_lineups_accepts_a_squad_resolved_from_an_entry(
             "bank_tenths": resolved["bank_tenths"],
             "free_transfers": 1,
             "selling_prices": resolved["selling_prices"],
+            "current_setup": {
+                "gameweek": resolved["gameweek"],
+                "starter_fpl_ids": resolved["starter_fpl_ids"],
+                "bench_fpl_ids": resolved["bench_fpl_ids"],
+                "captain_fpl_id": resolved["captain_fpl_id"],
+                "vice_captain_fpl_id": resolved["vice_captain_fpl_id"],
+            },
         },
     )
 
     assert response.status_code == 200
     assert response.json()["horizon"] == [2, 3, 4]
+    assert response.json()["lineups"][0]["current_setup_comparison"]["marginal_xpts"] == 10.0
 
 
 def test_recommend_lineups_recomputes_from_a_role_scenario_override(

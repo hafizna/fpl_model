@@ -8,7 +8,7 @@ import duckdb
 import pytest
 
 from fpl_model.validation.release_drift import compare_web_releases
-from fpl_model.webapp.service import load_web_bootstrap, recommend_web_lineups
+from fpl_model.webapp.service import CurrentSquadSetup, load_web_bootstrap, recommend_web_lineups
 
 
 def _database(path: Path) -> tuple[int, ...]:
@@ -121,6 +121,33 @@ def test_web_lineup_rejects_duplicate_squad_players(tmp_path: Path):
 
     with pytest.raises(ValueError, match="15 unique players"):
         recommend_web_lineups((*fpl_ids[:-1], fpl_ids[0]), database_path=database_path)
+
+
+def test_weekly_lineup_reports_marginal_xpts_against_loaded_current_setup(tmp_path: Path):
+    release_path = tmp_path / "release.json"
+    fpl_ids = _release_file(release_path)
+    setup = CurrentSquadSetup(
+        gameweek=2,
+        starter_fpl_ids=(1, 3, 4, 5, 8, 9, 10, 11, 12, 13, 14),
+        bench_fpl_ids=(2, 6, 7, 15),
+        captain_fpl_id=9,
+        vice_captain_fpl_id=5,
+    )
+
+    result = recommend_web_lineups(fpl_ids, release_path=release_path, current_setup=setup)
+
+    comparison = result["lineups"][0]["current_setup_comparison"]
+    assert comparison["basis"] == "loaded_fpl_picks"
+    assert comparison["current_formation"] == "3-5-2"
+    assert comparison["current_total_xpts"] == pytest.approx(49.5)
+    assert comparison["recommended_total_xpts"] == pytest.approx(59.5)
+    assert comparison["marginal_xpts"] == pytest.approx(10.0)
+    assert {row["fpl_id"] for row in comparison["started"]} == {2, 6, 7, 15}
+    assert {row["fpl_id"] for row in comparison["benched"]} == {1, 3, 4, 8}
+    assert comparison["captain_change"]["from"]["fpl_id"] == 9
+    assert comparison["captain_change"]["to"]["fpl_id"] == 15
+    assert comparison["bench_order_changed"] is True
+    assert result["lineups"][1]["current_setup_comparison"] is None
 
 
 def _release_file(path: Path, *, player_one_xpts: float = 0.5) -> tuple[int, ...]:

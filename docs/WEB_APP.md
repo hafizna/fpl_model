@@ -20,8 +20,9 @@ password or session cookie.
 
 `tests/test_e2e_team_id_to_lineup.py` drives the actual served page in a real headless Chromium
 browser (not just the FastAPI `TestClient`), covering "Team ID to weekly decision without a CLI":
-entering a Team ID, loading the resolved squad, and confirming the rendered pitch, outlook, and
-squad editor. It runs a real `uvicorn` server in a background thread against a fixture compact
+entering a Team ID, loading the resolved squad, and confirming the rendered pitch, marginal-change
+explanation, outlook, and squad editor. It also locks the transfer view's free-transfer and
+four-point-hit banners in both modes. It runs a real `uvicorn` server in a background thread against a fixture compact
 release, with `FPLClient.entry_picks` monkeypatched so no request reaches the real FPL API. Needs
 the `dev` extra installed with a Chromium binary:
 
@@ -37,6 +38,8 @@ Implemented surfaces:
   session cookie, ever; manual squad selection plus bank and free-transfer state remains available
   as an override;
 - exhaustive legal weekly XI, captain, vice-captain, and bench order;
+- marginal no-chip xPts and explained XI/captain/vice/bench-order changes against the manager's
+  current submitted setup loaded by Team ID;
 - a frozen three-Gameweek raw-xPts outlook;
 - expected autosub value as a separate diagnostic;
 - every legal, affordable same-position single transfer rescored over the same horizon;
@@ -150,8 +153,25 @@ discarded in memory) whenever the scenario or free-transfer count changes, since
 `entry/{id}/event/{gw}/picks/` endpoint (never `my-team/{id}/`, which is private and requires a
 login session). `gameweek` defaults to the current release horizon's own start Gameweek. This
 performs no server-side write -- the resolved squad (`fpl_ids`, `bank_tenths`, `selling_prices`,
-captain/vice-captain) is handed straight back to the browser, which remains the only place squad
-state is kept, matching this app's existing "browser local storage only" boundary.
+submitted XI, ordered bench, and captain/vice-captain) is handed straight back to the browser,
+which remains the only place squad state is kept, matching this app's existing "browser local
+storage only" boundary.
+
+### Marginal changes against the current setup
+
+"Marginal" means the model recommendation versus the manager's current submitted FPL picks, not
+versus recommendation history. `POST /api/recommend/lineups` accepts that optional current-setup
+snapshot and the Python decision service scores both setups from the same first-Gameweek frozen
+projections. The response includes current/recommended raw totals, marginal xPts, separate
+starting-XI and captain gains, players started/benched, captain and vice changes, and whether the
+bench order changed. The browser renders the reasons; it does not recompute points.
+
+This is explicitly a no-chip comparison because chip-aware optimization is outside the MVP. The
+snapshot is stored in browser local storage alongside the squad and is cleared as soon as a player
+is edited or the projection horizon changes, so the app cannot silently compare against stale
+picks. A manually assembled squad has no submitted XI/C/VC baseline, so the Weekly menu asks the
+user to load a Team ID instead of inventing one. Historical recommendation persistence is a
+separate future feature and is not needed for this contract.
 
 FPL's public picks payload has no per-player purchase or selling price, so `selling_prices` is
 always estimated from the CURRENT market price in the release catalog, and

@@ -745,13 +745,20 @@ rank improvement, or a production-approved `AI Score`.
       purchase/selling price, so both are estimated from current market price and flagged
       `selling_price_is_estimated`, surfaced as a visible caveat in the UI rather than implying an
       FPL-exact sell value)
-- [ ] Weekly squad: legal XI, captain, vice-captain, bench, raw xPts, marginal changes, and a small
+- [x] Weekly squad: legal XI, captain, vice-captain, bench, raw xPts, marginal changes, and a small
       `Assumptions to review` surface only when a material owned-player conflict exists (legal XI,
       captain/vice-captain, bench, and raw xPts already shipped pre-session; this session added the
       `Assumptions to review` half -- a `sensitivity-banner` shown only when
       `role_scenario_sensitivity` returns `sensitive`, naming the exact rotation-risk player(s)
-      driving it. Still open: "marginal changes" -- comparing this week's recommendation against a
-      previous one -- is not built yet)
+      driving it. "Marginal changes" follows Sprint 8B's original contract: compare against the
+      manager's **current submitted setup**, not a previous recommendation. Team-ID loading now
+      retains the submitted XI, ordered bench, captain, vice-captain, and Gameweek in browser-local
+      state; the Python service scores that setup and the optimized setup on the same frozen,
+      no-chip projections, returning the total/starting-XI/captain deltas and structured changes.
+      The Weekly menu explains every XI, captain, vice, and bench-order change. Editing the squad
+      manually invalidates the loaded setup so a stale comparison is never shown. Recommendation
+      history remains a separate post-MVP feature rather than an accidental P1 persistence
+      dependency)
 - [x] Three-Gameweek outlook: raw optimized-lineup xPts per GW and cumulative, player contribution,
       fixtures, captaincy, bench depth, and confidence; percentile rating is not an MVP blocker
       (raw per-GW/cumulative xPts, player contribution table, and captaincy already shipped
@@ -780,7 +787,8 @@ rank improvement, or a production-approved `AI Score`.
       sorting individual cards. Added a whole-scan mode banner: green "Free transfer available"
       when `hit_cost == 0`, red "Hit scenario: ... costs a N-point hit" when it does not, shown
       above every suggestion card so a manager understands the mode before reading any individual
-      move. Frontend-only change, verified live in both modes)
+      move. Frontend-only change, verified live in both modes and now locked by a real-browser E2E
+      regression test for both free-transfer and four-point-hit scans)
 - [x] Recompute all three menus from a reviewed role scenario without overwriting the base release
       (`webapp/service.py`'s `apply_role_scenario_overrides`, called from `POST
       /api/recommend/lineups`/`POST /api/recommend/transfers` via a new `role_scenario_overrides`
@@ -829,8 +837,9 @@ rank improvement, or a production-approved `AI Score`.
       Chromium browser via a real `uvicorn` server run in a background thread -- not the FastAPI
       `TestClient`, which never touches app.js/the DOM -- covering Team ID entry, the resolved
       squad rendering as an 11-player legal XI with exactly one captain and one vice-captain badge,
-      and the outlook/squad-editor menus. `FPLClient.entry_picks` is monkeypatched so no request
-      reaches the real FPL API. New `playwright` dev dependency plus a one-time
+      the marginal-change explanation, the outlook/squad-editor menus, and transfer-mode banners
+      in both free and hit scans. `FPLClient.entry_picks` is monkeypatched so no request reaches the
+      real FPL API. New `playwright` dev dependency plus a one-time
       `playwright install chromium` step, documented in `docs/WEB_APP.md`)
 
 #### P2 — Closed alpha and paid-founder beta

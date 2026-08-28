@@ -13,6 +13,7 @@ monkeypatched so no request reaches the real FPL API.
 
 from __future__ import annotations
 
+import json
 import socket
 import threading
 import time
@@ -34,19 +35,20 @@ def _free_port() -> int:
 
 
 def _picks_payload(*, bank: int = 5, captain_fpl_id: int = 9, vice_fpl_id: int = 5) -> dict:
+    pick_order = (1, 3, 4, 5, 8, 9, 10, 11, 12, 13, 14, 2, 6, 7, 15)
     return {
         "active_chip": None,
         "entry_history": {"event": 2, "bank": bank, "value": 1005},
         "picks": [
             {
                 "element": fpl_id,
-                "position": fpl_id,
+                "position": position,
                 "multiplier": 2 if fpl_id == captain_fpl_id else 1,
                 "is_captain": fpl_id == captain_fpl_id,
                 "is_vice_captain": fpl_id == vice_fpl_id,
                 "element_type": 1,
             }
-            for fpl_id in range(1, 16)
+            for position, fpl_id in enumerate(pick_order, start=1)
         ],
     }
 
@@ -56,6 +58,30 @@ def live_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Serve the real app over real HTTP, backed by a fixture compact release."""
     release_path = tmp_path / "release.json"
     _release_file(release_path)
+    payload = json.loads(release_path.read_text(encoding="utf-8"))
+    for fpl_id, position in zip(range(16, 20), ("GK", "DEF", "MID", "FWD"), strict=True):
+        payload["players"].append(
+            {
+                "fpl_id": fpl_id,
+                "player_code": 10_000 + fpl_id,
+                "name": f"Candidate {fpl_id}",
+                "team_id": 6,
+                "team": "T6",
+                "position": position,
+                "price_tenths": 50,
+                "status": "a",
+                "gameweeks": {
+                    str(gameweek): {
+                        "xpts": 8.0,
+                        "appearance_probability": 0.95,
+                        "uncertainty": None,
+                        "quality_flags": [],
+                    }
+                    for gameweek in (2, 3, 4)
+                },
+            }
+        )
+    release_path.write_text(json.dumps(payload), encoding="utf-8")
     monkeypatch.setenv("FPL_WEB_RELEASE_PATH", str(release_path))
     monkeypatch.setenv("FPL_DATABASE_PATH", str(tmp_path / "missing.duckdb"))
     monkeypatch.setattr(FPLClient, "entry_picks", lambda self, entry_id, gw: _picks_payload())
@@ -120,13 +146,17 @@ def test_team_id_loads_a_squad_and_renders_a_weekly_lineup(live_server, browser)
         starters = page.locator("#pitch .player-card").count()
         assert starters == 11
 
-        # fpl_id 9 is the fixture's captain (see _picks_payload); confirm the
-        # rendered pitch actually marks exactly one starter "C" and one "V".
+        # The optimized result must still render exactly one captain and one
+        # vice-captain after comparing against the submitted picks.
         assert page.locator("#pitch .captain-badge", has_text="C").count() == 1
         assert page.locator("#pitch .captain-badge", has_text="V").count() == 1
 
         summary_text = page.inner_text("#weekly-summary")
         assert "GW2 xPts" in summary_text
+        marginal_text = page.inner_text("#marginal-changes")
+        assert "changes vs your current setup" in marginal_text.lower()
+        assert "+10.00 xPts" in marginal_text
+        assert "Player 9 → Player 15" in marginal_text
     finally:
         page.close()
 
@@ -171,5 +201,27 @@ def test_an_invalid_team_id_surfaces_a_visible_error_not_a_silent_failure(live_s
         )
 
         assert "valid" in page.inner_text("#error-banner").lower()
+    finally:
+        page.close()
+
+
+def test_transfer_scan_labels_free_and_hit_modes_before_suggestions(live_server, browser):
+    page = browser.new_page()
+    try:
+        _seed_local_storage_squad(page)
+        page.goto(live_server, wait_until="networkidle", timeout=15000)
+        page.wait_for_selector("#pitch:not(.skeleton)", timeout=15000)
+        page.click("[data-view=transfers]")
+
+        page.click("#run-transfers")
+        page.wait_for_selector("#transfer-results .transfer-mode.free", timeout=30000)
+        assert "Free transfer available" in page.inner_text("#transfer-results .transfer-mode")
+        assert "no hit" in page.inner_text("#transfer-results")
+
+        page.select_option("#free-transfers", "0")
+        page.click("#run-transfers")
+        page.wait_for_selector("#transfer-results .transfer-mode.hit", timeout=30000)
+        assert "Hit scenario" in page.inner_text("#transfer-results .transfer-mode")
+        assert "4-point hit" in page.inner_text("#transfer-results .transfer-mode")
     finally:
         page.close()
