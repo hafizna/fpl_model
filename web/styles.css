@@ -43,6 +43,8 @@ h2 { margin: 4px 0 0; font-size: 19px; letter-spacing: -0.02em; }
 .deadline-block span { color: var(--muted); font-size: 11px; }
 .deadline-block strong { margin-top: 5px; }
 .error-banner { margin: 18px 34px -2px; padding: 12px 15px; border: 1px solid rgba(255,123,114,.35); border-radius: 10px; background: rgba(255,123,114,.08); color: #ffc1bc; font-size: 13px; }
+.sensitivity-banner { margin-bottom: 16px; padding: 12px 15px; border: 1px solid rgba(255,196,92,.35); border-left: 3px solid var(--amber); border-radius: 10px; background: rgba(255,196,92,.08); color: #ffe4b0; font-size: 12px; line-height: 1.5; }
+.sensitivity-banner strong { color: var(--amber); }
 .workspace { padding: 28px 34px 48px; display: grid; grid-template-columns: minmax(640px, 1fr) 360px; gap: 26px; align-items: start; }
 .content-column, .squad-panel { min-width: 0; }
 .view { display: none; }

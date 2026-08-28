@@ -21,9 +21,11 @@ import duckdb
 from fpl_model.decision.autosub import compute_expected_autosub_value
 from fpl_model.decision.lineup import PlayerGameweekProjection, recommend_lineup
 from fpl_model.decision.lineup_store import combine_appearance_probability
+from fpl_model.decision.role_scenario_sensitivity import evaluate_role_scenario_sensitivity
 from fpl_model.decision.squad import CHIP_NAMES, SquadPlayer, validate_squad
 from fpl_model.ingest.squad_snapshot import validate_entry_picks_payload
 from fpl_model.storage import DEFAULT_DATABASE_PATH
+from fpl_model.validation.role_state import RoleStateResult
 
 
 @dataclass(frozen=True, slots=True)
@@ -466,7 +468,33 @@ def _player_payload(player: SquadPlayer, projection: PlayerGameweekProjection) -
     }
 
 
-def _lineup_payload(squad, projection_by_id, gameweek: int) -> dict[str, Any]:
+def _role_state_by_id_for_gameweek(
+    catalog: dict[int, dict[str, Any]], fpl_ids: set[int], gameweek: int
+) -> dict[int, RoleStateResult]:
+    """Read back the role_state release_export.py already bakes into
+    catalog[fpl_id]["gameweeks"][str(gameweek)]["role_state"] -- no second
+    database/release read, matching resolve_entry_picks's own boundary. A
+    player missing a role_state entry (an older release built before this
+    field existed) is simply absent from the result rather than raising, so
+    evaluate_role_scenario_sensitivity treats them as not rotation-risk
+    instead of failing the whole lineup request over a diagnostic gap.
+    """
+    result: dict[int, RoleStateResult] = {}
+    for fpl_id in fpl_ids:
+        row = catalog.get(fpl_id, {}).get("gameweeks", {}).get(str(gameweek), {}).get("role_state")
+        if row is None:
+            continue
+        result[fpl_id] = RoleStateResult(role_state=row["role_state"], reason=row["reason"])
+    return result
+
+
+def _lineup_payload(
+    squad,
+    projection_by_id,
+    gameweek: int,
+    *,
+    catalog: dict[int, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     squad_ids = {player.fpl_id for player in squad.players}
     projection_by_id = {
         fpl_id: projection
@@ -475,6 +503,17 @@ def _lineup_payload(squad, projection_by_id, gameweek: int) -> dict[str, Any]:
     }
     recommendation = recommend_lineup(squad, projection_by_id.values())
     autosub = compute_expected_autosub_value(recommendation, projection_by_id)
+    sensitivity_report = None
+    if catalog is not None:
+        role_state_by_id = _role_state_by_id_for_gameweek(catalog, squad_ids, gameweek)
+        if role_state_by_id:
+            sensitivity = evaluate_role_scenario_sensitivity(
+                squad,
+                tuple(projection_by_id.values()),
+                role_state_by_id=role_state_by_id,
+                base_recommendation=recommendation,
+            )
+            sensitivity_report = sensitivity.report
     return {
         "gameweek": gameweek,
         "formation": recommendation.formation,
@@ -501,6 +540,7 @@ def _lineup_payload(squad, projection_by_id, gameweek: int) -> dict[str, Any]:
         ],
         "expected_autosub_value": autosub.total_expected_bench_value,
         "quality_flags": list(recommendation.data_quality_flags),
+        "role_scenario_sensitivity": sensitivity_report,
     }
 
 
@@ -525,7 +565,7 @@ def recommend_web_lineups(
         selling_prices={} if selling_prices is None else selling_prices,
     )
     lineups = [
-        _lineup_payload(squad, projections[gameweek], gameweek)
+        _lineup_payload(squad, projections[gameweek], gameweek, catalog=catalog)
         for gameweek, _ in horizon.model_runs
     ]
     return {
@@ -561,7 +601,11 @@ def recommend_web_transfers(
         selling_prices=selling_prices,
     )
     baseline_lineups = [
-        _lineup_payload(baseline_squad, projections[gameweek], gameweek)
+        # role_scenario_sensitivity only for the baseline (current, pre-
+        # transfer) squad -- computing it for every candidate transfer too
+        # would multiply the cost of an already-expensive brute-force scan
+        # (recommend_lineup already re-runs once per rotation-risk player).
+        _lineup_payload(baseline_squad, projections[gameweek], gameweek, catalog=catalog)
         for gameweek, _ in horizon.model_runs
     ]
     baseline_xpts = sum(row["total_xpts"] for row in baseline_lineups)
@@ -614,6 +658,7 @@ def recommend_web_transfers(
         "health": health,
         "release_id": release_id,
         "baseline_cumulative_xpts": baseline_xpts,
+        "baseline_lineups": baseline_lineups,
         "recommendation": "hold"
         if not suggestions or suggestions[0]["net_xpts_gain"] <= 0
         else "transfer",

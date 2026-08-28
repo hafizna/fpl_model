@@ -104,6 +104,22 @@ function playerCard(player, captainId, viceId) {
   </article>`;
 }
 
+function renderSensitivityBanner(sensitivity) {
+  const banner = $("#sensitivity-banner");
+  if (!sensitivity || sensitivity.label !== "sensitive") {
+    banner.hidden = true;
+    banner.className = "";
+    banner.innerHTML = "";
+    return;
+  }
+  const players = sensitivity.scenarios_that_change_the_recommendation
+    .map((row) => row.player_name)
+    .join(", ");
+  banner.hidden = false;
+  banner.className = "sensitivity-banner";
+  banner.innerHTML = `<strong>Sensitive recommendation.</strong> This lineup depends on ${players || "a rotation-risk player"}'s involvement -- if they blank, the starting XI or captain would change. Review before treating this as an unconditional best option.`;
+}
+
 function renderWeekly() {
   if (!state.lineups) return;
   const lineup = state.lineups.lineups[0];
@@ -113,6 +129,7 @@ function renderWeekly() {
     <div><span>Formation</span><strong>${lineup.formation}</strong></div>
     <div><span>Captain</span><strong>${lineup.captain.name}</strong></div>
     <div><span>Autosub EV</span><strong>${points(lineup.expected_autosub_value)}</strong></div>`;
+  renderSensitivityBanner(lineup.role_scenario_sensitivity);
   const rows = ["GK", "DEF", "MID", "FWD"].map((position) => {
     const players = lineup.starters.filter((player) => player.position === position);
     return `<div class="pitch-line ${position.toLowerCase()}">${players.map((player) => playerCard(player, lineup.captain.fpl_id, lineup.vice_captain.fpl_id)).join("")}</div>`;

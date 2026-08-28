@@ -17,6 +17,7 @@ from fpl_model.validation.decision_transparency import (
 )
 from fpl_model.validation.release_health import determine_release_health
 from fpl_model.validation.release_orchestration import orchestrate_release_validation
+from fpl_model.validation.role_state import load_role_states, role_state_report
 from fpl_model.webapp.service import (
     ResearchHorizon,
     load_horizon_catalog,
@@ -120,6 +121,11 @@ def build_web_release(
                 model_run_id=model_run_id,
                 fpl_ids=all_fpl_ids,
             )
+            role_states = load_role_states(
+                connection,
+                model_run_id=model_run_id,
+                fpl_ids=all_fpl_ids,
+            )
             for fpl_id, player in catalog.items():
                 projection = projections[gameweek][fpl_id]
                 player["gameweeks"][str(gameweek)].update(
@@ -127,6 +133,7 @@ def build_web_release(
                         "uncertainty": projection.uncertainty,
                         "quality_flags": list(projection.data_quality_flags),
                         "transparency": transparency_report(transparency.get(fpl_id)),
+                        "role_state": role_state_report(role_states.get(fpl_id)),
                     }
                 )
 

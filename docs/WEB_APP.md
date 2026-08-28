@@ -40,7 +40,26 @@ Implemented surfaces:
 - a frozen three-Gameweek raw-xPts outlook;
 - expected autosub value as a separate diagnostic;
 - every legal, affordable same-position single transfer rescored over the same horizon;
-- explicit `RESEARCH_ONLY`/`SHADOW`/`PRODUCTION` release status and pinned model-run metadata.
+- explicit `RESEARCH_ONLY`/`SHADOW`/`PRODUCTION` release status and pinned model-run metadata;
+- a visible `sensitive`-recommendation warning naming the exact rotation-risk player(s) whose
+  blanking would change the starting XI or captain.
+
+### Sensitive-decision state
+
+`role_state` (from `validation/role_state.py`) is baked into `web/release.json` per player per
+Gameweek by `webapp/release_export.py`, the same way `transparency` already is -- no DuckDB
+connection is available in the compact-release deployment mode, so this has to be pre-computed at
+export time rather than queried per request. `webapp/service.py`'s `_lineup_payload` reads it back
+from the already-loaded catalog (no second database/release read) and runs
+`decision/role_scenario_sensitivity.py`'s `evaluate_role_scenario_sensitivity` against the base
+recommendation, attaching the result as `role_scenario_sensitivity` on every lineup response. The
+frontend shows an amber banner naming the player(s) driving a `sensitive` label. This is
+deliberately baseline-only on `POST /api/recommend/transfers` -- computed for the current squad's
+own lineup, not for every candidate transfer -- since that endpoint already brute-forces hundreds
+of candidates and re-running `recommend_lineup` per rotation-risk player per candidate would
+multiply an already expensive scan. `export_web_release.py` must be re-run whenever the release is
+rebuilt for this to stay current; a release built before this feature existed simply has no
+`role_state` field and the frontend banner stays hidden rather than erroring.
 
 ### Loading a squad by Team ID
 

@@ -746,14 +746,30 @@ rank improvement, or a production-approved `AI Score`.
       `selling_price_is_estimated`, surfaced as a visible caveat in the UI rather than implying an
       FPL-exact sell value)
 - [ ] Weekly squad: legal XI, captain, vice-captain, bench, raw xPts, marginal changes, and a small
-      `Assumptions to review` surface only when a material owned-player conflict exists
+      `Assumptions to review` surface only when a material owned-player conflict exists (legal XI,
+      captain/vice-captain, bench, and raw xPts already shipped pre-session; this session added the
+      `Assumptions to review` half -- a `sensitivity-banner` shown only when
+      `role_scenario_sensitivity` returns `sensitive`, naming the exact rotation-risk player(s)
+      driving it. Still open: "marginal changes" -- comparing this week's recommendation against a
+      previous one -- is not built yet)
 - [ ] Three-Gameweek outlook: raw optimized-lineup xPts per GW and cumulative, player contribution,
       fixtures, captaincy, bench depth, and confidence; percentile rating is not an MVP blocker
 - [ ] Transfers: rank hold and validated single-transfer alternatives, show no-hit first, and keep
       hit scenarios, multi-transfer, and chips explicitly separate
 - [ ] Recompute all three menus from a reviewed role scenario without overwriting the base release
 - [ ] Pin every response to an immutable release ID and expose status, capture time, freshness,
-      finality, coverage, and sensitive-decision state
+      finality, coverage, and sensitive-decision state (`release_id`/`health` were already threaded
+      through every response before this session; capture time (`planning_as_of`) and status/label
+      were already surfaced in the sidebar release card. This session closed the sensitive-decision
+      half: `role_state` is now baked into `web/release.json` per player per Gameweek
+      (`webapp/release_export.py`, mirroring how `transparency` was already attached), and
+      `webapp/service.py`'s `_lineup_payload` computes `role_scenario_sensitivity` for the base
+      recommendation from it (deliberately baseline-only on the transfer-scan endpoint -- computing
+      it per candidate would multiply the cost of an already-expensive brute-force scan). Still
+      open: freshness/finality/coverage are not yet exposed as explicit UI-visible fields -- the
+      underlying `validation.passes`/`approval_status` data already exists in the release's own
+      `validation` block from `orchestrate_release_validation`, but the frontend does not render it
+      yet)
 - [x] Add mobile-first interaction and end-to-end tests for Team ID to weekly decision without a CLI
       (`web/styles.css` mobile-first CSS -- `body { min-width: 1120px }` removed and replaced with
       `320px`; two new breakpoints at 860px and 480px collapse the sidebar into a horizontal
