@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import json
+import logging
 import os
+import time
+import uuid
 from functools import lru_cache
 from pathlib import Path
 
 import requests
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
@@ -25,6 +29,46 @@ from fpl_model.webapp.service import (
 
 ROOT = Path(__file__).resolve().parents[1]
 WEB_ROOT = ROOT / "web"
+LOGGER = logging.getLogger("fpl_model.web")
+configured_log_level = os.environ.get("FPL_LOG_LEVEL", "INFO").upper()
+numeric_log_level = getattr(logging, configured_log_level, None)
+if not isinstance(numeric_log_level, int):
+    raise ValueError("FPL_LOG_LEVEL must be a standard Python logging level")
+LOGGER.setLevel(numeric_log_level)
+
+
+def _env_bool(name: str, *, default: bool) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{name} must be true or false")
+
+
+def _allowed_origins() -> list[str]:
+    configured = os.environ.get("FPL_ALLOWED_ORIGINS")
+    if configured is None:
+        return ["http://localhost:3000", "http://127.0.0.1:3000"]
+    return [origin.strip() for origin in configured.split(",") if origin.strip()]
+
+
+def _allowed_release_health() -> set[str]:
+    default = "shadow,production" if os.environ.get("VERCEL") == "1" else "research,shadow,production"
+    configured = os.environ.get(
+        "FPL_ALLOWED_RELEASE_HEALTH",
+        default,
+    )
+    values = {value.strip().lower() for value in configured.split(",") if value.strip()}
+    supported = {"research", "shadow", "production"}
+    if not values or not values <= supported:
+        raise ValueError(
+            "FPL_ALLOWED_RELEASE_HEALTH must contain research, shadow, and/or production"
+        )
+    return values
 
 
 def _database_path() -> Path:
@@ -79,18 +123,70 @@ class SquadRequest(BaseModel):
     current_setup: CurrentSetupRequest | None = None
 
 
+expose_api_docs = _env_bool(
+    "FPL_EXPOSE_API_DOCS",
+    default=os.environ.get("VERCEL") != "1",
+)
 app = FastAPI(
     title="FPL Model Web API",
     version="0.1.0",
     description="Research-only browser boundary over the deterministic FPL decision engine.",
+    docs_url="/docs" if expose_api_docs else None,
+    redoc_url="/redoc" if expose_api_docs else None,
+    openapi_url="/openapi.json" if expose_api_docs else None,
 )
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=_allowed_origins(),
     allow_credentials=False,
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],
 )
+
+
+@app.middleware("http")
+async def request_observability(request: Request, call_next):
+    """Emit one privacy-safe structured record for platform log alerts.
+
+    The route template is logged instead of the raw URL, so a Team ID in
+    ``/api/squad/from-entry/{entry_id}`` never lands in application logs.
+    """
+
+    request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
+    started = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        LOGGER.exception(
+            json.dumps(
+                {
+                    "event": "http_request",
+                    "request_id": request_id,
+                    "method": request.method,
+                    "route": "unmatched",
+                    "status_code": 500,
+                    "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+                },
+                separators=(",", ":"),
+            )
+        )
+        raise
+    route = getattr(request.scope.get("route"), "path", "unmatched")
+    LOGGER.info(
+        json.dumps(
+            {
+                "event": "http_request",
+                "request_id": request_id,
+                "method": request.method,
+                "route": route,
+                "status_code": response.status_code,
+                "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+            },
+            separators=(",", ":"),
+        )
+    )
+    response.headers["X-Request-ID"] = request_id
+    return response
 
 
 @lru_cache(maxsize=1)
@@ -98,16 +194,45 @@ def _bootstrap() -> dict[str, object]:
     return load_web_bootstrap(_database_path(), release_path=_release_path())
 
 
-@app.get("/api/health")
-def health() -> dict[str, object]:
+@app.get("/api/live")
+def live() -> dict[str, object]:
+    """Cheap process liveness check; does not touch the release artifact."""
+
+    return {"ok": True, "service": "fpl-web-api"}
+
+
+def _readiness_payload() -> dict[str, object]:
     database_path = _database_path()
     release_path = _release_path()
+    bootstrap_payload = _bootstrap()
+    release = bootstrap_payload["release"]
+    allowed_health = _allowed_release_health()
+    if release["health"] not in allowed_health:
+        raise ValueError(
+            f"release health {release['health']!r} is not allowed in this environment"
+        )
     return {
-        "ok": release_path is not None or database_path.exists(),
-        "database_path": str(database_path),
-        "release_path": None if release_path is None else str(release_path),
+        "ok": True,
+        "ready": True,
         "mode": "compact_release" if release_path is not None else "database",
+        "release_id": release["release_id"],
+        "release_health": release["health"],
+        "planning_as_of": release["planning_as_of"],
+        "horizon": [row["gameweek"] for row in release["model_runs"]],
+        "catalog_players": len(bootstrap_payload["players"]),
+        "database_exists": database_path.exists(),
     }
+
+
+@app.get("/api/health")
+@app.get("/api/ready")
+def readiness() -> dict[str, object]:
+    """Validate that the pinned release can actually serve decisions."""
+
+    try:
+        return _readiness_payload()
+    except (ValueError, OSError, KeyError) as exc:
+        raise HTTPException(status_code=503, detail=f"decision release is not ready: {exc}") from exc
 
 
 @app.get("/api/bootstrap")
@@ -187,6 +312,12 @@ def lineups(request: SquadRequest) -> dict[str, object]:
 
 @app.post("/api/recommend/transfers")
 def transfers(request: SquadRequest, top_n: int = 8) -> dict[str, object]:
+    try:
+        transfer_scan_enabled = _env_bool("FPL_TRANSFER_SCAN_ENABLED", default=True)
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if not transfer_scan_enabled:
+        raise HTTPException(status_code=503, detail="transfer scan is disabled by the operator")
     try:
         return recommend_web_transfers(
             tuple(request.fpl_ids),

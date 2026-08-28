@@ -846,6 +846,14 @@ rank improvement, or a production-approved `AI Score`.
 
 - [ ] Deploy the application and a separately operable projection/decision API with documented
       secrets, backups, rollback, monitoring, and cost limits
+      ([x] repository-side deployment contract: pinned Python runtime, 30-second function timeout,
+      bundle exclusions, security headers, real release readiness, cheap liveness, privacy-safe
+      request IDs/logging, transfer-scan kill switch, and `docs/DEPLOYMENT_RUNBOOK.md` covering
+      preview/promotion, environment variables, external monitoring, rollback, stateless backup,
+      and cost policy; [ ] external work still required: create/link the Vercel project, configure
+      preview/production environments and alerts, run a real preview smoke test, promote, and record
+      the known-good deployment/release IDs. The stateful refresh worker remains separately operable
+      and is the next checklist item rather than being hidden inside the web function)
 - [ ] Schedule and alert the complete snapshot-to-release refresh before every deadline
 - [ ] Add authentication, entitlement, privacy/terms, account deletion, support, and Indonesian
       payment flow without storing FPL credentials

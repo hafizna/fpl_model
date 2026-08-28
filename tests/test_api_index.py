@@ -10,13 +10,14 @@ earlier test's stale bootstrap.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pytest
 import requests
 from fastapi.testclient import TestClient
 
-from api.index import _bootstrap, app
+from api.index import _allowed_release_health, _bootstrap, app
 from fpl_model.ingest.fpl import FPLClient
 from tests.test_webapp_service import _release_file
 
@@ -62,7 +63,68 @@ def test_health_reports_compact_release_mode(tmp_path: Path, monkeypatch: pytest
     response = client.get("/api/health")
 
     assert response.status_code == 200
-    assert response.json()["mode"] == "compact_release"
+    payload = response.json()
+    assert payload["mode"] == "compact_release"
+    assert payload["ready"] is True
+    assert payload["release_health"] == "shadow"
+    assert payload["horizon"] == [2, 3, 4]
+    assert payload["catalog_players"] == 15
+
+
+def test_liveness_does_not_require_loading_the_release(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    missing = tmp_path / "missing.json"
+    monkeypatch.setenv("FPL_WEB_RELEASE_PATH", str(missing))
+    monkeypatch.setenv("FPL_DATABASE_PATH", str(tmp_path / "missing.duckdb"))
+
+    response = client.get("/api/live")
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "service": "fpl-web-api"}
+
+
+def test_readiness_fails_when_the_release_cannot_be_loaded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    broken_release = tmp_path / "broken.json"
+    broken_release.write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("FPL_WEB_RELEASE_PATH", str(broken_release))
+    monkeypatch.setenv("FPL_DATABASE_PATH", str(tmp_path / "missing.duckdb"))
+
+    response = client.get("/api/ready")
+
+    assert response.status_code == 503
+    assert "not ready" in response.json()["detail"]
+
+
+def test_readiness_fails_closed_when_release_health_is_not_allowed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    _use_release(tmp_path, monkeypatch)
+    monkeypatch.setenv("FPL_ALLOWED_RELEASE_HEALTH", "production")
+
+    response = client.get("/api/ready")
+
+    assert response.status_code == 503
+    assert "release health 'shadow' is not allowed" in response.json()["detail"]
+
+
+def test_vercel_default_never_allows_a_research_release(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("FPL_ALLOWED_RELEASE_HEALTH", raising=False)
+    monkeypatch.setenv("VERCEL", "1")
+
+    assert _allowed_release_health() == {"shadow", "production"}
+
+
+def test_every_response_has_a_traceable_request_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    _use_release(tmp_path, monkeypatch)
+
+    generated = client.get("/api/live")
+    supplied = client.get("/api/health", headers={"X-Request-ID": "alpha-smoke-1"})
+
+    assert len(generated.headers["X-Request-ID"]) == 32
+    assert supplied.headers["X-Request-ID"] == "alpha-smoke-1"
 
 
 def test_bootstrap_returns_the_release_catalog(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -91,6 +153,23 @@ def test_squad_from_entry_resolves_a_live_picks_payload(
     assert sorted(payload["fpl_ids"]) == list(range(1, 16))
     assert payload["captain_fpl_id"] == 9
     assert payload["selling_price_is_estimated"] is True
+
+
+def test_request_log_uses_route_template_instead_of_private_team_id(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+):
+    _use_release(tmp_path, monkeypatch)
+    monkeypatch.setattr(FPLClient, "entry_picks", lambda self, entry_id, gw: _picks_payload())
+
+    with caplog.at_level(logging.INFO, logger="fpl_model.web"):
+        response = client.get("/api/squad/from-entry/123456")
+
+    assert response.status_code == 200
+    request_logs = [record.message for record in caplog.records if '"event":"http_request"' in record.message]
+    assert any('"route":"/api/squad/from-entry/{entry_id}"' in row for row in request_logs)
+    assert all("123456" not in row for row in request_logs)
 
 
 def test_squad_from_entry_accepts_an_explicit_gameweek(
@@ -266,3 +345,18 @@ def test_recommend_lineups_rejects_a_negative_override_xpts(
     # Rejected by Pydantic field validation (ge=0.0) before reaching the
     # service layer, so this is a 422 from FastAPI's own request validation.
     assert response.status_code == 422
+
+
+def test_transfer_scan_can_be_disabled_by_operator(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    _use_release(tmp_path, monkeypatch)
+    monkeypatch.setenv("FPL_TRANSFER_SCAN_ENABLED", "false")
+
+    response = client.post(
+        "/api/recommend/transfers",
+        json={"fpl_ids": list(range(1, 16))},
+    )
+
+    assert response.status_code == 503
+    assert "disabled by the operator" in response.json()["detail"]
