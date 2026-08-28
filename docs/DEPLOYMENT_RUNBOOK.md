@@ -17,7 +17,8 @@ external refresh worker (stateful, scheduled separately)
 Vercel detects `api/index.py` as one FastAPI function. The function may read the packaged compact
 release and calculate decisions, but must not refresh FPL data, write DuckDB, or persist manager
 state. A refresh can exceed request limits and needs durable artifacts plus precise deadline
-scheduling; it belongs in a separately monitored worker/CI job.
+scheduling; it belongs in the separately monitored, platform-neutral
+`scripts/run_deadline_refresh.py` worker documented in `docs/DEADLINE_REFRESH_WORKER.md`.
 
 ## Runtime contract
 

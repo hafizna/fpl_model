@@ -855,6 +855,13 @@ rank improvement, or a production-approved `AI Score`.
       the known-good deployment/release IDs. The stateful refresh worker remains separately operable
       and is the next checklist item rather than being hidden inside the web function)
 - [ ] Schedule and alert the complete snapshot-to-release refresh before every deadline
+      ([x] platform-neutral worker contract: `scripts/run_deadline_refresh.py` wraps the existing
+      full materialization with an exclusive lock, optional timestamped DuckDB backup, validation
+      fail-close, atomic `web/release.json` publication, `deadline_refresh_status_v1`, distinct
+      pipeline/alert exit codes, and an environment-only generic alert webhook; failure-path tests
+      prove the previous release is retained. [ ] external adapter still required: choose and
+      configure Windows Task Scheduler, persistent CI runner, VPS timer, or managed job runner for
+      the real T-6h/T-75m schedule and missing-run alert. Hosting remains intentionally undecided)
 - [ ] Add authentication, entitlement, privacy/terms, account deletion, support, and Indonesian
       payment flow without storing FPL credentials
 - [ ] Run a 10-20 user closed alpha across at least three deadlines; record conflicts,

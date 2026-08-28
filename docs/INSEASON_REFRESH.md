@@ -58,6 +58,16 @@ The production-shaped manual sequence above is also available as one fail-closed
 python scripts/materialize_release.py --help
 ```
 
+For scheduled operations, use the platform-neutral wrapper:
+
+```bash
+python scripts/run_deadline_refresh.py --help
+```
+
+It adds an exclusive lock, optional pre-run DuckDB backup, atomic compact-release publication,
+machine-readable status/exit codes, and optional webhook alerting around the same materialization
+function. See `docs/DEADLINE_REFRESH_WORKER.md`. It does not relax any finality or freshness gate.
+
 It additionally attaches the named calibration and uncertainty artifacts and runs manifest,
 freshness, approval, and health validation over the resulting three model runs. The command exits
 non-zero when manifest or freshness validation fails; a healthy release can still remain
