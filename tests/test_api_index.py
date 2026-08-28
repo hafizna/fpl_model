@@ -18,8 +18,9 @@ import pytest
 import requests
 from fastapi.testclient import TestClient
 
-from api.index import _allowed_release_health, _bootstrap, app
+from api.index import ALPHA_RATE_LIMITER, _allowed_release_health, _bootstrap, app
 from fpl_model.ingest.fpl import FPLClient
+from fpl_model.webapp.alpha_access import TOKEN_HEADER, hash_access_token
 from tests.test_webapp_service import _ready_rating_artifact, _release_file
 
 client = TestClient(app)
@@ -28,8 +29,10 @@ client = TestClient(app)
 @pytest.fixture(autouse=True)
 def _clear_bootstrap_cache():
     _bootstrap.cache_clear()
+    ALPHA_RATE_LIMITER.clear()
     yield
     _bootstrap.cache_clear()
+    ALPHA_RATE_LIMITER.clear()
 
 
 def _use_release(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, **kwargs) -> None:
@@ -70,6 +73,96 @@ def test_health_reports_compact_release_mode(tmp_path: Path, monkeypatch: pytest
     assert payload["release_health"] == "shadow"
     assert payload["horizon"] == [2, 3, 4]
     assert payload["catalog_players"] == 15
+    assert payload["alpha_access_enabled"] is False
+    assert payload["alpha_rate_limit_scope"] is None
+
+
+def test_alpha_gate_protects_decisions_but_not_monitoring(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    _use_release(tmp_path, monkeypatch)
+    token = "alice-closed-alpha-code"
+    monkeypatch.setenv("FPL_REQUIRE_ALPHA_ACCESS", "true")
+    monkeypatch.setenv(
+        "FPL_ALPHA_ACCESS_TOKEN_HASHES", f"alice={hash_access_token(token)}"
+    )
+
+    assert client.get("/api/live").status_code == 200
+    ready = client.get("/api/ready")
+    denied = client.get("/api/bootstrap")
+    allowed = client.get("/api/bootstrap", headers={TOKEN_HEADER: token})
+
+    assert ready.status_code == 200
+    assert ready.json()["alpha_access_enabled"] is True
+    assert ready.json()["alpha_access_required"] is True
+    assert denied.status_code == 401
+    assert denied.json()["code"] == "alpha_access_required"
+    assert denied.headers["WWW-Authenticate"] == "FPLAlpha"
+    assert len(denied.headers["X-Request-ID"]) == 32
+    assert denied.headers["Cache-Control"] == "private, no-store"
+    assert allowed.status_code == 200
+    assert allowed.headers["X-RateLimit-Scope"] == "process"
+    assert allowed.headers["Cache-Control"] == "private, no-store"
+    assert allowed.headers["Vary"] == TOKEN_HEADER
+
+
+def test_required_alpha_gate_fails_readiness_when_no_codes_exist(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    _use_release(tmp_path, monkeypatch)
+    monkeypatch.setenv("FPL_REQUIRE_ALPHA_ACCESS", "true")
+
+    ready = client.get("/api/ready")
+    bootstrap = client.get("/api/bootstrap")
+
+    assert ready.status_code == 503
+    assert "no tester codes" in ready.json()["detail"]
+    assert bootstrap.status_code == 503
+
+
+def test_alpha_general_rate_limit_is_per_code(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    _use_release(tmp_path, monkeypatch)
+    alice = "alice-closed-alpha-code"
+    bob = "bob-closed-alpha-code-12"
+    monkeypatch.setenv(
+        "FPL_ALPHA_ACCESS_TOKEN_HASHES",
+        f"alice={hash_access_token(alice)},bob={hash_access_token(bob)}",
+    )
+    monkeypatch.setenv("FPL_ALPHA_REQUESTS_PER_MINUTE", "1")
+
+    first = client.get("/api/bootstrap", headers={TOKEN_HEADER: alice})
+    rejected = client.get("/api/bootstrap", headers={TOKEN_HEADER: alice})
+    independent = client.get("/api/bootstrap", headers={TOKEN_HEADER: bob})
+
+    assert first.status_code == 200
+    assert first.headers["X-RateLimit-Remaining"] == "0"
+    assert rejected.status_code == 429
+    assert int(rejected.headers["Retry-After"]) >= 1
+    assert independent.status_code == 200
+
+
+def test_alpha_transfer_scan_has_a_separate_stricter_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    _use_release(tmp_path, monkeypatch)
+    token = "alice-closed-alpha-code"
+    monkeypatch.setenv(
+        "FPL_ALPHA_ACCESS_TOKEN_HASHES", f"alice={hash_access_token(token)}"
+    )
+    monkeypatch.setenv("FPL_ALPHA_REQUESTS_PER_MINUTE", "10")
+    monkeypatch.setenv("FPL_ALPHA_TRANSFER_SCANS_PER_MINUTE", "1")
+    headers = {TOKEN_HEADER: token}
+
+    # The first request reaches Pydantic (422); the second is stopped by the
+    # transfer-work limiter before any validation or expensive scan.
+    first = client.post("/api/recommend/transfers", json={}, headers=headers)
+    rejected = client.post("/api/recommend/transfers", json={}, headers=headers)
+
+    assert first.status_code == 422
+    assert rejected.status_code == 429
+    assert "Transfer scan limit" in rejected.json()["detail"]
 
 
 def test_liveness_does_not_require_loading_the_release(

@@ -18,6 +18,7 @@ const state = {
   roleScenarioOverrides: [],
   lineups: null,
   transfers: null,
+  alphaToken: sessionStorage.getItem("touchline-alpha-token"),
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -37,13 +38,39 @@ function requestBody() {
 }
 
 async function api(path, options = {}) {
+  const accessHeaders = state.alphaToken ? { "X-FPL-Alpha-Token": state.alphaToken } : {};
   const response = await fetch(path, {
     ...options,
-    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+    headers: { "Content-Type": "application/json", ...accessHeaders, ...(options.headers || {}) },
   });
   const payload = await response.json();
-  if (!response.ok) throw new Error(payload.detail || `Request failed (${response.status})`);
+  if (!response.ok) {
+    const retryAfter = response.headers.get("Retry-After");
+    const suffix = response.status === 429 && retryAfter ? ` Try again in ${retryAfter}s.` : "";
+    const error = new Error(`${payload.detail || `Request failed (${response.status})`}${suffix}`);
+    error.status = response.status;
+    error.code = payload.code;
+    if (response.status === 401 && payload.code === "alpha_access_required") {
+      state.alphaToken = null;
+      sessionStorage.removeItem("touchline-alpha-token");
+      showAccessGate(error.message);
+    }
+    throw error;
+  }
   return payload;
+}
+
+function showAccessGate(message = "") {
+  const gate = $("#access-gate");
+  gate.hidden = false;
+  $("#access-message").textContent = message;
+  window.setTimeout(() => $("#access-code").focus(), 0);
+}
+
+function hideAccessGate() {
+  $("#access-gate").hidden = true;
+  $("#access-code").value = "";
+  $("#access-message").textContent = "";
 }
 
 function showError(message) {
@@ -414,16 +441,10 @@ function bindNavigation() {
   }));
 }
 
-async function init() {
-  bindNavigation();
-  $("#refresh-lineup").addEventListener("click", runLineups);
-  $("#run-transfers").addEventListener("click", runTransfers);
-  $("#load-team-id").addEventListener("click", loadFromTeamId);
-  $("#team-id").addEventListener("keydown", (event) => { if (event.key === "Enter") loadFromTeamId(); });
-  $("#bank").addEventListener("change", runLineups);
-  $("#free-transfers").addEventListener("change", resetTransfersView);
+async function loadWorkspace() {
   try {
     state.bootstrap = await api("/api/bootstrap");
+    hideAccessGate();
     if (state.selected.some((id) => !playerById(id))) {
       state.selected = DEFAULT_SQUAD;
       state.sellingPrices = {};
@@ -448,8 +469,40 @@ async function init() {
     renderSquadEditor();
     await runLineups();
   } catch (error) {
-    showError(error.message);
+    if (error.code !== "alpha_access_required") showError(error.message);
   }
+}
+
+async function submitAccessCode(event) {
+  event.preventDefault();
+  const code = $("#access-code").value.trim();
+  if (code.length < 16) {
+    $("#access-message").textContent = "The access code must contain at least 16 characters.";
+    return;
+  }
+  const button = $("#access-submit");
+  button.disabled = true;
+  button.textContent = "Checkingâ€¦";
+  state.alphaToken = code;
+  sessionStorage.setItem("touchline-alpha-token", code);
+  try {
+    await loadWorkspace();
+  } finally {
+    button.disabled = false;
+    button.textContent = "Open workspace";
+  }
+}
+
+async function init() {
+  bindNavigation();
+  $("#refresh-lineup").addEventListener("click", runLineups);
+  $("#run-transfers").addEventListener("click", runTransfers);
+  $("#load-team-id").addEventListener("click", loadFromTeamId);
+  $("#team-id").addEventListener("keydown", (event) => { if (event.key === "Enter") loadFromTeamId(); });
+  $("#bank").addEventListener("change", runLineups);
+  $("#free-transfers").addEventListener("change", resetTransfersView);
+  $("#access-form").addEventListener("submit", submitAccessCode);
+  await loadWorkspace();
 }
 
 init();

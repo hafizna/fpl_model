@@ -266,7 +266,8 @@ external transactional manager-state store.
 ## Current limits
 
 - research/shadow projection release only;
-- no authentication or multi-user manager storage;
+- controlled-alpha tester-code gate only; no account authentication, entitlement, or multi-user
+  manager storage;
 - no general multi-transfer or chip-aware optimization;
 - transfer search is one move, evaluated over the frozen three-Gameweek horizon;
 - percentile rating is implemented and reproducible, but remains labelled `Model Preview` until
@@ -279,3 +280,11 @@ The web runtime can be started directly with `scripts/run_web_app.py` (`FPL_WEB_
 `scripts/smoke_test_web.py` is the release-aware promotion check; it verifies that liveness,
 readiness, bootstrap, catalog, horizon, and materialized rating benchmark all describe the same
 immutable release.
+
+For a controlled alpha, the operator can require individually labelled access codes. Only SHA-256
+digests are configured on the server; the plaintext code is sent in `X-FPL-Alpha-Token` and retained
+in the browser's `sessionStorage` for that session only. Decision/catalog routes are protected while
+`/api/live` and `/api/ready` remain available to monitors. Per-code limits are process-local (60
+protected requests and two transfer scans per minute by default), so this boundary is intentionally
+limited to a small single-instance alpha and is not presented as public authentication or global
+abuse protection.

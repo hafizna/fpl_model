@@ -13,11 +13,16 @@ from pathlib import Path
 import requests
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from fpl_model.ingest.fpl import FPLClient
 from fpl_model.storage import DEFAULT_DATABASE_PATH
+from fpl_model.webapp.alpha_access import (
+    TOKEN_HEADER,
+    AlphaAccessConfig,
+    ProcessRateLimiter,
+)
 from fpl_model.webapp.service import (
     CurrentSquadSetup,
     RoleScenarioOverride,
@@ -35,6 +40,7 @@ numeric_log_level = getattr(logging, configured_log_level, None)
 if not isinstance(numeric_log_level, int):
     raise ValueError("FPL_LOG_LEVEL must be a standard Python logging level")
 LOGGER.setLevel(numeric_log_level)
+ALPHA_RATE_LIMITER = ProcessRateLimiter()
 
 
 def _env_bool(name: str, *, default: bool) -> bool:
@@ -140,8 +146,105 @@ app.add_middleware(
     allow_origins=_allowed_origins(),
     allow_credentials=False,
     allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type"],
+    allow_headers=["Content-Type", TOKEN_HEADER],
 )
+
+
+def _alpha_access_config() -> AlphaAccessConfig:
+    return AlphaAccessConfig.from_environment(os.environ)
+
+
+def _protected_alpha_path(path: str) -> bool:
+    return path == "/api/bootstrap" or path.startswith(("/api/squad/", "/api/recommend/"))
+
+
+def _private_alpha_response(response):
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["Vary"] = TOKEN_HEADER
+    return response
+
+
+@app.middleware("http")
+async def alpha_access_control(request: Request, call_next):
+    """Gate decision data and bound per-tester work during a controlled alpha."""
+
+    if not _protected_alpha_path(request.url.path):
+        return await call_next(request)
+    try:
+        config = _alpha_access_config()
+    except ValueError:
+        LOGGER.exception("invalid closed-alpha access configuration")
+        return _private_alpha_response(
+            JSONResponse(
+                status_code=503,
+                content={
+                    "detail": "closed-alpha access is unavailable due to operator configuration"
+                },
+            )
+        )
+    if not config.enabled:
+        if config.required:
+            return _private_alpha_response(
+                JSONResponse(
+                    status_code=503,
+                    content={"detail": "closed-alpha access is required but no tester codes exist"},
+                )
+            )
+        return _private_alpha_response(await call_next(request))
+
+    identity = config.authenticate(request.headers.get(TOKEN_HEADER))
+    if identity is None:
+        return _private_alpha_response(
+            JSONResponse(
+                status_code=401,
+                content={
+                    "detail": "A valid closed-alpha access code is required.",
+                    "code": "alpha_access_required",
+                },
+                headers={"WWW-Authenticate": "FPLAlpha"},
+            )
+        )
+
+    general = ALPHA_RATE_LIMITER.check(
+        identity.digest,
+        "general",
+        limit=config.requests_per_minute,
+    )
+    if not general.allowed:
+        return _private_alpha_response(
+            JSONResponse(
+                status_code=429,
+                content={"detail": "Too many alpha requests; retry after the indicated delay."},
+                headers={"Retry-After": str(general.retry_after_seconds)},
+            )
+        )
+    transfer = None
+    if request.url.path == "/api/recommend/transfers":
+        transfer = ALPHA_RATE_LIMITER.check(
+            identity.digest,
+            "transfer",
+            limit=config.transfer_scans_per_minute,
+        )
+        if not transfer.allowed:
+            return _private_alpha_response(
+                JSONResponse(
+                    status_code=429,
+                    content={
+                        "detail": "Transfer scan limit reached; retry after the indicated delay."
+                    },
+                    headers={"Retry-After": str(transfer.retry_after_seconds)},
+                )
+            )
+
+    response = await call_next(request)
+    response.headers["X-RateLimit-Scope"] = "process"
+    response.headers["X-RateLimit-Limit"] = str(
+        transfer.limit if transfer is not None else general.limit
+    )
+    response.headers["X-RateLimit-Remaining"] = str(
+        transfer.remaining if transfer is not None else general.remaining
+    )
+    return _private_alpha_response(response)
 
 
 @app.middleware("http")
@@ -207,6 +310,9 @@ def _readiness_payload() -> dict[str, object]:
     bootstrap_payload = _bootstrap()
     release = bootstrap_payload["release"]
     allowed_health = _allowed_release_health()
+    alpha_access = _alpha_access_config()
+    if alpha_access.required and not alpha_access.enabled:
+        raise ValueError("closed-alpha access is required but no tester codes are configured")
     if release["health"] not in allowed_health:
         raise ValueError(
             f"release health {release['health']!r} is not allowed in this environment"
@@ -234,6 +340,9 @@ def _readiness_payload() -> dict[str, object]:
         "rating_benchmark_id": (
             None if not isinstance(rating_benchmark, dict) else rating_benchmark.get("artifact_id")
         ),
+        "alpha_access_enabled": alpha_access.enabled,
+        "alpha_access_required": alpha_access.required,
+        "alpha_rate_limit_scope": "process" if alpha_access.enabled else None,
     }
 
 

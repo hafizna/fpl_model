@@ -4,14 +4,26 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from typing import Any
 from urllib.request import Request, urlopen
 
+from fpl_model.webapp.alpha_access import TOKEN_HEADER
 
-def _get_json(base_url: str, path: str, *, timeout_seconds: float) -> dict[str, Any]:
+
+def _get_json(
+    base_url: str,
+    path: str,
+    *,
+    timeout_seconds: float,
+    access_token: str | None,
+) -> dict[str, Any]:
+    headers = {"Accept": "application/json", "User-Agent": "fpl-runtime-smoke/1"}
+    if access_token is not None:
+        headers[TOKEN_HEADER] = access_token
     request = Request(
         f"{base_url.rstrip('/')}{path}",
-        headers={"Accept": "application/json", "User-Agent": "fpl-runtime-smoke/1"},
+        headers=headers,
     )
     with urlopen(request, timeout=timeout_seconds) as response:  # noqa: S310 - operator URL
         if response.status != 200:
@@ -28,12 +40,19 @@ def check_web_runtime(
     expected_release_id: str | None = None,
     allowed_health: frozenset[str] = frozenset({"shadow", "production"}),
     timeout_seconds: float = 10.0,
+    access_token: str | None = None,
 ) -> dict[str, Any]:
     """Verify liveness, readiness, and bootstrap all describe the same release."""
 
-    live = _get_json(base_url, "/api/live", timeout_seconds=timeout_seconds)
-    ready = _get_json(base_url, "/api/ready", timeout_seconds=timeout_seconds)
-    bootstrap = _get_json(base_url, "/api/bootstrap", timeout_seconds=timeout_seconds)
+    live = _get_json(
+        base_url, "/api/live", timeout_seconds=timeout_seconds, access_token=access_token
+    )
+    ready = _get_json(
+        base_url, "/api/ready", timeout_seconds=timeout_seconds, access_token=access_token
+    )
+    bootstrap = _get_json(
+        base_url, "/api/bootstrap", timeout_seconds=timeout_seconds, access_token=access_token
+    )
 
     release = bootstrap.get("release")
     players = bootstrap.get("players")
@@ -83,6 +102,11 @@ def parse_args() -> argparse.Namespace:
         help="Comma-separated release health states accepted by this environment.",
     )
     parser.add_argument("--timeout-seconds", type=float, default=10.0)
+    parser.add_argument(
+        "--access-token-env",
+        default="FPL_ALPHA_ACCESS_TOKEN",
+        help="Environment variable containing the plaintext tester code; never pass it as an argument.",
+    )
     return parser.parse_args()
 
 
@@ -99,6 +123,7 @@ def main() -> None:
             expected_release_id=args.expected_release_id,
             allowed_health=allowed_health,
             timeout_seconds=args.timeout_seconds,
+            access_token=os.environ.get(args.access_token_env),
         )
     except Exception as exc:  # one machine-readable boundary for deployment automation
         print(

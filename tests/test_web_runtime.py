@@ -55,19 +55,28 @@ def test_runtime_address_rejects_invalid_ports(monkeypatch: pytest.MonkeyPatch, 
 
 def test_smoke_contract_verifies_one_consistent_release(monkeypatch: pytest.MonkeyPatch):
     responses = _runtime_responses()
+    observed_tokens = []
+
+    def fake_get_json(base_url, path, timeout_seconds, access_token):
+        observed_tokens.append(access_token)
+        return responses[path]
+
     monkeypatch.setattr(
         "scripts.smoke_test_web._get_json",
-        lambda base_url, path, timeout_seconds: responses[path],
+        fake_get_json,
     )
 
     report = check_web_runtime(
         "https://alpha.example/",
         expected_release_id="release_test",
+        access_token="operator-session-token",
     )
 
     assert report["passes"] is True
     assert report["release_id"] == "release_test"
     assert report["rating_benchmark_id"] == "benchmark_test"
+    assert observed_tokens == ["operator-session-token"] * 3
+    assert "operator-session-token" not in str(report)
 
 
 def test_smoke_contract_rejects_cross_release_bootstrap(monkeypatch: pytest.MonkeyPatch):
@@ -75,7 +84,7 @@ def test_smoke_contract_rejects_cross_release_bootstrap(monkeypatch: pytest.Monk
     responses["/api/bootstrap"]["release"]["release_id"] = "different_release"
     monkeypatch.setattr(
         "scripts.smoke_test_web._get_json",
-        lambda base_url, path, timeout_seconds: responses[path],
+        lambda base_url, path, timeout_seconds, access_token: responses[path],
     )
 
     with pytest.raises(ValueError, match="release IDs differ"):

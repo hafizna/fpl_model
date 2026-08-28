@@ -54,12 +54,44 @@ store.
 | `FPL_ALLOWED_RELEASE_HEALTH` | `research,shadow,production` | `shadow,production` for alpha; `production` when approved | no |
 | `FPL_TRANSFER_SCAN_ENABLED` | `true` | `true` for controlled alpha | no |
 | `FPL_ALLOWED_ORIGINS` | local/preview origin if cross-origin | exact frontend origin if API is split | no |
+| `FPL_REQUIRE_ALPHA_ACCESS` | `false` | `true` | no |
+| `FPL_ALPHA_ACCESS_TOKEN_HASHES` | omit | platform secret: `label=sha256,...` | yes |
+| `FPL_ALPHA_REQUESTS_PER_MINUTE` | `60` | start at `60` | no |
+| `FPL_ALPHA_TRANSFER_SCANS_PER_MINUTE` | `2` | start at `2` | no |
 
 The current stateless alpha has no application secret because it has no account system, payment
 provider, cron endpoint, or server-side manager database. Do not invent a shared frontend API key:
 anything shipped to browser JavaScript is public. Authentication/entitlement and a global platform
 rate limit are required before opening transfer scans beyond a controlled alpha. A future cron
 endpoint must use a server-side `CRON_SECRET` of at least 16 random characters.
+
+## Controlled-alpha access boundary
+
+This repository includes a deliberately small pre-account gate for 10-20 named testers. Issue a
+different random code of at least 16 characters to each person; 24+ random bytes from a password
+manager is preferred. Do not put plaintext codes on a command line, in Git, in URLs, or in server
+environment variables. Generate each digest interactively:
+
+```powershell
+.venv\Scripts\python.exe scripts\hash_alpha_access_token.py --label alice
+```
+
+Store the resulting entries as a platform secret, for example
+`alice=<sha256>,bob=<sha256>`, and set `FPL_REQUIRE_ALPHA_ACCESS=true`. `/api/bootstrap`, public-Team-ID
+loading, lineup recommendations, and transfer recommendations then require the
+`X-FPL-Alpha-Token` header. `/api/live` and `/api/ready` remain public for monitors; readiness reports
+whether the gate is enabled/required and fails closed when access is required but no digest exists.
+
+The browser asks for the code and retains it in `sessionStorage`, so closing that browser tab/session
+clears it. HTTPS is mandatory outside localhost because the plaintext code travels in a request
+header. Revoke a tester by removing their labelled digest from the platform secret and restarting or
+redeploying every instance. Never ask a tester for their FPL password or session cookie.
+
+The default limit is 60 protected requests and two transfer scans per tester per minute. A rejected
+request returns HTTP 429 plus `Retry-After`; successful gated responses identify the limit as
+`X-RateLimit-Scope: process`. This is suitable only for a controlled single-instance alpha. It is
+not a distributed/global rate limiter: before public or horizontally scaled use, enforce limits in a
+shared gateway/store and replace tester codes with real authentication and entitlement.
 
 ## Platform-neutral container path
 
@@ -88,6 +120,15 @@ boundary with the same command:
   --base-url http://127.0.0.1:8000 `
   --expected-release-id <EXPECTED_RELEASE_ID> `
   --allowed-health shadow,production
+```
+
+For a gated runtime, put the plaintext tester code in the operator process environment only; the
+script deliberately has no plaintext-token CLI argument:
+
+```powershell
+$env:FPL_ALPHA_ACCESS_TOKEN = "<TESTER_CODE>"
+.venv\Scripts\python.exe scripts\smoke_test_web.py --base-url <PREVIEW_URL>
+Remove-Item Env:FPL_ALPHA_ACCESS_TOKEN
 ```
 
 `web_runtime_smoke_v1` fails unless liveness, readiness, and bootstrap agree on one release ID,
@@ -165,6 +206,8 @@ Use a monitor outside Vercel so a Vercel-wide incident cannot report itself as h
   release ID. That schedule belongs to the next P2 work item, not a Vercel Hobby cron.
 - Keep structured runtime logs for incident diagnosis, but do not add raw request URLs, request
   bodies, squad lists, or Team IDs.
+- Assert `alpha_access_required=true` and `alpha_access_enabled=true` for a closed-alpha deployment;
+  never weaken the gate merely to make a failed readiness check green.
 
 ## Cost limits
 

@@ -868,6 +868,12 @@ rank improvement, or a production-approved `AI Score`.
       the real T-6h/T-75m schedule and missing-run alert. Hosting remains intentionally undecided)
 - [ ] Add authentication, entitlement, privacy/terms, account deletion, support, and Indonesian
       payment flow without storing FPL credentials
+      ([x] controlled-alpha boundary only: individually labelled tester codes are checked against
+      server-side SHA-256 digests, protected routes are rate-limited per code/process, the browser
+      keeps the plaintext code in `sessionStorage` only, monitoring routes stay public, and required
+      access fails readiness closed when no codes exist. This is deliberately not checked as the
+      full item: accounts, global/distributed abuse protection, entitlement, legal/privacy flows,
+      support, deletion, and payment remain unbuilt)
 - [ ] Run a 10-20 user closed alpha across at least three deadlines; record conflicts,
       recommendation flips, failures, support load, and next-deadline return usage
 - [ ] Open a clearly labelled founder beta only after the alpha gates pass; payment validates

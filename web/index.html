@@ -8,6 +8,18 @@
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
+    <section id="access-gate" class="access-gate" role="dialog" aria-modal="true" aria-labelledby="access-title" hidden>
+      <form id="access-form" class="access-card">
+        <div class="brand-mark">T</div>
+        <div class="eyebrow">Controlled alpha</div>
+        <h2 id="access-title">Enter your tester access code</h2>
+        <p>Your code unlocks this browser tab only. It is never placed in the URL or application logs.</p>
+        <label for="access-code">Access code</label>
+        <input id="access-code" type="password" minlength="16" maxlength="256" autocomplete="current-password" required />
+        <button id="access-submit" class="button primary" type="submit">Open workspace</button>
+        <p id="access-message" class="access-message" aria-live="polite"></p>
+      </form>
+    </section>
     <div class="app-shell">
       <aside class="sidebar">
         <a class="brand" href="#weekly" aria-label="Touchline home">

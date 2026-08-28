@@ -23,8 +23,9 @@ import pytest
 import uvicorn
 from playwright.sync_api import sync_playwright
 
-from api.index import _bootstrap, app
+from api.index import ALPHA_RATE_LIMITER, _bootstrap, app
 from fpl_model.ingest.fpl import FPLClient
+from fpl_model.webapp.alpha_access import hash_access_token
 from tests.test_webapp_service import _ready_rating_artifact, _release_file
 
 
@@ -107,6 +108,20 @@ def live_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         _bootstrap.cache_clear()
 
 
+@pytest.fixture
+def gated_live_server(live_server, monkeypatch: pytest.MonkeyPatch):
+    token = "browser-alpha-code-123456"
+    monkeypatch.setenv("FPL_REQUIRE_ALPHA_ACCESS", "true")
+    monkeypatch.setenv(
+        "FPL_ALPHA_ACCESS_TOKEN_HASHES", f"browser={hash_access_token(token)}"
+    )
+    ALPHA_RATE_LIMITER.clear()
+    try:
+        yield live_server, token
+    finally:
+        ALPHA_RATE_LIMITER.clear()
+
+
 @pytest.fixture(scope="module")
 def browser():
     with sync_playwright() as playwright:
@@ -125,6 +140,29 @@ def _seed_local_storage_squad(page) -> None:
         + str(list(range(1, 16)))
         + "))"
     )
+
+
+def test_closed_alpha_prompt_unlocks_the_workspace_for_one_browser_session(
+    gated_live_server, browser
+):
+    base_url, token = gated_live_server
+    page = browser.new_page()
+    try:
+        _seed_local_storage_squad(page)
+        page.goto(base_url, wait_until="networkidle", timeout=15000)
+        page.wait_for_selector("#access-gate", state="visible", timeout=5000)
+
+        assert page.locator("#pitch").get_attribute("class") == "pitch skeleton"
+        page.fill("#access-code", token)
+        page.click("#access-submit")
+        page.wait_for_selector("#access-gate", state="hidden", timeout=15000)
+        page.wait_for_selector("#pitch:not(.skeleton)", timeout=15000)
+
+        assert page.evaluate("sessionStorage.getItem('touchline-alpha-token')") == token
+        assert page.evaluate("localStorage.getItem('touchline-alpha-token')") is None
+        assert token not in page.url
+    finally:
+        page.close()
 
 
 def test_team_id_loads_a_squad_and_renders_a_weekly_lineup(live_server, browser):
