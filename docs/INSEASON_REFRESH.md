@@ -76,7 +76,8 @@ non-zero when manifest or freshness validation fails; a healthy release can stil
 By default, `refresh_fpl_event_live.py` fails closed unless the source snapshot says the prior
 Gameweek is both `finished` and `data_checked`. For the narrower appearance/context refresh,
 `--allow-analytically-complete` admits a non-final event only when every fixture assigned to that
-Gameweek is finished in the same immutable official snapshot. The stored run remains `provisional`,
+Gameweek is either `finished` or `finished_provisional` in the same immutable official snapshot.
+The latter is FPL's final-whistle state before its later data-check pass. The stored run remains `provisional`,
 and every downstream appearance/context row carries
 `OFFICIAL_EVENT_ANALYTICALLY_COMPLETE_NOT_FINAL`. Re-ingest and rebuild after FPL sets
 `data_checked`; immutable run IDs preserve both versions.

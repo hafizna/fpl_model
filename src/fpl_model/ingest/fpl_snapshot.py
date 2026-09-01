@@ -130,6 +130,17 @@ def _run_id(captured_at: datetime, payload_sha256: str) -> str:
     return f"fpl_{timestamp}_{payload_sha256[:12]}"
 
 
+def _fixture_analytically_finished(fixture: dict[str, Any]) -> bool:
+    """Return whether a fixture has ended, even if FPL is still finalising it.
+
+    The official fixtures endpoint now exposes ``finished_provisional`` at the
+    final whistle and keeps ``finished`` false until its later data-check pass.
+    ``fixture_snapshot.finished`` is the analytical-completeness signal; whole-
+    Gameweek finality remains separately represented by ``gameweek_snapshot``.
+    """
+    return bool(fixture.get("finished") or fixture.get("finished_provisional"))
+
+
 def _write_raw_payload(
     *,
     raw_root: Path,
@@ -338,7 +349,7 @@ def persist_fpl_snapshot(
             _integer(fixture.get("team_h"), "fixtures.team_h"),
             _integer(fixture.get("team_a"), "fixtures.team_a"),
             bool(fixture.get("started")),
-            bool(fixture.get("finished")),
+            _fixture_analytically_finished(fixture),
         )
         for fixture in fixtures
     ]

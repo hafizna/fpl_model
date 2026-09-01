@@ -182,6 +182,32 @@ def test_repeating_identical_snapshot_is_idempotent(tmp_path):
         assert connection.execute("SELECT count(*) FROM player_snapshot").fetchone()[0] == 1
 
 
+def test_finished_provisional_fixture_is_stored_as_analytically_finished(tmp_path):
+    bootstrap, fixtures = _snapshot_payload()
+    fixtures[0]["finished_provisional"] = True
+    database_path = tmp_path / "fpl.duckdb"
+
+    persist_fpl_snapshot(
+        bootstrap=bootstrap,
+        fixtures=fixtures,
+        captured_at=datetime(2026, 9, 1, 7, 0, tzinfo=UTC),
+        season="2026-27",
+        database_path=database_path,
+        raw_root=tmp_path / "raw",
+    )
+
+    with duckdb.connect(str(database_path), read_only=True) as connection:
+        fixture_finished = connection.execute(
+            "SELECT finished FROM fixture_snapshot WHERE fixture_id = 501"
+        ).fetchone()[0]
+        gameweek_finished = connection.execute(
+            "SELECT finished FROM gameweek_snapshot WHERE gameweek = 1"
+        ).fetchone()[0]
+
+    assert fixture_finished is True
+    assert gameweek_finished is False
+
+
 def test_invalid_model_input_rolls_back_all_database_rows(tmp_path):
     bootstrap, fixtures = _snapshot_payload()
     bootstrap["elements"][0]["minutes"] = "not-a-number"  # type: ignore[index]
