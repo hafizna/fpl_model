@@ -27,6 +27,7 @@ from fpl_model.webapp.alpha_operations import AlphaOperationsConfig
 from fpl_model.webapp.decision_receipt import attach_decision_receipt
 from fpl_model.webapp.service import (
     CurrentSquadSetup,
+    PendingTransfer,
     RoleScenarioOverride,
     load_web_bootstrap,
     recommend_web_lineups,
@@ -122,6 +123,17 @@ class CurrentSetupRequest(BaseModel):
         )
 
 
+class PendingTransferRequest(BaseModel):
+    out_fpl_id: int = Field(gt=0)
+    in_fpl_id: int = Field(gt=0)
+
+    def to_transfer(self) -> PendingTransfer:
+        return PendingTransfer(
+            out_fpl_id=self.out_fpl_id,
+            in_fpl_id=self.in_fpl_id,
+        )
+
+
 class SquadRequest(BaseModel):
     fpl_ids: list[int] = Field(min_length=15, max_length=15)
     bank_tenths: int = Field(default=0, ge=0)
@@ -129,6 +141,7 @@ class SquadRequest(BaseModel):
     selling_prices: dict[int, int] = Field(default_factory=dict)
     role_scenario_overrides: list[RoleScenarioOverrideRequest] = Field(default_factory=list)
     current_setup: CurrentSetupRequest | None = None
+    pending_transfers: list[PendingTransferRequest] = Field(default_factory=list)
 
 
 expose_api_docs = _env_bool(
@@ -522,6 +535,9 @@ def lineups(request: SquadRequest) -> dict[str, object]:
             role_scenario_overrides=tuple(
                 row.to_override() for row in request.role_scenario_overrides
             ),
+            pending_transfers=tuple(
+                row.to_transfer() for row in request.pending_transfers
+            ),
             current_setup=(
                 None if request.current_setup is None else request.current_setup.to_setup()
             ),
@@ -553,6 +569,9 @@ def transfers(request: SquadRequest, top_n: int = 8) -> dict[str, object]:
             selling_prices=request.selling_prices,
             role_scenario_overrides=tuple(
                 row.to_override() for row in request.role_scenario_overrides
+            ),
+            pending_transfers=tuple(
+                row.to_transfer() for row in request.pending_transfers
             ),
             top_n=max(1, min(top_n, 20)),
             database_path=_database_path(),

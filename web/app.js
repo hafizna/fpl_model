@@ -5,12 +5,44 @@ const DEFAULT_SQUAD = [
   194, 379, 165,
 ];
 
+function readStoredJson(key, fallback) {
+  try {
+    const value = JSON.parse(localStorage.getItem(key) || "null");
+    return value == null ? fallback : value;
+  } catch {
+    return fallback;
+  }
+}
+
+function loadPlan() {
+  const stored = readStoredJson("touchline-plan", null);
+  const legacy = {
+    squad: readStoredJson("touchline-squad", DEFAULT_SQUAD),
+    selling_prices: readStoredJson("touchline-selling-prices", {}),
+    selling_price_is_estimated: readStoredJson("touchline-selling-estimated", false),
+    current_setup: readStoredJson("touchline-current-setup", null),
+    horizon_length: Math.max(1, Math.min(5, Number(localStorage.getItem("touchline-horizon") || 3) || 3)),
+    risk_profile: localStorage.getItem("touchline-risk-profile") || "balanced",
+  };
+  const source = stored && typeof stored === "object" ? stored : legacy;
+  const plan = {
+    squad: Array.isArray(source.squad) ? source.squad : legacy.squad,
+    bank_tenths: Number.isInteger(source.bank_tenths) ? source.bank_tenths : 0,
+    free_transfers: Number.isInteger(source.free_transfers) ? source.free_transfers : 1,
+    selling_prices: source.selling_prices && typeof source.selling_prices === "object" ? source.selling_prices : legacy.selling_prices,
+    selling_price_is_estimated: Boolean(source.selling_price_is_estimated),
+    current_setup: source.current_setup || null,
+    pending_transfers: Array.isArray(source.pending_transfers) ? source.pending_transfers : [],
+    horizon_length: Math.max(1, Math.min(5, Number(source.horizon_length || legacy.horizon_length) || 3)),
+    risk_profile: source.risk_profile || legacy.risk_profile,
+  };
+  localStorage.setItem("touchline-plan", JSON.stringify(plan));
+  return plan;
+}
+
 const state = {
   bootstrap: null,
-  selected: JSON.parse(localStorage.getItem("touchline-squad") || "null") || DEFAULT_SQUAD,
-  sellingPrices: JSON.parse(localStorage.getItem("touchline-selling-prices") || "null") || {},
-  sellingPriceIsEstimated: JSON.parse(localStorage.getItem("touchline-selling-estimated") || "false"),
-  currentSetup: JSON.parse(localStorage.getItem("touchline-current-setup") || "null"),
+  plan: loadPlan(),
   // Reviewed role-scenario overrides: {fpl_id, gameweek, xpts}[]. Applied
   // entirely client-side per request -- never persisted server-side or
   // written back to the release, and NOT saved to localStorage (a scenario
@@ -19,8 +51,6 @@ const state = {
   lineups: null,
   transfers: null,
   teamProfile: JSON.parse(localStorage.getItem("touchline-team-profile") || "null"),
-  horizonLength: Math.max(1, Math.min(5, Number(localStorage.getItem("touchline-horizon") || 3) || 3)),
-  riskProfile: localStorage.getItem("touchline-risk-profile") || "balanced",
   alphaToken: sessionStorage.getItem("touchline-alpha-token"),
   publicConfig: null,
 };
@@ -30,14 +60,23 @@ const $$ = (selector) => [...document.querySelectorAll(selector)];
 const money = (tenths) => `£${(tenths / 10).toFixed(1)}`;
 const points = (value) => Number(value || 0).toFixed(2);
 
+function persistPlan() {
+  localStorage.setItem("touchline-plan", JSON.stringify(state.plan));
+}
+
+function effectivePendingCount() {
+  return state.plan.pending_transfers.length;
+}
+
 function requestBody() {
   return {
-    fpl_ids: state.selected,
-    bank_tenths: Math.round(Number($("#bank").value || 0) * 10),
-    free_transfers: Number($("#free-transfers").value),
-    selling_prices: state.sellingPrices,
+    fpl_ids: state.plan.squad,
+    bank_tenths: state.plan.bank_tenths,
+    free_transfers: state.plan.free_transfers,
+    selling_prices: state.plan.selling_prices,
     role_scenario_overrides: state.roleScenarioOverrides,
-    current_setup: state.currentSetup,
+    current_setup: state.plan.current_setup,
+    pending_transfers: state.plan.pending_transfers,
   };
 }
 
@@ -139,11 +178,11 @@ function publishedGameweeks() {
 
 function visibleLineups() {
   const lineups = state.lineups?.lineups || [];
-  return lineups.slice(0, Math.max(1, Math.min(state.horizonLength, lineups.length)));
+  return lineups.slice(0, Math.max(1, Math.min(state.plan.horizon_length, lineups.length)));
 }
 
 function renderPlanningControls() {
-  if (!RISK_PROFILES[state.riskProfile]) state.riskProfile = "balanced";
+  if (!RISK_PROFILES[state.plan.risk_profile]) state.plan.risk_profile = "balanced";
   const gameweeks = publishedGameweeks();
   const select = $("#horizon-select");
   if (!select) return;
@@ -151,21 +190,21 @@ function renderPlanningControls() {
   select.innerHTML = Array.from({ length: 5 }, (_, index) => {
     const length = index + 1;
     const enabled = length <= available;
-    return `<option value="${length}" ${length === state.horizonLength ? "selected" : ""} ${enabled ? "" : "disabled"}>${length} GW${length === 1 ? "" : "s"}${enabled ? "" : " — not published"}</option>`;
+    return `<option value="${length}" ${length === state.plan.horizon_length ? "selected" : ""} ${enabled ? "" : "disabled"}>${length} GW${length === 1 ? "" : "s"}${enabled ? "" : " — not published"}</option>`;
   }).join("");
-  if (state.horizonLength > available) state.horizonLength = available || 1;
-  select.value = String(state.horizonLength);
+  if (state.plan.horizon_length > available) state.plan.horizon_length = available || 1;
+  select.value = String(state.plan.horizon_length);
   const first = gameweeks[0];
-  const last = gameweeks[Math.min(state.horizonLength, gameweeks.length) - 1];
+  const last = gameweeks[Math.min(state.plan.horizon_length, gameweeks.length) - 1];
   $("#horizon-note").textContent = gameweeks.length
-    ? `Published now: GW${first}–GW${gameweeks.at(-1)}. Showing ${state.horizonLength} GW${state.horizonLength === 1 ? "" : "s"} (GW${first}–GW${last}).`
+    ? `Published now: GW${first}–GW${gameweeks.at(-1)}. Showing ${state.plan.horizon_length} GW${state.plan.horizon_length === 1 ? "" : "s"} (GW${first}–GW${last}).`
     : "No published Gameweek horizon is available yet.";
   $("#horizon-availability").textContent = gameweeks.length ? `${gameweeks.length} GW published` : "";
   const profiles = $("#risk-profiles");
-  profiles.innerHTML = Object.entries(RISK_PROFILES).map(([key, profile]) => `<button type="button" class="risk-profile ${state.riskProfile === key ? "selected" : ""}" data-risk-profile="${key}"><strong>${profile.label}</strong><small>${profile.note}</small></button>`).join("");
+  profiles.innerHTML = Object.entries(RISK_PROFILES).map(([key, profile]) => `<button type="button" class="risk-profile ${state.plan.risk_profile === key ? "selected" : ""}" data-risk-profile="${key}"><strong>${profile.label}</strong><small>${profile.note}</small></button>`).join("");
   $$("[data-risk-profile]").forEach((button) => button.addEventListener("click", () => {
-    state.riskProfile = button.dataset.riskProfile;
-    localStorage.setItem("touchline-risk-profile", state.riskProfile);
+    state.plan.risk_profile = button.dataset.riskProfile;
+    persistPlan();
     renderPlanningControls();
     renderTransfers();
   }));
@@ -175,8 +214,8 @@ function renderSetupSummary() {
   const container = $("#setup-summary");
   if (!container) return;
   const teamName = state.teamProfile?.name;
-  const squadCount = state.selected.filter((id) => playerById(id)).length;
-  container.innerHTML = `<div><span>Workspace</span><strong>${teamName || "Default squad"}</strong><small>${squadCount}/15 players loaded · ${state.riskProfile} stance · ${state.horizonLength} GW visible</small></div><button type="button" class="button secondary" id="setup-settings">Adjust settings</button>`;
+  const squadCount = state.plan.squad.filter((id) => playerById(id)).length;
+  container.innerHTML = `<div><span>Workspace</span><strong>${teamName || "Default squad"}</strong><small>${squadCount}/15 players loaded · ${state.plan.risk_profile} stance · ${state.plan.horizon_length} GW visible</small></div><button type="button" class="button secondary" id="setup-settings">Adjust settings</button>`;
   $("#setup-settings")?.addEventListener("click", () => navigateTo("settings"));
 }
 
@@ -206,10 +245,10 @@ function renderRelease() {
 }
 
 function renderSquadEditor() {
-  const selectedPlayers = state.selected.map(playerById).filter(Boolean);
+  const selectedPlayers = state.plan.squad.map(playerById).filter(Boolean);
   const cost = selectedPlayers.reduce((sum, player) => sum + player.price_tenths, 0);
   $("#squad-cost").textContent = `${money(cost)} squad`;
-  $("#team-id-note").textContent = state.sellingPriceIsEstimated
+  $("#team-id-note").textContent = state.plan.selling_price_is_estimated
     ? "Loaded from your public Team ID. Selling prices are ESTIMATED from current market price, not FPL's own profit-sharing sale rule — check the FPL app for your exact sell value before making a real transfer."
     : "Loads your public squad by Team ID only — never a password or session cookie. Estimated selling prices (current market price, not FPL's own profit-sharing rule) are used until you adjust them below.";
   const positionOrder = ["GK", "DEF", "MID", "FWD"];
@@ -230,18 +269,20 @@ function renderSquadEditor() {
     select.addEventListener("change", async (event) => {
       const oldId = Number(event.target.dataset.playerId);
       const newId = Number(event.target.value);
-      if (state.selected.includes(newId)) {
+      if (state.plan.squad.includes(newId)) {
         showError("That player is already in the squad.");
         event.target.value = String(oldId);
         return;
       }
-      state.selected = state.selected.map((id) => id === oldId ? newId : id);
+      state.plan.squad = state.plan.squad.map((id) => id === oldId ? newId : id);
+      state.plan.pending_transfers = [];
       clearCurrentSetup();
-      localStorage.setItem("touchline-squad", JSON.stringify(state.selected));
+      persistPlan();
       renderSquadEditor();
       await runLineups();
     });
   });
+  renderPendingTransfers();
 }
 
 function playerCard(player, captainId, viceId) {
@@ -255,16 +296,71 @@ function playerCard(player, captainId, viceId) {
 }
 
 function clearCurrentSetup() {
-  state.currentSetup = null;
+  state.plan.current_setup = null;
+  persistPlan();
   localStorage.removeItem("touchline-current-setup");
 }
 
-function resetTransfersView() {
+function pendingTransferLabel(row) {
+  const outgoing = playerById(row.out_fpl_id)?.name || `#${row.out_fpl_id}`;
+  const incoming = playerById(row.in_fpl_id)?.name || `#${row.in_fpl_id}`;
+  return `${outgoing} → ${incoming}`;
+}
+
+function renderPendingTransfers() {
+  const pending = state.plan.pending_transfers;
+  const markup = pending.length === 0 ? "" : `<div class="pending-heading"><span>Staged transfers (${pending.length})</span><span>Not committed</span></div><div class="pending-list">${pending.map((row, index) => `<span class="pending-chip">${pendingTransferLabel(row)}<button type="button" data-remove-pending="${index}" aria-label="Remove staged transfer ${pendingTransferLabel(row)}">×</button></span>`).join("")}</div><div class="pending-actions"><small>Lineup and outlook already include these moves.</small><button type="button" class="button primary" data-commit-pending ${state.lineups?.plan_summary ? "" : "disabled"}>Commit to squad</button></div>`;
+  $$("#squad-pending-transfers, #transfers-pending-transfers").forEach((container) => {
+    container.innerHTML = markup;
+    container.querySelectorAll("[data-remove-pending]").forEach((button) => button.addEventListener("click", () => removePendingTransfer(Number(button.dataset.removePending))));
+    container.querySelector("[data-commit-pending]")?.addEventListener("click", commitPendingTransfers);
+  });
+}
+
+async function removePendingTransfer(index) {
+  if (!Number.isInteger(index) || !state.plan.pending_transfers[index]) return;
+  state.plan.pending_transfers.splice(index, 1);
+  persistPlan();
+  renderPendingTransfers();
+  resetTransfersView("Staged move removed — re-scan to compare from the updated plan.");
+  await runLineups();
+}
+
+async function stageTransfer(row) {
+  if (!row?.out?.fpl_id || !row?.in?.fpl_id) return;
+  state.plan.pending_transfers.push({ out_fpl_id: row.out.fpl_id, in_fpl_id: row.in.fpl_id });
+  persistPlan();
+  renderPendingTransfers();
+  resetTransfersView(`${row.out.name} is staged for ${row.in.name} — lineup and outlook are recalculating.`);
+  await runLineups();
+}
+
+async function commitPendingTransfers() {
+  const summary = state.lineups?.plan_summary;
+  if (!summary || state.plan.pending_transfers.length === 0) return;
+  state.plan.squad = summary.effective_fpl_ids;
+  state.plan.bank_tenths = summary.effective_bank_tenths;
+  state.plan.free_transfers = summary.effective_free_transfers;
+  state.plan.selling_prices = summary.effective_selling_prices;
+  state.plan.pending_transfers = [];
+  state.plan.current_setup = null;
+  localStorage.removeItem("touchline-current-setup");
+  persistPlan();
+  $("#bank").value = (state.plan.bank_tenths / 10).toFixed(1);
+  $("#free-transfers").value = String(state.plan.free_transfers);
+  renderSquadEditor();
+  resetTransfersView("Transfer committed — re-scan to compare from the committed squad.");
+  await runLineups();
+}
+
+function resetTransfersView(message = "Squad or scenario changed — run the scan again to compare against the reviewed scenario.") {
   state.transfers = null;
   renderDecisionReceipts();
+  renderPendingTransfers();
   const container = $("#transfer-results");
   container.className = "transfer-list empty-state";
-  container.textContent = "Squad or scenario changed -- run the scan again to compare against the reviewed scenario.";
+  container.innerHTML = `<div>${message}</div><button type="button" class="button secondary" id="rescan-transfers">Re-scan transfers</button>`;
+  $("#rescan-transfers")?.addEventListener("click", runTransfers);
 }
 
 async function applyBlankScenario(fplId, gameweek) {
@@ -332,6 +428,15 @@ function renderWeekly() {
     <div><span>Formation</span><strong>${lineup.formation}</strong></div>
     <div><span>Captain</span><strong>${lineup.captain.name}</strong></div>
     <div><span>Autosub EV</span><strong>${points(lineup.expected_autosub_value)}</strong></div>`;
+  const planSummary = state.lineups.plan_summary || {
+    gameweek: lineup.gameweek,
+    formation: lineup.formation,
+    captain: lineup.captain,
+    staged_transfer_count: effectivePendingCount(),
+    net_xpts_vs_holding: 0,
+  };
+  const planDelta = Number(planSummary.net_xpts_vs_holding || 0);
+  $("#plan-header").innerHTML = `<span class="plan-title">Plan for GW${planSummary.gameweek}</span><div><span>Formation</span><strong>${planSummary.formation}</strong></div><div><span>Captain</span><strong>${planSummary.captain.name}</strong></div><div><span>Staged transfers</span><strong>${planSummary.staged_transfer_count}</strong></div><div class="plan-delta"><span>Net xPts vs holding</span><strong class="${planDelta >= 0 ? "positive" : "negative"}">${planDelta >= 0 ? "+" : ""}${points(planDelta)}</strong></div>`;
   renderSensitivityBanner(lineup.role_scenario_sensitivity, lineup.gameweek);
   renderMarginalChanges(lineup);
   const rows = ["GK", "DEF", "MID", "FWD"].map((position) => {
@@ -348,7 +453,10 @@ function renderMarginalChanges(lineup) {
   const comparison = lineup.current_setup_comparison;
   if (!comparison) {
     container.className = "marginal-changes unavailable";
-    container.innerHTML = `<div><span>No-chip changes vs your current setup</span><strong>Load your Team ID to compare</strong></div><p>The model needs your submitted XI, captain, vice-captain, and bench order — a squad list alone is not enough.</p>`;
+    const stagedNote = state.plan.current_setup && effectivePendingCount() > 0
+      ? "Your submitted XI comparison stays anchored to the committed squad; staged moves are shown separately above."
+      : "The model needs your submitted XI, captain, vice-captain, and bench order — a squad list alone is not enough.";
+    container.innerHTML = `<div><span>No-chip changes vs your current setup</span><strong>${state.plan.current_setup && effectivePendingCount() > 0 ? "Committed setup retained" : "Load your Team ID to compare"}</strong></div><p>${stagedNote}</p>`;
     return;
   }
 
@@ -387,7 +495,7 @@ function renderOutlook() {
   const overallRating = rating?.available ? rating.model_strength.overall_3gw : null;
   $("#outlook-total").classList.remove("skeleton");
   const visibleTotal = horizonLineups.reduce((sum, row) => sum + Number(row.total_xpts || 0), 0);
-  $("#outlook-total").innerHTML = `<div><span>Projected horizon score</span><strong>${points(visibleTotal)}</strong><small>captaincy included · ${state.horizonLength}-GW visible slice</small></div>${overallRating ? `<div class="rating-score"><span>${rating.display_label}</span><strong>${Math.round(overallRating.percentile)}</strong><small>release benchmark (full published horizon)</small></div>` : `<div class="rating-score unavailable"><span>${rating?.display_label || "Model Preview"}</span><strong>—</strong><small>benchmark unavailable; raw xPts is still valid</small></div>`}`;
+  $("#outlook-total").innerHTML = `<div><span>Projected horizon score</span><strong>${points(visibleTotal)}</strong><small>captaincy included · ${state.plan.horizon_length}-GW visible slice</small></div>${overallRating ? `<div class="rating-score"><span>${rating.display_label}</span><strong>${Math.round(overallRating.percentile)}</strong><small>release benchmark (full published horizon)</small></div>` : `<div class="rating-score unavailable"><span>${rating?.display_label || "Model Preview"}</span><strong>—</strong><small>benchmark unavailable; raw xPts is still valid</small></div>`}`;
   if (overallRating) $("#outlook-total").insertAdjacentHTML("beforeend", `<small class="outlook-benchmark-note">percentile benchmark is for the full published horizon.</small>`);
   const perGameweekRating = new Map(
     rating?.available
@@ -432,8 +540,8 @@ function renderOutlook() {
       }
     });
   });
-  const rows = state.selected.map(playerById).filter(Boolean).sort((a, b) => (totals.get(b.fpl_id) || 0) - (totals.get(a.fpl_id) || 0));
-  $("#player-outlook").innerHTML = `<div class="table-head"><span>Player</span><span>Fixtures</span><span>Confidence</span><span>${state.horizonLength}-GW xPts</span></div>${rows.map((player) => {
+  const rows = state.plan.squad.map(playerById).filter(Boolean).sort((a, b) => (totals.get(b.fpl_id) || 0) - (totals.get(a.fpl_id) || 0));
+  $("#player-outlook").innerHTML = `<div class="table-head"><span>Player</span><span>Fixtures</span><span>Confidence</span><span>${state.plan.horizon_length}-GW xPts</span></div>${rows.map((player) => {
     const uncertaintyValues = uncertaintyByPlayer.get(player.fpl_id);
     const confidence = uncertaintyValues && uncertaintyValues.length
       ? `±${points(uncertaintyValues.reduce((a, b) => a + b, 0) / uncertaintyValues.length)}`
@@ -445,7 +553,8 @@ function renderOutlook() {
 function renderTransfers() {
   const container = $("#transfer-results");
   if (!state.transfers) return;
-  const profile = RISK_PROFILES[state.riskProfile] || RISK_PROFILES.balanced;
+  renderPendingTransfers();
+  const profile = RISK_PROFILES[state.plan.risk_profile] || RISK_PROFILES.balanced;
   const suggestions = state.transfers.suggestions.filter((row) => row.net_xpts_gain >= profile.threshold);
   // hit_cost is uniform across one scan -- it comes entirely from the
   // manager's current free-transfer count, not per-suggestion (this app
@@ -462,9 +571,13 @@ function renderTransfers() {
     : `<div class="transfer-mode free">Free transfer available: every suggested move below costs no hit.</div>`}<div class="transfer-mode profile">${profile.label} stance: ${profile.note}</div>`;
   container.className = "transfer-list";
   container.innerHTML = `${modeBanner}<article class="transfer-card hold ${state.transfers.recommendation === "hold" ? "recommended" : ""}"><div><span>Baseline</span><strong>Hold transfer</strong><small>${baselinePercentile == null ? "rating withheld" : `${Math.round(baselinePercentile)}th percentile · ${baselineRating.display_label}`}</small></div><div><span>3-GW xPts</span><strong>${points(state.transfers.baseline_cumulative_xpts)}</strong></div></article>${suggestions.map((row, index) => `<article class="transfer-card ${index === 0 && state.transfers.recommendation === "transfer" ? "recommended" : ""}">
-    <div class="transfer-move"><span>${index === 0 ? "Best retained move" : `Alternative ${index + 1}`}</span><strong>${row.out.name} <i>→</i> ${row.in.name}</strong><small>${row.out.position} · bank ${money(row.remaining_bank_tenths)}</small></div>
+    <div class="transfer-move"><span>${index === 0 ? "Best retained move" : `Alternative ${index + 1}`}</span><strong>${row.out.name} <i>→</i> ${row.in.name}</strong><small>${row.out.position} · bank ${money(row.remaining_bank_tenths)}</small><button type="button" class="button secondary" data-apply-out="${row.out.fpl_id}" data-apply-in="${row.in.fpl_id}" data-lineup-changed="${row.lineup_changed ? "true" : "false"}">Apply move</button></div>
     <div><span>Net gain</span><strong class="${row.net_xpts_gain >= 0 ? "positive" : "negative"}">${row.net_xpts_gain >= 0 ? "+" : ""}${points(row.net_xpts_gain)}</strong><small>${row.hit_cost ? `includes −${row.hit_cost} hit` : "no hit"}</small></div>
   </article>`).join("")}`;
+  container.querySelectorAll("[data-apply-out]").forEach((button) => button.addEventListener("click", () => {
+    const row = state.transfers.suggestions.find((candidate) => candidate.out.fpl_id === Number(button.dataset.applyOut) && candidate.in.fpl_id === Number(button.dataset.applyIn));
+    stageTransfer(row);
+  }));
 }
 
 function parseEntryReference(raw) {
@@ -493,25 +606,24 @@ async function loadFromTeamId() {
     const params = new URLSearchParams({ include_profile: "true" });
     if (reference.gameweek) params.set("gameweek", String(reference.gameweek));
     const resolved = await api(`/api/squad/from-entry/${entryId}?${params.toString()}`);
-    state.selected = resolved.fpl_ids;
-    state.sellingPrices = resolved.selling_prices;
-    state.sellingPriceIsEstimated = resolved.selling_price_is_estimated;
+    state.plan.squad = resolved.fpl_ids;
+    state.plan.selling_prices = resolved.selling_prices;
+    state.plan.selling_price_is_estimated = resolved.selling_price_is_estimated;
     const horizonStart = Number(state.bootstrap.release.model_runs[0].gameweek);
     const setupMatchesHorizon = resolved.gameweek === horizonStart;
-    state.currentSetup = setupMatchesHorizon ? {
+    state.plan.current_setup = setupMatchesHorizon ? {
       gameweek: resolved.gameweek,
       starter_fpl_ids: resolved.starter_fpl_ids,
       bench_fpl_ids: resolved.bench_fpl_ids,
       captain_fpl_id: resolved.captain_fpl_id,
       vice_captain_fpl_id: resolved.vice_captain_fpl_id,
     } : null;
+    state.plan.pending_transfers = [];
+    state.plan.bank_tenths = resolved.bank_tenths;
     state.teamProfile = resolved.entry || { id: entryId, name: null };
     localStorage.setItem("touchline-team-profile", JSON.stringify(state.teamProfile));
-    localStorage.setItem("touchline-squad", JSON.stringify(state.selected));
-    localStorage.setItem("touchline-selling-prices", JSON.stringify(state.sellingPrices));
-    localStorage.setItem("touchline-selling-estimated", JSON.stringify(state.sellingPriceIsEstimated));
-    localStorage.setItem("touchline-current-setup", JSON.stringify(state.currentSetup));
-    $("#bank").value = (resolved.bank_tenths / 10).toFixed(1);
+    persistPlan();
+    $("#bank").value = (state.plan.bank_tenths / 10).toFixed(1);
     const teamSummary = $("#team-summary");
     teamSummary.hidden = false;
     teamSummary.innerHTML = `<strong>${state.teamProfile.name || `FPL Team ${entryId}`}</strong><small>Team ID ${entryId} · public picks loaded for GW${resolved.gameweek}${setupMatchesHorizon ? "" : ` · lineup comparison starts at GW${horizonStart}`}</small>`;
@@ -537,6 +649,7 @@ async function runLineups() {
     localStorage.setItem("touchline-last-squad-rating", JSON.stringify(state.lineups.squad_rating));
     renderWeekly();
     renderOutlook();
+    renderPendingTransfers();
     renderDecisionReceipts();
   } catch (error) {
     showError(error.message);
@@ -580,26 +693,30 @@ async function loadWorkspace() {
   try {
     state.bootstrap = await api("/api/bootstrap");
     hideAccessGate();
-    if (state.selected.some((id) => !playerById(id))) {
-      state.selected = DEFAULT_SQUAD;
-      state.sellingPrices = {};
-      state.sellingPriceIsEstimated = false;
+    if (state.plan.squad.some((id) => !playerById(id))) {
+      state.plan.squad = DEFAULT_SQUAD;
+      state.plan.selling_prices = {};
+      state.plan.selling_price_is_estimated = false;
+      state.plan.pending_transfers = [];
       clearCurrentSetup();
+      persistPlan();
       showError("A previously loaded squad no longer matches the current release; showing the default squad.");
     }
     const firstGameweek = state.bootstrap.release.model_runs[0].gameweek;
-    const setupShapeIsValid = state.currentSetup
-      && Array.isArray(state.currentSetup.starter_fpl_ids)
-      && Array.isArray(state.currentSetup.bench_fpl_ids);
+    const setupShapeIsValid = state.plan.current_setup
+      && Array.isArray(state.plan.current_setup.starter_fpl_ids)
+      && Array.isArray(state.plan.current_setup.bench_fpl_ids);
     const setupIds = setupShapeIsValid
-      ? [...state.currentSetup.starter_fpl_ids, ...state.currentSetup.bench_fpl_ids]
+      ? [...state.plan.current_setup.starter_fpl_ids, ...state.plan.current_setup.bench_fpl_ids]
       : [];
-    if (state.currentSetup && (
+    if (state.plan.current_setup && (
       !setupShapeIsValid
-      || state.currentSetup.gameweek !== firstGameweek
+      || state.plan.current_setup.gameweek !== firstGameweek
       || setupIds.length !== 15
-      || setupIds.some((id) => !state.selected.includes(id))
+      || setupIds.some((id) => !state.plan.squad.includes(id))
     )) clearCurrentSetup();
+    $("#bank").value = (state.plan.bank_tenths / 10).toFixed(1);
+    $("#free-transfers").value = String(state.plan.free_transfers);
     renderRelease();
     renderSquadEditor();
     if (state.teamProfile) {
@@ -649,11 +766,21 @@ async function init() {
   $("#run-transfers").addEventListener("click", runTransfers);
   $("#load-team-id").addEventListener("click", loadFromTeamId);
   $("#team-id").addEventListener("keydown", (event) => { if (event.key === "Enter") loadFromTeamId(); });
-  $("#bank").addEventListener("change", runLineups);
-  $("#free-transfers").addEventListener("change", resetTransfersView);
+  $("#bank").addEventListener("change", () => {
+    state.plan.bank_tenths = Math.round(Number($("#bank").value || 0) * 10);
+    persistPlan();
+    resetTransfersView("Bank changed — re-scan to compare from the updated plan.");
+    runLineups();
+  });
+  $("#free-transfers").addEventListener("change", () => {
+    state.plan.free_transfers = Number($("#free-transfers").value);
+    persistPlan();
+    resetTransfersView("Free-transfer count changed — re-scan to compare from the updated plan.");
+    runLineups();
+  });
   $("#horizon-select")?.addEventListener("change", (event) => {
-    state.horizonLength = Number(event.target.value);
-    localStorage.setItem("touchline-horizon", String(state.horizonLength));
+    state.plan.horizon_length = Number(event.target.value);
+    persistPlan();
     renderPlanningControls();
     renderOutlook();
     renderSetupSummary();

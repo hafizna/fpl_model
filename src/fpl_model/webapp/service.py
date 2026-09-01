@@ -38,7 +38,7 @@ from fpl_model.decision.squad_rating import (
     build_squad_benchmark,
     rate_squad,
 )
-from fpl_model.decision.transfer import TransferTarget
+from fpl_model.decision.transfer import TransferTarget, apply_single_transfer
 from fpl_model.ingest.squad_snapshot import validate_entry_picks_payload
 from fpl_model.storage import DEFAULT_DATABASE_PATH
 from fpl_model.validation.role_state import RoleStateResult
@@ -94,6 +94,20 @@ class CurrentSquadSetup:
             raise ValueError("current setup vice-captain must be a starter")
         if self.captain_fpl_id == self.vice_captain_fpl_id:
             raise ValueError("current setup captain and vice-captain must differ")
+
+
+@dataclass(frozen=True, slots=True)
+class PendingTransfer:
+    """One browser-staged move, applied to a working squad copy only."""
+
+    out_fpl_id: int
+    in_fpl_id: int
+
+    def __post_init__(self) -> None:
+        if self.out_fpl_id <= 0 or self.in_fpl_id <= 0:
+            raise ValueError("pending transfer player IDs must be positive")
+        if self.out_fpl_id == self.in_fpl_id:
+            raise ValueError("pending transfer must change the player")
 
 
 def _flags(value: str | None) -> set[str]:
@@ -1027,6 +1041,100 @@ def _squad_rating_payload(
     return rating
 
 
+def _apply_pending_transfers(
+    squad,
+    pending_transfers: tuple[PendingTransfer, ...],
+    *,
+    catalog: dict[int, dict[str, Any]],
+) -> tuple[Any, float]:
+    """Apply staged moves to a validated copy without mutating release state."""
+
+    hit_cost = 0.0
+    for pending in pending_transfers:
+        owned = {player.fpl_id for player in squad.players}
+        if pending.out_fpl_id not in owned:
+            raise ValueError(
+                f"pending transfer outgoing player {pending.out_fpl_id} is not in the squad"
+            )
+        if pending.in_fpl_id in owned:
+            raise ValueError(
+                f"pending transfer incoming player {pending.in_fpl_id} is already in the squad"
+            )
+        outgoing = next(player for player in squad.players if player.fpl_id == pending.out_fpl_id)
+        incoming_row = catalog.get(pending.in_fpl_id)
+        if incoming_row is None:
+            raise ValueError(
+                f"pending transfer incoming player {pending.in_fpl_id} lacks complete horizon projections"
+            )
+        if incoming_row["status"] not in {"a", "d"}:
+            raise ValueError(
+                f"pending transfer incoming player {pending.in_fpl_id} is not available"
+            )
+        if incoming_row["position"] != outgoing.position:
+            raise ValueError("pending transfer must keep the same player position")
+        bank_after = (
+            squad.bank_tenths
+            + outgoing.selling_price_tenths
+            - incoming_row["price_tenths"]
+        )
+        if bank_after < 0:
+            raise ValueError(
+                f"pending transfer {pending.out_fpl_id} → {pending.in_fpl_id} is not affordable"
+            )
+        incoming = SquadPlayer(
+            fpl_id=incoming_row["fpl_id"],
+            player_code=incoming_row["player_code"],
+            player_name=incoming_row["name"],
+            team_id=incoming_row["team_id"],
+            position=incoming_row["position"],
+            current_price_tenths=incoming_row["price_tenths"],
+            purchase_price_tenths=incoming_row["price_tenths"],
+            selling_price_tenths=incoming_row["price_tenths"],
+            squad_position=outgoing.squad_position,
+            is_captain=outgoing.is_captain,
+            is_vice_captain=outgoing.is_vice_captain,
+        )
+        free_transfers = squad.free_transfers or 0
+        if free_transfers < 1:
+            hit_cost += 4.0
+        squad = apply_single_transfer(
+            squad,
+            outgoing=outgoing,
+            incoming=incoming,
+            bank_after_tenths=bank_after,
+        )
+        squad = replace(squad, free_transfers=max(0, free_transfers - 1))
+    return squad, hit_cost
+
+
+def _plan_summary(
+    *,
+    horizon: ResearchHorizon,
+    lineups: list[dict[str, Any]],
+    baseline_lineups: list[dict[str, Any]],
+    pending_transfers: tuple[PendingTransfer, ...],
+    hit_cost: float,
+    squad,
+) -> dict[str, Any]:
+    first = lineups[0]
+    baseline_total = sum(row["total_xpts"] for row in baseline_lineups)
+    effective_total = sum(row["total_xpts"] for row in lineups)
+    return {
+        "gameweek": horizon.start_gameweek,
+        "formation": first["formation"],
+        "captain": first["captain"],
+        "staged_transfer_count": len(pending_transfers),
+        "net_xpts_vs_holding": effective_total - baseline_total - hit_cost,
+        "pending_hit_cost": hit_cost,
+        "effective_fpl_ids": [player.fpl_id for player in squad.players],
+        "effective_bank_tenths": squad.bank_tenths,
+        "effective_free_transfers": squad.free_transfers,
+        "effective_selling_prices": {
+            player.fpl_id: player.selling_price_tenths for player in squad.players
+        },
+    }
+
+
 def recommend_web_lineups(
     fpl_ids: tuple[int, ...],
     *,
@@ -1034,6 +1142,7 @@ def recommend_web_lineups(
     free_transfers: int = 1,
     selling_prices: dict[int, int] | None = None,
     role_scenario_overrides: tuple[RoleScenarioOverride, ...] = (),
+    pending_transfers: tuple[PendingTransfer, ...] = (),
     current_setup: CurrentSquadSetup | None = None,
     database_path: str | Path = DEFAULT_DATABASE_PATH,
     release_path: str | Path | None = None,
@@ -1050,7 +1159,7 @@ def recommend_web_lineups(
     projections = apply_role_scenario_overrides(
         base_projections, role_scenario_overrides, horizon=horizon
     )
-    squad = _validated_web_squad(
+    committed_squad = _validated_web_squad(
         catalog,
         fpl_ids,
         bank_tenths=bank_tenths,
@@ -1065,13 +1174,32 @@ def recommend_web_lineups(
         setup_ids = set((*current_setup.starter_fpl_ids, *current_setup.bench_fpl_ids))
         if setup_ids != set(fpl_ids):
             raise ValueError("current setup players must exactly match the submitted squad")
+    baseline_lineups = [
+        _lineup_payload(
+            committed_squad,
+            projections[gameweek],
+            gameweek,
+            catalog=catalog,
+            current_setup=current_setup if gameweek == horizon.start_gameweek else None,
+        )
+        for gameweek, _ in horizon.model_runs
+    ]
+    squad, pending_hit_cost = _apply_pending_transfers(
+        committed_squad,
+        pending_transfers,
+        catalog=catalog,
+    )
     lineups = [
         _lineup_payload(
             squad,
             projections[gameweek],
             gameweek,
             catalog=catalog,
-            current_setup=current_setup if gameweek == horizon.start_gameweek else None,
+            current_setup=(
+                current_setup
+                if not pending_transfers and gameweek == horizon.start_gameweek
+                else None
+            ),
         )
         for gameweek, _ in horizon.model_runs
     ]
@@ -1081,8 +1209,8 @@ def recommend_web_lineups(
         base_projections=base_projections,
         release_id=release_id,
         release_health=health,
-        fpl_ids=fpl_ids,
-        bank_tenths=bank_tenths,
+        fpl_ids=tuple(player.fpl_id for player in squad.players),
+        bank_tenths=squad.bank_tenths,
         squad=squad,
         lineups=lineups,
         reviewed_scenario=bool(role_scenario_overrides),
@@ -1097,6 +1225,15 @@ def recommend_web_lineups(
         "horizon": [gameweek for gameweek, _ in horizon.model_runs],
         "lineups": lineups,
         "cumulative_xpts": sum(row["total_xpts"] for row in lineups),
+        "baseline_cumulative_xpts": sum(row["total_xpts"] for row in baseline_lineups),
+        "plan_summary": _plan_summary(
+            horizon=horizon,
+            lineups=lineups,
+            baseline_lineups=baseline_lineups,
+            pending_transfers=pending_transfers,
+            hit_cost=pending_hit_cost,
+            squad=squad,
+        ),
         "squad_rating": rating,
         "method_note": (
             "Exhaustive legal XI and captain search over one frozen research horizon."
@@ -1115,6 +1252,7 @@ def recommend_web_transfers(
     free_transfers: int = 1,
     selling_prices: dict[int, int] | None = None,
     role_scenario_overrides: tuple[RoleScenarioOverride, ...] = (),
+    pending_transfers: tuple[PendingTransfer, ...] = (),
     top_n: int = 8,
     database_path: str | Path = DEFAULT_DATABASE_PATH,
     release_path: str | Path | None = None,
@@ -1129,12 +1267,17 @@ def recommend_web_transfers(
     projections = apply_role_scenario_overrides(
         base_projections, role_scenario_overrides, horizon=horizon
     )
-    baseline_squad = _validated_web_squad(
+    committed_squad = _validated_web_squad(
         catalog,
         fpl_ids,
         bank_tenths=bank_tenths,
         free_transfers=free_transfers,
         selling_prices=selling_prices,
+    )
+    baseline_squad, pending_hit_cost = _apply_pending_transfers(
+        committed_squad,
+        pending_transfers,
+        catalog=catalog,
     )
     baseline_lineups = [
         # role_scenario_sensitivity only for the baseline (current, pre-
@@ -1151,18 +1294,19 @@ def recommend_web_transfers(
         base_projections=base_projections,
         release_id=release_id,
         release_health=health,
-        fpl_ids=fpl_ids,
-        bank_tenths=bank_tenths,
+        fpl_ids=tuple(player.fpl_id for player in baseline_squad.players),
+        bank_tenths=baseline_squad.bank_tenths,
         squad=baseline_squad,
         lineups=baseline_lineups,
         reviewed_scenario=bool(role_scenario_overrides),
         materialized_artifact=release_metadata.get("rating_benchmark"),
     )
-    owned = set(fpl_ids)
+    owned = {player.fpl_id for player in baseline_squad.players}
     suggestions: list[dict[str, Any]] = []
-    for out_id in fpl_ids:
+    for outgoing_player in baseline_squad.players:
+        out_id = outgoing_player.fpl_id
         outgoing = catalog[out_id]
-        available = selling_prices.get(out_id, outgoing["price_tenths"]) + bank_tenths
+        available = outgoing_player.selling_price_tenths + baseline_squad.bank_tenths
         for incoming in catalog.values():
             in_id = incoming["fpl_id"]
             if (
@@ -1172,13 +1316,16 @@ def recommend_web_transfers(
                 or incoming["status"] not in {"a", "d"}
             ):
                 continue
-            candidate_ids = tuple(in_id if value == out_id else value for value in fpl_ids)
+            candidate_ids = tuple(
+                in_id if value == out_id else value
+                for value in (player.fpl_id for player in baseline_squad.players)
+            )
             try:
                 candidate_squad = _validated_web_squad(
                     catalog,
                     candidate_ids,
                     bank_tenths=available - incoming["price_tenths"],
-                    free_transfers=max(0, free_transfers - 1),
+                    free_transfers=max(0, (baseline_squad.free_transfers or 0) - 1),
                     selling_prices=selling_prices,
                 )
             except ValueError:
@@ -1188,7 +1335,13 @@ def recommend_web_transfers(
                 for gameweek, _ in horizon.model_runs
             ]
             candidate_xpts = sum(row["total_xpts"] for row in candidate_lineups)
-            hit_cost = 0 if free_transfers >= 1 else 4
+            hit_cost = 0 if (baseline_squad.free_transfers or 0) >= 1 else 4
+            lineup_changed = (
+                tuple(row["fpl_id"] for row in candidate_lineups[0]["starters"])
+                != tuple(row["fpl_id"] for row in baseline_lineups[0]["starters"])
+                or candidate_lineups[0]["captain"]["fpl_id"]
+                != baseline_lineups[0]["captain"]["fpl_id"]
+            )
             suggestions.append(
                 {
                     "out": outgoing,
@@ -1197,6 +1350,7 @@ def recommend_web_transfers(
                     "hit_cost": hit_cost,
                     "net_xpts_gain": candidate_xpts - baseline_xpts - hit_cost,
                     "remaining_bank_tenths": available - incoming["price_tenths"],
+                    "lineup_changed": lineup_changed,
                     "lineups": candidate_lineups,
                 }
             )
@@ -1213,6 +1367,7 @@ def recommend_web_transfers(
         "baseline_cumulative_xpts": baseline_xpts,
         "baseline_squad_rating": baseline_rating,
         "baseline_lineups": baseline_lineups,
+        "pending_hit_cost": pending_hit_cost,
         "recommendation": "hold"
         if not suggestions or suggestions[0]["net_xpts_gain"] <= 0
         else "transfer",

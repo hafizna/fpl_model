@@ -102,6 +102,13 @@ h2 { margin: 4px 0 0; font-size: 19px; letter-spacing: -0.02em; }
 .setup-summary small { margin-top: 4px; color: var(--muted); font-size: 10px; }
 .section-heading { margin-bottom: 18px; display: flex; align-items: center; justify-content: space-between; }
 .section-heading.compact { margin-bottom: 14px; }
+.plan-header { margin: -4px 0 16px; padding: 13px 15px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; border: 1px solid rgba(61,224,143,.3); border-radius: 11px; background: rgba(61,224,143,.07); }
+.plan-header > div { display: flex; align-items: baseline; gap: 7px; }
+.plan-header span { color: var(--muted); font-size: 10px; }
+.plan-header strong { font-size: 12px; }
+.plan-header .plan-title { flex-basis: 100%; color: var(--green); font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
+.plan-header .plan-delta { margin-left: auto; }
+.transfer-card .button { margin-top: 9px; padding: 7px 10px; font-size: 10px; }
 .button { padding: 10px 14px; border-radius: 9px; border: 1px solid var(--line); cursor: pointer; font-size: 12px; font-weight: 700; }
 .button.primary { background: var(--green); color: #07100b; border-color: var(--green); }
 .button.secondary { background: var(--panel-2); }
@@ -140,6 +147,15 @@ h2 { margin: 4px 0 0; font-size: 19px; letter-spacing: -0.02em; }
 .team-summary strong, .team-summary small { display: block; }
 .team-summary strong { font-size: 12px; }
 .team-summary small { margin-top: 3px; color: var(--muted); font-size: 9px; }
+.pending-transfers { margin-bottom: 14px; padding: 12px; border: 1px solid rgba(255,196,92,.35); border-radius: 10px; background: rgba(255,196,92,.07); }
+.pending-transfers:empty { display: none; }
+.pending-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--amber); font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
+.pending-list { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 7px; }
+.pending-chip { padding: 6px 8px; display: inline-flex; align-items: center; gap: 7px; border-radius: 7px; background: #2a251c; color: #ffe4b0; font-size: 10px; }
+.pending-chip button { width: 17px; height: 17px; padding: 0; border: 0; border-radius: 50%; background: rgba(255,255,255,.12); color: inherit; cursor: pointer; line-height: 1; }
+.pending-actions { margin-top: 9px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.pending-actions small { color: var(--muted); font-size: 9px; }
+.pending-actions .button { padding: 7px 10px; font-size: 10px; }
 #team-id-note { margin: 0 0 16px; }
 .state-inputs { margin-bottom: 16px; display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
 .state-inputs label { color: var(--muted); font-size: 9px; text-transform: uppercase; letter-spacing: .08em; }
