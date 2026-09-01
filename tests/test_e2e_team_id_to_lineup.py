@@ -263,7 +263,7 @@ def test_an_invalid_team_id_surfaces_a_visible_error_not_a_silent_failure(live_s
         page.close()
 
 
-def test_transfer_scan_labels_free_and_hit_modes_before_suggestions(live_server, browser):
+def test_transfer_scan_renders_scored_hold_free_hit_and_roll_paths(live_server, browser):
     page = browser.new_page()
     try:
         _seed_local_storage_squad(page)
@@ -272,17 +272,26 @@ def test_transfer_scan_labels_free_and_hit_modes_before_suggestions(live_server,
         page.click("[data-view=transfers]")
 
         page.click("#run-transfers")
-        page.wait_for_selector("#transfer-results .transfer-mode.free", timeout=30000)
-        assert "Free transfer available" in page.inner_text("#transfer-results .transfer-mode")
-        assert "no hit" in page.inner_text("#transfer-results")
-        assert "Model Preview" in page.inner_text("#transfer-results")
+        page.wait_for_selector("#transfer-paths [data-path-id=hold]", timeout=30000)
+        assert "Hold" in page.inner_text("#transfer-paths [data-path-id=hold]")
+        assert "Use 1 free transfer" in page.inner_text("#transfer-paths [data-path-id=one_ft]")
+        assert "Take a −4 hit" in page.inner_text("#transfer-paths [data-path-id=hit_minus4]")
+        assert "Roll the transfer" in page.inner_text("#transfer-paths [data-path-id=roll]")
+        assert re.search(
+            r"Net xPts\s+\d+\.\d+",
+            page.inner_text("#transfer-paths [data-path-id=hold]"),
+            flags=re.IGNORECASE,
+        )
         assert page.locator("#decision-receipts [data-receipt-id]").count() == 2
 
         page.select_option("#free-transfers", "0")
+        page.wait_for_function(
+            "document.getElementById('refresh-lineup').disabled === false", timeout=15000
+        )
         page.click("#run-transfers")
-        page.wait_for_selector("#transfer-results .transfer-mode.hit", timeout=30000)
-        assert "Hit scenario" in page.inner_text("#transfer-results .transfer-mode")
-        assert "4-point hit" in page.inner_text("#transfer-results .transfer-mode")
+        page.wait_for_selector("#transfer-paths [data-path-id=hit_minus4]", timeout=30000)
+        assert page.locator("#transfer-paths [data-path-id=one_ft]").count() == 0
+        assert "includes −4 hit" in page.inner_text("#transfer-paths [data-path-id=hit_minus4]")
     finally:
         page.close()
 
@@ -320,6 +329,29 @@ def test_apply_transfer_stages_move_and_updates_plan_header(live_server, browser
         assert "1" in header
         assert match is not None
         assert float(match.group(1)) == pytest.approx(expected_gain, abs=0.01)
+    finally:
+        page.close()
+
+
+def test_transfer_path_stages_the_server_returned_moves(live_server, browser):
+    page = browser.new_page()
+    try:
+        _seed_local_storage_squad(page)
+        page.goto(live_server, wait_until="networkidle", timeout=15000)
+        page.wait_for_selector("#pitch:not(.skeleton)", timeout=15000)
+        page.click("[data-view=transfers]")
+        page.click("#run-transfers")
+        page.wait_for_selector("#transfer-paths [data-path-id=one_ft] [data-stage-path]", timeout=30000)
+
+        page.click("#transfer-paths [data-path-id=one_ft] [data-stage-path]")
+        page.wait_for_selector("#transfers-pending-transfers .pending-chip", timeout=15000)
+        pending = page.evaluate(
+            "JSON.parse(localStorage.getItem('touchline-plan')).pending_transfers"
+        )
+
+        assert len(pending) == 1
+        assert pending[0]["out_fpl_id"] > 0
+        assert pending[0]["in_fpl_id"] > 0
     finally:
         page.close()
 

@@ -22,9 +22,10 @@ password or session cookie.
 browser (not just the FastAPI `TestClient`), covering "Team ID to weekly decision without a CLI":
 entering a Team ID, loading the resolved squad, and confirming the rendered pitch, marginal-change
 explanation, outlook, and squad editor. It also covers staging one transfer and checking that the
-connected plan header and pitch update. It runs a real `uvicorn` server in a background thread against a fixture compact
-release, with `FPLClient.entry_picks` monkeypatched so no request reaches the real FPL API. Needs
-the `dev` extra installed with a Chromium binary:
+connected plan header and pitch update, plus the scored Hold / free-transfer / -4 / Roll paths. It
+runs a real `uvicorn` server in a background thread against a fixture compact release, with
+`FPLClient.entry_picks` monkeypatched so no request reaches the real FPL API. Needs the `dev` extra
+installed with a Chromium binary:
 
 ```powershell
 .venv\Scripts\python.exe -m pip install -e ".[dev,web]"
@@ -48,7 +49,7 @@ Implemented surfaces:
   blanking would change the starting XI or captain;
 - opponent/fixture (with home/away), bench depth, and confidence (projection uncertainty) on the
   three-Gameweek outlook;
-- an explicit whole-scan "free transfer" vs "hit scenario" banner on the transfers view.
+- an explicit server-scored Hold / transfer / hit / Roll comparison on the transfers view.
 
 ### Connected plan (Phase 1)
 
@@ -98,17 +99,22 @@ sites and unpacks its input as a fixed 5-element tuple -- fixture/opponent data 
 in a separate `opponent_rows` structure in `load_horizon_catalog` rather than widening that shared
 tuple, which would have broken every other caller.
 
-### Free transfer vs hit scenario
+### Transfer-path comparison (Phase 2)
 
-`recommend_web_transfers`'s `hit_cost` is uniform across one scan -- `0 if free_transfers >= 1 else
-4` -- computed once from the manager's current free-transfer count, not per suggestion, since this
-app does not evaluate "wait a Gameweek for a free transfer" as an alternative (see `docs/WEB_APP.md`'s
-own "Current limits": no multi-Gameweek transfer planning). "Keep hit scenarios explicitly separate"
-therefore means labelling the whole scan's mode clearly, not sorting individual cards -- the
-frontend shows a whole-scan banner above every suggestion: green "Free transfer available" when
-`suggestions[0].hit_cost == 0`, red "Hit scenario: ... costs a N-point hit" otherwise, so a manager
-understands the mode before reading any individual move. This is a frontend-only change; the
-backend already exposed `hit_cost` on every suggestion.
+`recommend_web_transfers` now returns a `paths` array that is fully scored by the Python decision
+service. Every path has `net_xpts` (after that path's hit), `delta_xpts_vs_hold`, a server-provided
+transfer list, and a `recommended_path_id`; the browser only renders those values and may stage the
+returned moves. The compact comparison contains Hold and Roll every time, plus the best legal
+single free transfer when one is available. With no free transfer, its best single move is labelled
+`Take a −4 hit`; with one free transfer, that −4 path is a two-move candidate. With two or more
+free transfers it can instead show a two-free-transfer path.
+
+The two-move candidate is intentionally bounded: it pairs only the strongest eight single-move
+candidates, revalidates the combined squad and affordability, and re-scores the resulting XI and
+captaincy over the frozen horizon. It is not a global two-transfer optimizer. A two-move path is
+shown only if it improves on Hold, and a path requiring more than one hit is omitted. Roll is shown
+as a transparent reminder that the next Gameweek is not scored: `Banked FT next Gameweek; this app
+does not score GW+1.`
 
 ### Sensitive-decision state
 
@@ -308,9 +314,10 @@ external transactional manager-state store.
 - research/shadow projection release only;
 - controlled-alpha tester-code gate only; no account authentication, entitlement, or multi-user
   manager storage;
-- no general multi-transfer search or chip-aware optimization; multiple transfers can be staged
+- no general multi-transfer search or chip-aware optimization; Phase 2 compares one move and a
+  bounded shortlist-derived two-move alternative only, while multiple transfers can still be staged
   manually in the browser plan and committed only after review;
-- transfer search is one move, evaluated over the frozen three-Gameweek horizon;
+- transfer paths are evaluated over the frozen three-Gameweek horizon; Roll does not score GW+1;
 - percentile rating is implemented and reproducible, but remains labelled `Model Preview` until
   the underlying model release earns production approval;
 - no externally configured scheduled materialisation/deployment job (the deterministic worker and

@@ -44,6 +44,7 @@ from fpl_model.storage import DEFAULT_DATABASE_PATH
 from fpl_model.validation.role_state import RoleStateResult
 
 _SQUAD_BENCHMARK_CACHE: dict[tuple[str, int], SquadBenchmark] = {}
+_TRANSFER_PATH_SHORTLIST_SIZE = 8
 
 
 @dataclass(frozen=True, slots=True)
@@ -1135,6 +1136,233 @@ def _plan_summary(
     }
 
 
+def _transfer_path_move(
+    transfer: PendingTransfer, *, catalog: dict[int, dict[str, Any]]
+) -> dict[str, Any]:
+    """Return display data for one server-validated staged move."""
+
+    outgoing = catalog[transfer.out_fpl_id]
+    incoming = catalog[transfer.in_fpl_id]
+    return {
+        "out_fpl_id": transfer.out_fpl_id,
+        "in_fpl_id": transfer.in_fpl_id,
+        "out_name": outgoing["name"],
+        "in_name": incoming["name"],
+        "position": outgoing["position"],
+    }
+
+
+def _transfer_path_payload(
+    *,
+    path_id: str,
+    label: str,
+    transfers: tuple[PendingTransfer, ...],
+    catalog: dict[int, dict[str, Any]],
+    hit: float,
+    net_xpts: float,
+    baseline_xpts: float,
+    note: str | None = None,
+) -> dict[str, Any]:
+    """One fully scored browser path; JavaScript only renders this payload."""
+
+    return {
+        "id": path_id,
+        "label": label,
+        "transfers": [
+            _transfer_path_move(transfer, catalog=catalog) for transfer in transfers
+        ],
+        "hit": hit,
+        "net_xpts": net_xpts,
+        "delta_xpts_vs_hold": net_xpts - baseline_xpts,
+        "note": note,
+    }
+
+
+def _score_web_squad_over_horizon(
+    squad,
+    *,
+    horizon: ResearchHorizon,
+    projections: dict[int, dict[int, PlayerGameweekProjection]],
+) -> float:
+    """Score a working squad without altering the frozen release or benchmark."""
+
+    return sum(
+        _lineup_payload(squad, projections[gameweek], gameweek)["total_xpts"]
+        for gameweek, _ in horizon.model_runs
+    )
+
+
+def _best_two_move_path(
+    *,
+    baseline_squad,
+    suggestions: list[dict[str, Any]],
+    horizon: ResearchHorizon,
+    catalog: dict[int, dict[str, Any]],
+    projections: dict[int, dict[int, PlayerGameweekProjection]],
+) -> tuple[tuple[PendingTransfer, ...], float, float] | None:
+    """Return the best affordable two-move plan from a small single-move shortlist.
+
+    This is deliberately not a global N-squared optimisation. The primary
+    transfer scan already evaluates every legal single move; Phase 2 only
+    pairs its strongest bounded shortlist, then revalidates and re-scores the
+    combined squad through the same decision engine.
+    """
+
+    shortlist = suggestions[:_TRANSFER_PATH_SHORTLIST_SIZE]
+    best: tuple[tuple[PendingTransfer, ...], float, float] | None = None
+    for first_index, first in enumerate(shortlist):
+        first_transfer = PendingTransfer(
+            out_fpl_id=first["out"]["fpl_id"],
+            in_fpl_id=first["in"]["fpl_id"],
+        )
+        for second in shortlist[first_index + 1 :]:
+            second_transfer = PendingTransfer(
+                out_fpl_id=second["out"]["fpl_id"],
+                in_fpl_id=second["in"]["fpl_id"],
+            )
+            transfers = (first_transfer, second_transfer)
+            try:
+                candidate_squad, hit = _apply_pending_transfers(
+                    baseline_squad,
+                    transfers,
+                    catalog=catalog,
+                )
+            except ValueError:
+                continue
+            # This phase compares a bounded -4 decision, not two paid hits.
+            if hit > 4.0:
+                continue
+            net_xpts = _score_web_squad_over_horizon(
+                candidate_squad,
+                horizon=horizon,
+                projections=projections,
+            ) - hit
+            if best is None or net_xpts > best[2]:
+                best = (transfers, hit, net_xpts)
+    return best
+
+
+def _transfer_paths(
+    *,
+    baseline_squad,
+    baseline_xpts: float,
+    suggestions: list[dict[str, Any]],
+    horizon: ResearchHorizon,
+    catalog: dict[int, dict[str, Any]],
+    projections: dict[int, dict[int, PlayerGameweekProjection]],
+) -> tuple[list[dict[str, Any]], str]:
+    """Build the bounded Hold / FT / -4 / Roll decision comparison."""
+
+    paths = [
+        _transfer_path_payload(
+            path_id="hold",
+            label="Hold",
+            transfers=(),
+            catalog=catalog,
+            hit=0.0,
+            net_xpts=baseline_xpts,
+            baseline_xpts=baseline_xpts,
+        )
+    ]
+    free_transfers = baseline_squad.free_transfers or 0
+    best_single = suggestions[0] if suggestions else None
+    if best_single is not None:
+        transfer = PendingTransfer(
+            out_fpl_id=best_single["out"]["fpl_id"],
+            in_fpl_id=best_single["in"]["fpl_id"],
+        )
+        net_xpts = baseline_xpts + best_single["net_xpts_gain"]
+        if free_transfers >= 1:
+            paths.append(
+                _transfer_path_payload(
+                    path_id="one_ft",
+                    label="Use 1 free transfer",
+                    transfers=(transfer,),
+                    catalog=catalog,
+                    hit=0.0,
+                    net_xpts=net_xpts,
+                    baseline_xpts=baseline_xpts,
+                )
+            )
+        else:
+            paths.append(
+                _transfer_path_payload(
+                    path_id="hit_minus4",
+                    label="Take a −4 hit",
+                    transfers=(transfer,),
+                    catalog=catalog,
+                    hit=best_single["hit_cost"],
+                    net_xpts=net_xpts,
+                    baseline_xpts=baseline_xpts,
+                )
+            )
+
+    two_move = _best_two_move_path(
+        baseline_squad=baseline_squad,
+        suggestions=suggestions,
+        horizon=horizon,
+        catalog=catalog,
+        projections=projections,
+    )
+    if two_move is not None:
+        transfers, hit, net_xpts = two_move
+        # The two-move alternative belongs in the compact comparison only
+        # when it actually beats holding over the frozen horizon.
+        if net_xpts > baseline_xpts:
+            if free_transfers == 1 and hit == 4.0:
+                paths.append(
+                    _transfer_path_payload(
+                        path_id="hit_minus4",
+                        label="Take a −4 hit",
+                        transfers=transfers,
+                        catalog=catalog,
+                        hit=hit,
+                        net_xpts=net_xpts,
+                        baseline_xpts=baseline_xpts,
+                    )
+                )
+            elif free_transfers >= 2 and hit == 0.0:
+                paths.append(
+                    _transfer_path_payload(
+                        path_id="two_ft",
+                        label="Use 2 free transfers",
+                        transfers=transfers,
+                        catalog=catalog,
+                        hit=hit,
+                        net_xpts=net_xpts,
+                        baseline_xpts=baseline_xpts,
+                    )
+                )
+
+    paths.append(
+        _transfer_path_payload(
+            path_id="roll",
+            label="Roll the transfer",
+            transfers=(),
+            catalog=catalog,
+            hit=0.0,
+            net_xpts=baseline_xpts,
+            baseline_xpts=baseline_xpts,
+            note="Banked FT next Gameweek; this app does not score GW+1.",
+        )
+    )
+    recommended_path_id = "hold"
+    for path in paths:
+        if path["id"] == "roll" or path["delta_xpts_vs_hold"] <= 0:
+            continue
+        if (
+            recommended_path_id == "hold"
+            or path["delta_xpts_vs_hold"]
+            > next(
+                row["delta_xpts_vs_hold"]
+                for row in paths
+                if row["id"] == recommended_path_id
+            )
+        ):
+            recommended_path_id = path["id"]
+    return paths, recommended_path_id
+
+
 def recommend_web_lineups(
     fpl_ids: tuple[int, ...],
     *,
@@ -1357,6 +1585,14 @@ def recommend_web_transfers(
     suggestions.sort(
         key=lambda row: (-row["net_xpts_gain"], -row["gross_xpts_gain"], row["in"]["name"])
     )
+    paths, recommended_path_id = _transfer_paths(
+        baseline_squad=baseline_squad,
+        baseline_xpts=baseline_xpts,
+        suggestions=suggestions,
+        horizon=horizon,
+        catalog=catalog,
+        projections=projections,
+    )
     return {
         "health": health,
         "release_id": release_id,
@@ -1368,12 +1604,13 @@ def recommend_web_transfers(
         "baseline_squad_rating": baseline_rating,
         "baseline_lineups": baseline_lineups,
         "pending_hit_cost": pending_hit_cost,
-        "recommendation": "hold"
-        if not suggestions or suggestions[0]["net_xpts_gain"] <= 0
-        else "transfer",
+        "paths": paths,
+        "recommended_path_id": recommended_path_id,
+        "recommendation": "hold" if recommended_path_id == "hold" else "transfer",
         "suggestions": suggestions[:top_n],
         "method_note": (
             "Every legal affordable same-position single transfer is rescored over the frozen "
-            "three-Gameweek horizon. Future transfer value and price changes are excluded."
+            "three-Gameweek horizon. The optional two-move comparison pairs only a bounded "
+            "shortlist of those single moves; future transfer value and price changes are excluded."
         ),
     }

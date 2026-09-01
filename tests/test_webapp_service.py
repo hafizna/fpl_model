@@ -9,7 +9,12 @@ import pytest
 
 import fpl_model.webapp.service as webapp_service
 from fpl_model.validation.release_drift import compare_web_releases
-from fpl_model.webapp.service import CurrentSquadSetup, load_web_bootstrap, recommend_web_lineups
+from fpl_model.webapp.service import (
+    CurrentSquadSetup,
+    load_web_bootstrap,
+    recommend_web_lineups,
+    recommend_web_transfers,
+)
 
 
 def _database(path: Path) -> tuple[int, ...]:
@@ -204,6 +209,85 @@ def _release_file(path: Path, *, player_one_xpts: float = 0.5) -> tuple[int, ...
     }
     path.write_text(json.dumps(payload), encoding="utf-8")
     return tuple(range(1, 16))
+
+
+def _release_with_transfer_candidates(path: Path) -> tuple[int, ...]:
+    fpl_ids = _release_file(path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    for fpl_id, position, team_id in zip(
+        range(16, 20),
+        ("GK", "DEF", "MID", "FWD"),
+        range(7, 11),
+        strict=True,
+    ):
+        payload["players"].append(
+            {
+                "fpl_id": fpl_id,
+                "player_code": 10_000 + fpl_id,
+                "name": f"Candidate {fpl_id}",
+                "team_id": team_id,
+                "team": f"T{team_id}",
+                "position": position,
+                "price_tenths": 50,
+                "status": "a",
+                "gameweeks": {
+                    str(gameweek): {
+                        "xpts": 9.0,
+                        "appearance_probability": 0.95,
+                        "uncertainty": None,
+                        "quality_flags": [],
+                    }
+                    for gameweek in (2, 3, 4)
+                },
+            }
+        )
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return fpl_ids
+
+
+def test_transfer_paths_score_hold_free_transfer_and_hit_choices(tmp_path: Path):
+    release_path = tmp_path / "paths.json"
+    fpl_ids = _release_with_transfer_candidates(release_path)
+
+    one_free_transfer = recommend_web_transfers(
+        fpl_ids,
+        free_transfers=1,
+        release_path=release_path,
+    )
+    one_paths = {row["id"]: row for row in one_free_transfer["paths"]}
+    assert {"hold", "one_ft", "hit_minus4", "roll"} <= set(one_paths)
+    assert one_paths["hold"]["net_xpts"] == pytest.approx(
+        one_free_transfer["baseline_cumulative_xpts"]
+    )
+    assert one_paths["one_ft"]["hit"] == 0.0
+    assert len(one_paths["one_ft"]["transfers"]) == 1
+    assert one_paths["hit_minus4"]["hit"] == 4.0
+    assert len(one_paths["hit_minus4"]["transfers"]) == 2
+    assert one_paths["hit_minus4"]["delta_xpts_vs_hold"] > 0
+    assert one_free_transfer["recommended_path_id"] == "hit_minus4"
+    assert "does not score GW+1" in one_paths["roll"]["note"]
+
+    no_free_transfers = recommend_web_transfers(
+        fpl_ids,
+        free_transfers=0,
+        release_path=release_path,
+    )
+    zero_paths = {row["id"]: row for row in no_free_transfers["paths"]}
+    assert "one_ft" not in zero_paths
+    assert zero_paths["hit_minus4"]["hit"] == 4.0
+    assert len(zero_paths["hit_minus4"]["transfers"]) == 1
+    assert zero_paths["hit_minus4"]["net_xpts"] > zero_paths["hold"]["net_xpts"]
+
+    two_free_transfers = recommend_web_transfers(
+        fpl_ids,
+        free_transfers=2,
+        release_path=release_path,
+    )
+    two_paths = {row["id"]: row for row in two_free_transfers["paths"]}
+    assert two_paths["one_ft"]["hit"] == 0.0
+    assert two_paths["two_ft"]["hit"] == 0.0
+    assert len(two_paths["two_ft"]["transfers"]) == 2
+    assert two_free_transfers["recommended_path_id"] == "two_ft"
 
 
 def _ready_rating_artifact() -> dict:
