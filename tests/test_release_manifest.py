@@ -302,7 +302,7 @@ def test_build_release_manifest_surfaces_non_final_event_live_evidence(tmp_path)
             "live_run_id": "live_gw1",
             "season": "2026-27",
             "gameweek": 1,
-            "captured_at": "2026-08-25T09:00:00+07:00",
+            "captured_at": "2026-08-25T02:00:00+00:00",
             "event_finished": True,
             "data_checked": False,
             "player_rows": 5,

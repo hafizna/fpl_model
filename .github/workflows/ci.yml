@@ -16,6 +16,8 @@ jobs:
           cache: pip
       - name: Install
         run: pip install -e ".[dev,web]"
+      - name: Install browser
+        run: python -m playwright install --with-deps chromium
       - name: Lint
         run: ruff check .
       - name: Tests

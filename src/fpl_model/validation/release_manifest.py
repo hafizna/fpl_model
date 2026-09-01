@@ -20,6 +20,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +46,11 @@ class ReleaseManifest:
 
 def _row(connection: duckdb.DuckDBPyConnection, sql: str, params: list[Any]) -> tuple | None:
     return connection.execute(sql, params).fetchone()
+
+
+def _timestamp(value: datetime | None) -> str | None:
+    """Serialize lineage timestamps canonically so manifest hashes are host-independent."""
+    return value.astimezone(UTC).isoformat() if value is not None else None
 
 
 def _model_run(connection: duckdb.DuckDBPyConnection, model_run_id: str) -> dict[str, Any]:
@@ -73,12 +79,12 @@ def _model_run(connection: duckdb.DuckDBPyConnection, model_run_id: str) -> dict
     return {
         "model_run_id": str(run_id),
         "target_gameweek": int(gameweek),
-        "as_of": as_of.isoformat(),
-        "deadline": deadline.isoformat(),
+        "as_of": _timestamp(as_of),
+        "deadline": _timestamp(deadline),
         "model_version": str(model_version),
         "source_ingestion_run_id": str(source_ingestion_run_id),
         "status": str(status),
-        "completed_at": completed_at.isoformat() if completed_at is not None else None,
+        "completed_at": _timestamp(completed_at),
     }
 
 
@@ -138,9 +144,9 @@ def _ingestion_run(connection: duckdb.DuckDBPyConnection, ingestion_run_id: str)
     return {
         "ingestion_run_id": ingestion_run_id,
         "source": str(source),
-        "captured_at": captured_at.isoformat() if captured_at is not None else None,
-        "source_as_of": source_as_of.isoformat() if source_as_of is not None else None,
-        "completed_at": completed_at.isoformat() if completed_at is not None else None,
+        "captured_at": _timestamp(captured_at),
+        "source_as_of": _timestamp(source_as_of),
+        "completed_at": _timestamp(completed_at),
         "status": str(status),
         "payload_sha256": payload_sha256,
     }
@@ -198,7 +204,7 @@ def _event_live_runs(
                 "live_run_id": str(run_id),
                 "season": str(season),
                 "gameweek": int(gameweek),
-                "captured_at": captured_at.isoformat() if captured_at is not None else None,
+                "captured_at": _timestamp(captured_at),
                 "event_finished": bool(event_finished),
                 "data_checked": bool(data_checked),
                 "player_rows": int(player_rows),
