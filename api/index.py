@@ -441,7 +441,11 @@ def public_config() -> dict[str, object]:
 
 
 @app.get("/api/squad/from-entry/{entry_id}")
-def squad_from_entry(entry_id: int, gameweek: int | None = None) -> dict[str, object]:
+def squad_from_entry(
+    entry_id: int,
+    gameweek: int | None = None,
+    include_profile: bool = False,
+) -> dict[str, object]:
     """Load a public squad by FPL Team ID -- no password or session cookie.
 
     Fetches live from FPL's public `entry/{id}/event/{gw}/picks/` endpoint
@@ -460,7 +464,25 @@ def squad_from_entry(entry_id: int, gameweek: int | None = None) -> dict[str, ob
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     target_gameweek = gameweek or release["model_runs"][0]["gameweek"]
 
-    client = FPLClient()
+    # Keep the optional profile enrichment bounded; picks remain the critical
+    # path and should not wait on a slow profile request for the full client
+    # default timeout.
+    client = FPLClient(timeout_seconds=10.0)
+    profile: dict[str, object] | None = None
+    if include_profile:
+        try:
+            raw_profile = client.entry(entry_id)
+            profile = {
+                "id": raw_profile.get("id"),
+                "name": raw_profile.get("name"),
+                "player_first_name": raw_profile.get("player_first_name"),
+                "player_last_name": raw_profile.get("player_last_name"),
+                "current_event": raw_profile.get("current_event"),
+            }
+        except (requests.HTTPError, requests.RequestException, ValueError):
+            # Profile metadata is a convenience only. A temporary profile
+            # failure must not prevent the public picks endpoint from loading.
+            profile = None
     try:
         picks_payload = client.entry_picks(entry_id, target_gameweek)
     except requests.HTTPError as exc:
@@ -483,7 +505,10 @@ def squad_from_entry(entry_id: int, gameweek: int | None = None) -> dict[str, ob
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    return {"entry_id": entry_id, "gameweek": target_gameweek, **resolved}
+    payload = {"entry_id": entry_id, "gameweek": target_gameweek, **resolved}
+    if profile is not None:
+        payload["entry"] = profile
+    return payload
 
 
 @app.post("/api/recommend/lineups")

@@ -18,6 +18,9 @@ const state = {
   roleScenarioOverrides: [],
   lineups: null,
   transfers: null,
+  teamProfile: JSON.parse(localStorage.getItem("touchline-team-profile") || "null"),
+  horizonLength: Math.max(1, Math.min(5, Number(localStorage.getItem("touchline-horizon") || 3) || 3)),
+  riskProfile: localStorage.getItem("touchline-risk-profile") || "balanced",
   alphaToken: sessionStorage.getItem("touchline-alpha-token"),
   publicConfig: null,
 };
@@ -124,12 +127,67 @@ function playerById(id) {
   return state.bootstrap.players.find((player) => player.fpl_id === Number(id));
 }
 
+const RISK_PROFILES = {
+  conservative: { label: "Conservative", note: "Prefer clearer upside and fewer speculative moves.", threshold: 2 },
+  balanced: { label: "Balanced", note: "Keep the model ranking intact and compare the full shortlist.", threshold: 0 },
+  aggressive: { label: "Aggressive", note: "Surface differentials, including lower-confidence upside.", threshold: -2 },
+};
+
+function publishedGameweeks() {
+  return state.bootstrap?.release?.model_runs?.map((row) => Number(row.gameweek)) || [];
+}
+
+function visibleLineups() {
+  const lineups = state.lineups?.lineups || [];
+  return lineups.slice(0, Math.max(1, Math.min(state.horizonLength, lineups.length)));
+}
+
+function renderPlanningControls() {
+  if (!RISK_PROFILES[state.riskProfile]) state.riskProfile = "balanced";
+  const gameweeks = publishedGameweeks();
+  const select = $("#horizon-select");
+  if (!select) return;
+  const available = Math.min(5, gameweeks.length);
+  select.innerHTML = Array.from({ length: 5 }, (_, index) => {
+    const length = index + 1;
+    const enabled = length <= available;
+    return `<option value="${length}" ${length === state.horizonLength ? "selected" : ""} ${enabled ? "" : "disabled"}>${length} GW${length === 1 ? "" : "s"}${enabled ? "" : " — not published"}</option>`;
+  }).join("");
+  if (state.horizonLength > available) state.horizonLength = available || 1;
+  select.value = String(state.horizonLength);
+  const first = gameweeks[0];
+  const last = gameweeks[Math.min(state.horizonLength, gameweeks.length) - 1];
+  $("#horizon-note").textContent = gameweeks.length
+    ? `Published now: GW${first}–GW${gameweeks.at(-1)}. Showing ${state.horizonLength} GW${state.horizonLength === 1 ? "" : "s"} (GW${first}–GW${last}).`
+    : "No published Gameweek horizon is available yet.";
+  $("#horizon-availability").textContent = gameweeks.length ? `${gameweeks.length} GW published` : "";
+  const profiles = $("#risk-profiles");
+  profiles.innerHTML = Object.entries(RISK_PROFILES).map(([key, profile]) => `<button type="button" class="risk-profile ${state.riskProfile === key ? "selected" : ""}" data-risk-profile="${key}"><strong>${profile.label}</strong><small>${profile.note}</small></button>`).join("");
+  $$("[data-risk-profile]").forEach((button) => button.addEventListener("click", () => {
+    state.riskProfile = button.dataset.riskProfile;
+    localStorage.setItem("touchline-risk-profile", state.riskProfile);
+    renderPlanningControls();
+    renderTransfers();
+  }));
+}
+
+function renderSetupSummary() {
+  const container = $("#setup-summary");
+  if (!container) return;
+  const teamName = state.teamProfile?.name;
+  const squadCount = state.selected.filter((id) => playerById(id)).length;
+  container.innerHTML = `<div><span>Workspace</span><strong>${teamName || "Default squad"}</strong><small>${squadCount}/15 players loaded · ${state.riskProfile} stance · ${state.horizonLength} GW visible</small></div><button type="button" class="button secondary" id="setup-settings">Adjust settings</button>`;
+  $("#setup-settings")?.addEventListener("click", () => navigateTo("settings"));
+}
+
 function renderRelease() {
   const release = state.bootstrap.release;
   $("#release-label").textContent = release.label;
   $("#release-meta").textContent = `${release.model_version} · ${new Date(release.planning_as_of).toLocaleString()}`;
   const gws = release.model_runs.map((row) => row.gameweek);
   $("#horizon-label").textContent = `GW${gws[0]}–GW${gws.at(-1)}`;
+  renderPlanningControls();
+  renderSetupSummary();
 
   const coverage = release.coverage;
   $("#release-coverage").textContent = coverage
@@ -324,16 +382,19 @@ function fixtureLabel(player) {
 
 function renderOutlook() {
   if (!state.lineups) return;
+  const horizonLineups = visibleLineups();
   const rating = state.lineups.squad_rating;
   const overallRating = rating?.available ? rating.model_strength.overall_3gw : null;
   $("#outlook-total").classList.remove("skeleton");
-  $("#outlook-total").innerHTML = `<div><span>Projected horizon score</span><strong>${points(state.lineups.cumulative_xpts)}</strong><small>captaincy included · cumulative raw xPts</small></div>${overallRating ? `<div class="rating-score"><span>${rating.display_label}</span><strong>${Math.round(overallRating.percentile)}</strong><small>percentile vs ${rating.benchmark.population_size} legal same-budget squads</small></div>` : `<div class="rating-score unavailable"><span>${rating?.display_label || "Model Preview"}</span><strong>—</strong><small>benchmark unavailable; raw xPts is still valid</small></div>`}`;
+  const visibleTotal = horizonLineups.reduce((sum, row) => sum + Number(row.total_xpts || 0), 0);
+  $("#outlook-total").innerHTML = `<div><span>Projected horizon score</span><strong>${points(visibleTotal)}</strong><small>captaincy included · ${state.horizonLength}-GW visible slice</small></div>${overallRating ? `<div class="rating-score"><span>${rating.display_label}</span><strong>${Math.round(overallRating.percentile)}</strong><small>release benchmark (full published horizon)</small></div>` : `<div class="rating-score unavailable"><span>${rating?.display_label || "Model Preview"}</span><strong>—</strong><small>benchmark unavailable; raw xPts is still valid</small></div>`}`;
+  if (overallRating) $("#outlook-total").insertAdjacentHTML("beforeend", `<small class="outlook-benchmark-note">percentile benchmark is for the full published horizon.</small>`);
   const perGameweekRating = new Map(
     rating?.available
       ? rating.model_strength.per_gameweek.map((row) => [row.gameweek, row.percentile])
       : []
   );
-  $("#outlook-grid").innerHTML = state.lineups.lineups.map((lineup) => {
+  $("#outlook-grid").innerHTML = horizonLineups.map((lineup) => {
     const benchTotal = lineup.bench.reduce((sum, player) => sum + Number(player.xpts || 0), 0);
     const percentile = perGameweekRating.get(lineup.gameweek);
     return `<article class="gw-card">
@@ -360,7 +421,7 @@ function renderOutlook() {
   const totals = new Map();
   const fixturesByPlayer = new Map();
   const uncertaintyByPlayer = new Map();
-  state.lineups.lineups.forEach((lineup) => {
+  horizonLineups.forEach((lineup) => {
     [...lineup.starters, ...lineup.bench].forEach((player) => {
       totals.set(player.fpl_id, (totals.get(player.fpl_id) || 0) + Number(player.xpts || 0));
       const existing = fixturesByPlayer.get(player.fpl_id) || [];
@@ -372,7 +433,7 @@ function renderOutlook() {
     });
   });
   const rows = state.selected.map(playerById).filter(Boolean).sort((a, b) => (totals.get(b.fpl_id) || 0) - (totals.get(a.fpl_id) || 0));
-  $("#player-outlook").innerHTML = `<div class="table-head"><span>Player</span><span>Fixtures</span><span>Confidence</span><span>3-GW xPts</span></div>${rows.map((player) => {
+  $("#player-outlook").innerHTML = `<div class="table-head"><span>Player</span><span>Fixtures</span><span>Confidence</span><span>${state.horizonLength}-GW xPts</span></div>${rows.map((player) => {
     const uncertaintyValues = uncertaintyByPlayer.get(player.fpl_id);
     const confidence = uncertaintyValues && uncertaintyValues.length
       ? `±${points(uncertaintyValues.reduce((a, b) => a + b, 0) / uncertaintyValues.length)}`
@@ -384,7 +445,8 @@ function renderOutlook() {
 function renderTransfers() {
   const container = $("#transfer-results");
   if (!state.transfers) return;
-  const suggestions = state.transfers.suggestions;
+  const profile = RISK_PROFILES[state.riskProfile] || RISK_PROFILES.balanced;
+  const suggestions = state.transfers.suggestions.filter((row) => row.net_xpts_gain >= profile.threshold);
   // hit_cost is uniform across one scan -- it comes entirely from the
   // manager's current free-transfer count, not per-suggestion (this app
   // does not evaluate "wait a Gameweek for a free transfer" as an
@@ -395,9 +457,9 @@ function renderTransfers() {
   const baselinePercentile = baselineRating?.available
     ? baselineRating.model_strength.overall_3gw.percentile
     : null;
-  const modeBanner = suggestions.length === 0 ? "" : isHitScenario
+  const modeBanner = `${suggestions.length === 0 ? "" : isHitScenario
     ? `<div class="transfer-mode hit">Hit scenario: no free transfer is available, so every suggested move below costs a ${suggestions[0].hit_cost}-point hit. Net gain already accounts for it.</div>`
-    : `<div class="transfer-mode free">Free transfer available: every suggested move below costs no hit.</div>`;
+    : `<div class="transfer-mode free">Free transfer available: every suggested move below costs no hit.</div>`}<div class="transfer-mode profile">${profile.label} stance: ${profile.note}</div>`;
   container.className = "transfer-list";
   container.innerHTML = `${modeBanner}<article class="transfer-card hold ${state.transfers.recommendation === "hold" ? "recommended" : ""}"><div><span>Baseline</span><strong>Hold transfer</strong><small>${baselinePercentile == null ? "rating withheld" : `${Math.round(baselinePercentile)}th percentile · ${baselineRating.display_label}`}</small></div><div><span>3-GW xPts</span><strong>${points(state.transfers.baseline_cumulative_xpts)}</strong></div></article>${suggestions.map((row, index) => `<article class="transfer-card ${index === 0 && state.transfers.recommendation === "transfer" ? "recommended" : ""}">
     <div class="transfer-move"><span>${index === 0 ? "Best retained move" : `Alternative ${index + 1}`}</span><strong>${row.out.name} <i>→</i> ${row.in.name}</strong><small>${row.out.position} · bank ${money(row.remaining_bank_tenths)}</small></div>
@@ -405,19 +467,26 @@ function renderTransfers() {
   </article>`).join("")}`;
 }
 
+function parseEntryId(raw) {
+  const value = String(raw || "").trim();
+  if (/^\d+$/.test(value)) return Number(value);
+  const match = value.match(/(?:entry|team)\/(\d+)/i) || value.match(/\b\d{4,}\b/);
+  return match ? Number(match[1] || match[0]) : null;
+}
+
 async function loadFromTeamId() {
   const input = $("#team-id");
-  const entryId = Number(input.value);
+  const entryId = parseEntryId(input.value);
   const button = $("#load-team-id");
   if (!Number.isInteger(entryId) || entryId <= 0) {
-    showError("Enter a valid FPL Team ID.");
+    showError("Enter a valid numeric FPL Team ID or paste a public fantasy.premierleague.com/entry/<id> URL. Team-name search is not exposed by FPL's public API.");
     return;
   }
   showError("");
   button.disabled = true;
   button.textContent = "Loading…";
   try {
-    const resolved = await api(`/api/squad/from-entry/${entryId}`);
+    const resolved = await api(`/api/squad/from-entry/${entryId}?include_profile=true`);
     state.selected = resolved.fpl_ids;
     state.sellingPrices = resolved.selling_prices;
     state.sellingPriceIsEstimated = resolved.selling_price_is_estimated;
@@ -428,11 +497,17 @@ async function loadFromTeamId() {
       captain_fpl_id: resolved.captain_fpl_id,
       vice_captain_fpl_id: resolved.vice_captain_fpl_id,
     };
+    state.teamProfile = resolved.entry || { id: entryId, name: null };
+    localStorage.setItem("touchline-team-profile", JSON.stringify(state.teamProfile));
     localStorage.setItem("touchline-squad", JSON.stringify(state.selected));
     localStorage.setItem("touchline-selling-prices", JSON.stringify(state.sellingPrices));
     localStorage.setItem("touchline-selling-estimated", JSON.stringify(state.sellingPriceIsEstimated));
     localStorage.setItem("touchline-current-setup", JSON.stringify(state.currentSetup));
     $("#bank").value = (resolved.bank_tenths / 10).toFixed(1);
+    const teamSummary = $("#team-summary");
+    teamSummary.hidden = false;
+    teamSummary.innerHTML = `<strong>${state.teamProfile.name || `FPL Team ${entryId}`}</strong><small>Team ID ${entryId} · public picks loaded for GW${resolved.gameweek}</small>`;
+    renderSetupSummary();
     renderSquadEditor();
     await runLineups();
   } catch (error) {
@@ -476,13 +551,18 @@ async function runTransfers() {
   }
 }
 
+function navigateTo(viewName) {
+  const titles = { setup: "Workspace setup", weekly: "Lineup recommendation", outlook: "Planning outlook", transfers: "Transfer suggestions", settings: "Risk & horizon settings" };
+  $$(".nav-item").forEach((item) => item.classList.toggle("active", item.dataset.view === viewName));
+  $$(".view").forEach((view) => view.classList.toggle("active", view.id === `${viewName}-view`));
+  $("#page-title").textContent = titles[viewName] || "FPL Decision Lab";
+  renderPlanningControls();
+  renderSetupSummary();
+}
+
 function bindNavigation() {
-  const titles = { weekly: "Weekly squad scenario", outlook: "Three-Gameweek outlook", transfers: "Transfer recommendations" };
-  $$(".nav-item").forEach((button) => button.addEventListener("click", () => {
-    $$(".nav-item").forEach((item) => item.classList.toggle("active", item === button));
-    $$(".view").forEach((view) => view.classList.toggle("active", view.id === `${button.dataset.view}-view`));
-    $("#page-title").textContent = titles[button.dataset.view];
-  }));
+  $$(".nav-item").forEach((button) => button.addEventListener("click", () => navigateTo(button.dataset.view)));
+  $("#setup-next")?.addEventListener("click", () => navigateTo("weekly"));
 }
 
 async function loadWorkspace() {
@@ -511,6 +591,12 @@ async function loadWorkspace() {
     )) clearCurrentSetup();
     renderRelease();
     renderSquadEditor();
+    if (state.teamProfile) {
+      const teamSummary = $("#team-summary");
+      teamSummary.hidden = false;
+      teamSummary.innerHTML = `<strong>${state.teamProfile.name || "Saved FPL team"}</strong><small>Team ID ${state.teamProfile.id || "—"}</small>`;
+    }
+    renderSetupSummary();
     await runLineups();
   } catch (error) {
     if (error.code !== "alpha_access_required") showError(error.message);
@@ -554,6 +640,13 @@ async function init() {
   $("#team-id").addEventListener("keydown", (event) => { if (event.key === "Enter") loadFromTeamId(); });
   $("#bank").addEventListener("change", runLineups);
   $("#free-transfers").addEventListener("change", resetTransfersView);
+  $("#horizon-select")?.addEventListener("change", (event) => {
+    state.horizonLength = Number(event.target.value);
+    localStorage.setItem("touchline-horizon", String(state.horizonLength));
+    renderPlanningControls();
+    renderOutlook();
+    renderSetupSummary();
+  });
   $("#access-form").addEventListener("submit", submitAccessCode);
   await loadPublicConfig();
   await loadWorkspace();

@@ -29,9 +29,11 @@
         </a>
 
         <nav class="primary-nav" aria-label="Primary navigation">
-          <button class="nav-item active" data-view="weekly"><span>01</span>Weekly scenario</button>
-          <button class="nav-item" data-view="outlook"><span>02</span>3-GW outlook</button>
-          <button class="nav-item" data-view="transfers"><span>03</span>Transfers</button>
+          <button class="nav-item" data-view="setup"><span>01</span><b>Setup</b><small>Import &amp; plan</small></button>
+          <button class="nav-item active" data-view="weekly"><span>02</span><b>Lineup</b><small>Pick XI &amp; captain</small></button>
+          <button class="nav-item" data-view="outlook"><span>03</span><b>Outlook</b><small>See the horizon</small></button>
+          <button class="nav-item" data-view="transfers"><span>04</span><b>Transfers</b><small>Compare moves</small></button>
+          <button class="nav-item" data-view="settings"><span>05</span><b>Settings</b><small>Risk &amp; horizon</small></button>
         </nav>
 
         <div class="release-card">
@@ -56,6 +58,7 @@
           <div class="deadline-block">
             <span>Planning horizon</span>
             <strong id="horizon-label">—</strong>
+            <small id="horizon-availability"></small>
           </div>
         </header>
 
@@ -64,6 +67,20 @@
 
         <section class="workspace">
           <div class="content-column">
+            <section id="setup-view" class="view">
+              <div class="section-heading">
+                <div><div class="eyebrow">Start here</div><h2>Build your decision workspace</h2></div>
+                <button id="setup-next" class="button primary" type="button">Review lineup →</button>
+              </div>
+              <div class="journey-card">
+                <div class="journey-step active"><span>1</span><div><strong>Import your squad</strong><small>Use a Team ID or public FPL URL in the panel.</small></div></div>
+                <div class="journey-step"><span>2</span><div><strong>Set the planning lens</strong><small>Choose a visible horizon and decision stance.</small></div></div>
+                <div class="journey-step"><span>3</span><div><strong>Review, then act</strong><small>Lineup first; transfer suggestions stay in context.</small></div></div>
+              </div>
+              <div id="setup-summary" class="setup-summary"></div>
+              <div class="model-note"><strong>One workspace, one source of truth</strong><p>Every menu uses the same squad, bank, free transfers, and frozen projection release. The current release has three published Gameweeks; longer horizons will appear automatically when released.</p></div>
+            </section>
+
             <section id="weekly-view" class="view active">
               <div class="section-heading">
                 <div><div class="eyebrow">Model selection</div><h2>Best legal XI</h2></div>
@@ -100,6 +117,14 @@
               </div>
               <div id="transfer-results" class="transfer-list empty-state">Run the scan to compare the current squad with every legal, affordable same-position move.</div>
             </section>
+
+            <section id="settings-view" class="view">
+              <div class="section-heading"><div><div class="eyebrow">Decision controls</div><h2>Risk &amp; horizon</h2></div></div>
+              <div class="settings-grid">
+                <div class="settings-card"><div class="eyebrow">Decision stance</div><h3>How much swing is comfortable?</h3><p>Changes how suggestions are grouped in this browser. It does not retrain the frozen projection model.</p><div id="risk-profiles" class="risk-profiles"></div></div>
+                <div class="settings-card"><div class="eyebrow">Timeline</div><h3>Gameweeks ahead</h3><p>Select how much of the published horizon to keep in view. Future options unlock when the release contains them.</p><label class="control-label" for="horizon-select">Visible horizon</label><select id="horizon-select" class="settings-select"></select><div id="horizon-note" class="control-note"></div></div>
+              </div>
+            </section>
           </div>
 
           <aside class="squad-panel">
@@ -108,11 +133,12 @@
               <span id="squad-cost" class="cost-pill">—</span>
             </div>
             <div class="team-id-row">
-              <label for="team-id">FPL Team ID
-                <span><input id="team-id" type="number" min="1" step="1" placeholder="e.g. 1234567" /></span>
+              <label for="team-id">FPL Team ID or public URL
+                <span><input id="team-id" type="text" inputmode="numeric" autocomplete="off" placeholder="1234567 or fantasy.premierleague.com/entry/1234567" /></span>
               </label>
               <button id="load-team-id" class="button secondary" type="button">Load squad</button>
             </div>
+            <div id="team-summary" class="team-summary" hidden></div>
             <p id="team-id-note" class="private-note">Loads your public squad by Team ID only — never a password or session cookie. Estimated selling prices (current market price, not FPL's own profit-sharing rule) are used until you adjust them below.</p>
             <div class="state-inputs">
               <label>Bank <span><input id="bank" type="number" min="0" step="0.1" value="0.0" />m</span></label>

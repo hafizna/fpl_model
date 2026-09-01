@@ -147,7 +147,7 @@ base release" control that clears it. Stale transfer-scan results are invalidate
 discarded in memory) whenever the scenario or free-transfer count changes, since `POST
 /api/recommend/transfers` is only re-run when the user explicitly re-scans.
 
-### Loading a squad by Team ID
+### Loading a squad by Team ID or public URL
 
 `GET /api/squad/from-entry/{entry_id}?gameweek=N` fetches live from FPL's public
 `entry/{id}/event/{gw}/picks/` endpoint (never `my-team/{id}/`, which is private and requires a
@@ -180,6 +180,18 @@ visible caveat rather than implying an FPL-exact sell value (FPL's real selling 
 profit-sharing rule on price rises that cannot be reconstructed from a single picks snapshot). The
 CLI/persistence equivalent, for building an immutable `squad_snapshot` database row instead of a
 one-off browser fetch, is `ingest.squad_snapshot.import_squad_snapshot_from_entry`.
+
+The browser accepts either a numeric Team ID or a public `fantasy.premierleague.com/entry/<id>`
+URL. Supplying `include_profile=true` also returns the public entry name when available; profile
+metadata is optional and a profile lookup failure does not block picks. FPL's public API does not
+provide a reliable name-search endpoint, so the UI explains that constraint instead of pretending
+name search is supported.
+
+Navigation is staged as Setup, Lineup, Outlook, Transfers, and Settings. Settings currently
+controls the visible slice of the published horizon (1–5 options, with unavailable lengths
+disabled) and a browser-only decision stance for transfer shortlist display. The underlying
+release and projection model remain unchanged until a longer horizon or calibrated risk model is
+materialized.
 
 ## Sprint 7 score contract
 
