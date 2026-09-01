@@ -467,16 +467,20 @@ function renderTransfers() {
   </article>`).join("")}`;
 }
 
-function parseEntryId(raw) {
+function parseEntryReference(raw) {
   const value = String(raw || "").trim();
-  if (/^\d+$/.test(value)) return Number(value);
+  if (/^\d+$/.test(value)) return { entryId: Number(value), gameweek: null };
   const match = value.match(/(?:entry|team)\/(\d+)/i) || value.match(/\b\d{4,}\b/);
-  return match ? Number(match[1] || match[0]) : null;
+  if (!match) return null;
+  const gameweekMatch = value.match(/(?:event|gw|gameweek)[\/_-]?(\d+)/i);
+  const gameweek = gameweekMatch ? Number(gameweekMatch[1]) : null;
+  return { entryId: Number(match[1] || match[0]), gameweek: Number.isInteger(gameweek) && gameweek >= 1 && gameweek <= 38 ? gameweek : null };
 }
 
 async function loadFromTeamId() {
   const input = $("#team-id");
-  const entryId = parseEntryId(input.value);
+  const reference = parseEntryReference(input.value);
+  const entryId = reference?.entryId;
   const button = $("#load-team-id");
   if (!Number.isInteger(entryId) || entryId <= 0) {
     showError("Enter a valid numeric FPL Team ID or paste a public fantasy.premierleague.com/entry/<id> URL. Team-name search is not exposed by FPL's public API.");
@@ -486,17 +490,21 @@ async function loadFromTeamId() {
   button.disabled = true;
   button.textContent = "Loading…";
   try {
-    const resolved = await api(`/api/squad/from-entry/${entryId}?include_profile=true`);
+    const params = new URLSearchParams({ include_profile: "true" });
+    if (reference.gameweek) params.set("gameweek", String(reference.gameweek));
+    const resolved = await api(`/api/squad/from-entry/${entryId}?${params.toString()}`);
     state.selected = resolved.fpl_ids;
     state.sellingPrices = resolved.selling_prices;
     state.sellingPriceIsEstimated = resolved.selling_price_is_estimated;
-    state.currentSetup = {
+    const horizonStart = Number(state.bootstrap.release.model_runs[0].gameweek);
+    const setupMatchesHorizon = resolved.gameweek === horizonStart;
+    state.currentSetup = setupMatchesHorizon ? {
       gameweek: resolved.gameweek,
       starter_fpl_ids: resolved.starter_fpl_ids,
       bench_fpl_ids: resolved.bench_fpl_ids,
       captain_fpl_id: resolved.captain_fpl_id,
       vice_captain_fpl_id: resolved.vice_captain_fpl_id,
-    };
+    } : null;
     state.teamProfile = resolved.entry || { id: entryId, name: null };
     localStorage.setItem("touchline-team-profile", JSON.stringify(state.teamProfile));
     localStorage.setItem("touchline-squad", JSON.stringify(state.selected));
@@ -506,9 +514,12 @@ async function loadFromTeamId() {
     $("#bank").value = (resolved.bank_tenths / 10).toFixed(1);
     const teamSummary = $("#team-summary");
     teamSummary.hidden = false;
-    teamSummary.innerHTML = `<strong>${state.teamProfile.name || `FPL Team ${entryId}`}</strong><small>Team ID ${entryId} · public picks loaded for GW${resolved.gameweek}</small>`;
+    teamSummary.innerHTML = `<strong>${state.teamProfile.name || `FPL Team ${entryId}`}</strong><small>Team ID ${entryId} · public picks loaded for GW${resolved.gameweek}${setupMatchesHorizon ? "" : ` · lineup comparison starts at GW${horizonStart}`}</small>`;
     renderSetupSummary();
     renderSquadEditor();
+    $("#team-id-note").textContent = setupMatchesHorizon
+      ? "Public squad loaded. Selling prices are estimated from current market prices."
+      : `Public squad loaded from GW${resolved.gameweek}. The release starts at GW${horizonStart}, so the squad is available for planning but no submitted-XI comparison is shown yet.`;
     await runLineups();
   } catch (error) {
     showError(error.message);
