@@ -326,13 +326,34 @@ async function removePendingTransfer(index) {
   await runLineups();
 }
 
-async function stageTransfer(row) {
-  if (!row?.out?.fpl_id || !row?.in?.fpl_id) return;
-  state.plan.pending_transfers.push({ out_fpl_id: row.out.fpl_id, in_fpl_id: row.in.fpl_id });
+async function stageTransfers(transfers, message) {
+  const staged = (transfers || []).map((row) => ({
+    out_fpl_id: row.out_fpl_id ?? row.out?.fpl_id,
+    in_fpl_id: row.in_fpl_id ?? row.in?.fpl_id,
+  }));
+  if (staged.length === 0 || staged.some((row) => !row.out_fpl_id || !row.in_fpl_id)) return;
+  state.plan.pending_transfers.push(...staged);
   persistPlan();
   renderPendingTransfers();
-  resetTransfersView(`${row.out.name} is staged for ${row.in.name} — lineup and outlook are recalculating.`);
+  resetTransfersView(message);
   await runLineups();
+}
+
+async function stageTransfer(row) {
+  if (!row?.out?.fpl_id || !row?.in?.fpl_id) return;
+  await stageTransfers(
+    [row],
+    `${row.out.name} is staged for ${row.in.name} — lineup and outlook are recalculating.`,
+  );
+}
+
+async function stagePath(path) {
+  if (!path?.transfers?.length) return;
+  const moveNames = path.transfers.map((row) => `${row.out_name} → ${row.in_name}`).join(" · ");
+  await stageTransfers(
+    path.transfers,
+    `${moveNames} staged from the ${path.label.toLowerCase()} path — lineup and outlook are recalculating.`,
+  );
 }
 
 async function commitPendingTransfers() {
@@ -357,6 +378,7 @@ function resetTransfersView(message = "Squad or scenario changed — run the sca
   state.transfers = null;
   renderDecisionReceipts();
   renderPendingTransfers();
+  $("#transfer-paths").innerHTML = "";
   const container = $("#transfer-results");
   container.className = "transfer-list empty-state";
   container.innerHTML = `<div>${message}</div><button type="button" class="button secondary" id="rescan-transfers">Re-scan transfers</button>`;
@@ -550,27 +572,34 @@ function renderOutlook() {
   }).join("")}`;
 }
 
+function renderTransferPaths() {
+  const container = $("#transfer-paths");
+  const paths = state.transfers?.paths || [];
+  const recommendedPathId = state.transfers?.recommended_path_id;
+  container.innerHTML = paths.map((path) => {
+    const moves = path.transfers.map((row) => `${row.out_name} <i>→</i> ${row.in_name}`).join(" · ");
+    const detail = moves || path.note || "No transfer this Gameweek.";
+    const isRecommended = path.id === recommendedPathId;
+    return `<article class="transfer-path ${isRecommended ? "recommended" : ""}" data-path-id="${path.id}">
+      <div><span>${isRecommended ? "Recommended path" : "Path"}</span><strong>${path.label}</strong><small>${detail}</small></div>
+      <div><span>Net xPts</span><strong>${points(path.net_xpts)}</strong><small class="${path.delta_xpts_vs_hold >= 0 ? "positive" : "negative"}">${path.delta_xpts_vs_hold >= 0 ? "+" : ""}${points(path.delta_xpts_vs_hold)} vs hold${path.hit ? ` · includes −${path.hit} hit` : ""}</small></div>
+      ${path.transfers.length ? `<button type="button" class="button ${isRecommended ? "primary" : "secondary"}" data-stage-path="${path.id}">Stage this</button>` : ""}
+    </article>`;
+  }).join("");
+  container.querySelectorAll("[data-stage-path]").forEach((button) => button.addEventListener("click", () => {
+    stagePath(paths.find((path) => path.id === button.dataset.stagePath));
+  }));
+}
+
 function renderTransfers() {
   const container = $("#transfer-results");
   if (!state.transfers) return;
   renderPendingTransfers();
+  renderTransferPaths();
   const profile = RISK_PROFILES[state.plan.risk_profile] || RISK_PROFILES.balanced;
   const suggestions = state.transfers.suggestions.filter((row) => row.net_xpts_gain >= profile.threshold);
-  // hit_cost is uniform across one scan -- it comes entirely from the
-  // manager's current free-transfer count, not per-suggestion (this app
-  // does not evaluate "wait a Gameweek for a free transfer" as an
-  // alternative). A hit scenario is therefore an explicit, whole-scan mode,
-  // not something to sort per-card.
-  const isHitScenario = suggestions.length > 0 && suggestions[0].hit_cost > 0;
-  const baselineRating = state.transfers.baseline_squad_rating;
-  const baselinePercentile = baselineRating?.available
-    ? baselineRating.model_strength.overall_3gw.percentile
-    : null;
-  const modeBanner = `${suggestions.length === 0 ? "" : isHitScenario
-    ? `<div class="transfer-mode hit">Hit scenario: no free transfer is available, so every suggested move below costs a ${suggestions[0].hit_cost}-point hit. Net gain already accounts for it.</div>`
-    : `<div class="transfer-mode free">Free transfer available: every suggested move below costs no hit.</div>`}<div class="transfer-mode profile">${profile.label} stance: ${profile.note}</div>`;
   container.className = "transfer-list";
-  container.innerHTML = `${modeBanner}<article class="transfer-card hold ${state.transfers.recommendation === "hold" ? "recommended" : ""}"><div><span>Baseline</span><strong>Hold transfer</strong><small>${baselinePercentile == null ? "rating withheld" : `${Math.round(baselinePercentile)}th percentile · ${baselineRating.display_label}`}</small></div><div><span>3-GW xPts</span><strong>${points(state.transfers.baseline_cumulative_xpts)}</strong></div></article>${suggestions.map((row, index) => `<article class="transfer-card ${index === 0 && state.transfers.recommendation === "transfer" ? "recommended" : ""}">
+  container.innerHTML = `<div class="transfer-mode profile">${profile.label} stance: ${profile.note}</div>${suggestions.length === 0 ? `<div class="empty-state">No retained single-move alternatives for this stance. The path comparison above still shows Hold and Roll.</div>` : suggestions.map((row, index) => `<article class="transfer-card">
     <div class="transfer-move"><span>${index === 0 ? "Best retained move" : `Alternative ${index + 1}`}</span><strong>${row.out.name} <i>→</i> ${row.in.name}</strong><small>${row.out.position} · bank ${money(row.remaining_bank_tenths)}</small><button type="button" class="button secondary" data-apply-out="${row.out.fpl_id}" data-apply-in="${row.in.fpl_id}" data-lineup-changed="${row.lineup_changed ? "true" : "false"}">Apply move</button></div>
     <div><span>Net gain</span><strong class="${row.net_xpts_gain >= 0 ? "positive" : "negative"}">${row.net_xpts_gain >= 0 ? "+" : ""}${points(row.net_xpts_gain)}</strong><small>${row.hit_cost ? `includes −${row.hit_cost} hit` : "no hit"}</small></div>
   </article>`).join("")}`;
