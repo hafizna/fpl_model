@@ -21,8 +21,8 @@ password or session cookie.
 `tests/test_e2e_team_id_to_lineup.py` drives the actual served page in a real headless Chromium
 browser (not just the FastAPI `TestClient`), covering "Team ID to weekly decision without a CLI":
 entering a Team ID, loading the resolved squad, and confirming the rendered pitch, marginal-change
-explanation, outlook, and squad editor. It also locks the transfer view's free-transfer and
-four-point-hit banners in both modes. It runs a real `uvicorn` server in a background thread against a fixture compact
+explanation, outlook, and squad editor. It also covers staging one transfer and checking that the
+connected plan header and pitch update. It runs a real `uvicorn` server in a background thread against a fixture compact
 release, with `FPLClient.entry_picks` monkeypatched so no request reaches the real FPL API. Needs
 the `dev` extra installed with a Chromium binary:
 
@@ -49,6 +49,34 @@ Implemented surfaces:
 - opponent/fixture (with home/away), bench depth, and confidence (projection uncertainty) on the
   three-Gameweek outlook;
 - an explicit whole-scan "free transfer" vs "hit scenario" banner on the transfers view.
+
+### Connected plan (Phase 1)
+
+The browser persists one working plan under `localStorage["touchline-plan"]`:
+`squad`, `bank_tenths`, `free_transfers`, `selling_prices`, `current_setup`,
+`pending_transfers`, `horizon_length`, and `risk_profile`. On first load it migrates the earlier
+`touchline-squad`, `touchline-selling-prices`, `touchline-selling-estimated`,
+`touchline-current-setup`, `touchline-horizon`, and `touchline-risk-profile` keys into that object;
+the legacy keys remain for one release as a safety fallback. Manager state is never written to the
+server.
+
+Transfer recommendations expose an `Apply move` action. This adds an `{out_fpl_id, in_fpl_id}`
+record to `pending_transfers`, then sends the whole staged list to both recommendation endpoints.
+The Python service validates and applies those moves to an in-memory working squad copy using the
+same squad/transfer rules as the decision layer; the frozen release and rating benchmark are not
+mutated. Lineup responses include a `plan_summary` with the effective squad, bank, free transfers,
+formation, captain, staged count, and server-computed `net_xpts_vs_holding`, so JavaScript never
+calculates transfer legality or xPts. Decision receipts hash the complete request, including staged
+moves, and remain reproducible.
+
+The Squad panel and Transfers view share a removable staged-transfer strip. `Commit to squad`
+folds the server-validated effective state into the browser plan, decrements each free transfer (a
+`4.0` point hit is included in `pending_hit_cost` once the count is exhausted), clears pending
+moves, and clears the submitted-XI comparison because the committed squad has changed. A staged
+move is not silently committed; removing it or committing it always re-runs lineup/outlook scoring.
+The current Phase 1
+surface deliberately does not add chips, multi-move path comparison, projection editing, locks/bans,
+or risk-adjusted backend ranking; those remain later phases of the planning-flow brief.
 
 ### Fixtures, bench depth, and confidence
 
@@ -280,7 +308,8 @@ external transactional manager-state store.
 - research/shadow projection release only;
 - controlled-alpha tester-code gate only; no account authentication, entitlement, or multi-user
   manager storage;
-- no general multi-transfer or chip-aware optimization;
+- no general multi-transfer search or chip-aware optimization; multiple transfers can be staged
+  manually in the browser plan and committed only after review;
 - transfer search is one move, evaluated over the frozen three-Gameweek horizon;
 - percentile rating is implemented and reproducible, but remains labelled `Model Preview` until
   the underlying model release earns production approval;

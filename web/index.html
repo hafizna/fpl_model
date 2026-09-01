@@ -86,6 +86,7 @@
                 <div><div class="eyebrow">Model selection</div><h2>Best legal XI</h2></div>
                 <button id="refresh-lineup" class="button secondary">Recalculate</button>
               </div>
+              <div id="plan-header" class="plan-header" aria-live="polite"></div>
               <div id="weekly-summary" class="metric-strip skeleton"></div>
               <div id="sensitivity-banner" hidden></div>
               <div id="marginal-changes" class="marginal-changes"></div>
@@ -115,6 +116,7 @@
               <div class="transfer-intro">
                 Hold is always included. Affordability uses the selling prices below plus bank; a hit is charged when no free transfer remains.
               </div>
+              <div id="transfers-pending-transfers" class="pending-transfers" aria-live="polite"></div>
               <div id="transfer-results" class="transfer-list empty-state">Run the scan to compare the current squad with every legal, affordable same-position move.</div>
             </section>
 
@@ -149,6 +151,7 @@
                 </select>
               </label>
             </div>
+            <div id="squad-pending-transfers" class="pending-transfers" aria-live="polite"></div>
             <div id="squad-editor" class="squad-editor skeleton"></div>
             <p class="private-note">Saved in this browser only. No FPL password or session cookie is stored.</p>
           </aside>

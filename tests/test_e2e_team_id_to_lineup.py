@@ -14,6 +14,7 @@ monkeypatched so no request reaches the real FPL API.
 from __future__ import annotations
 
 import json
+import re
 import socket
 import threading
 import time
@@ -282,6 +283,43 @@ def test_transfer_scan_labels_free_and_hit_modes_before_suggestions(live_server,
         page.wait_for_selector("#transfer-results .transfer-mode.hit", timeout=30000)
         assert "Hit scenario" in page.inner_text("#transfer-results .transfer-mode")
         assert "4-point hit" in page.inner_text("#transfer-results .transfer-mode")
+    finally:
+        page.close()
+
+
+def test_apply_transfer_stages_move_and_updates_plan_header(live_server, browser):
+    page = browser.new_page()
+    try:
+        _seed_local_storage_squad(page)
+        page.goto(live_server, wait_until="networkidle", timeout=15000)
+        page.wait_for_selector("#pitch:not(.skeleton)", timeout=15000)
+        page.click("[data-view=transfers]")
+        page.click("#run-transfers")
+        page.wait_for_selector("#transfer-results [data-apply-out]", timeout=30000)
+
+        card = page.locator(".transfer-card").filter(
+            has=page.locator('[data-apply-out][data-lineup-changed="true"]')
+        ).first
+        expected_gain = float(card.locator("strong").nth(1).inner_text().replace("+", ""))
+        pitch_before = page.locator("#pitch").inner_html()
+        card.locator("[data-apply-out]").click()
+
+        page.wait_for_selector("#squad-pending-transfers .pending-chip", timeout=15000)
+        page.click("[data-view=weekly]")
+        page.wait_for_function(
+            "document.getElementById('plan-header').innerText.includes('Staged transfers\\n1')",
+            timeout=15000,
+        )
+        pitch_after = page.locator("#pitch").inner_html()
+        header = page.inner_text("#plan-header")
+        match = re.search(r"Net xPts vs holding\s+([+-]?\d+\.\d+)", header)
+
+        assert pitch_after != pitch_before
+        assert "plan for gw" in header.lower()
+        assert "Staged transfers" in header
+        assert "1" in header
+        assert match is not None
+        assert float(match.group(1)) == pytest.approx(expected_gain, abs=0.01)
     finally:
         page.close()
 
