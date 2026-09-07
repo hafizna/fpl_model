@@ -21,7 +21,7 @@ function loadPlan() {
     selling_prices: readStoredJson("touchline-selling-prices", {}),
     selling_price_is_estimated: readStoredJson("touchline-selling-estimated", false),
     current_setup: readStoredJson("touchline-current-setup", null),
-    horizon_length: Math.max(1, Math.min(5, Number(localStorage.getItem("touchline-horizon") || 3) || 3)),
+    horizon_length: Math.max(1, Math.min(5, Number(localStorage.getItem("touchline-horizon") || 5) || 3)),
     risk_profile: localStorage.getItem("touchline-risk-profile") || "balanced",
   };
   const source = stored && typeof stored === "object" ? stored : legacy;
@@ -33,7 +33,7 @@ function loadPlan() {
     selling_price_is_estimated: Boolean(source.selling_price_is_estimated),
     current_setup: source.current_setup || null,
     pending_transfers: Array.isArray(source.pending_transfers) ? source.pending_transfers : [],
-    horizon_length: Math.max(1, Math.min(5, Number(source.horizon_length || legacy.horizon_length) || 3)),
+    horizon_length: Math.max(1, Math.min(5, Number(source.horizon_length || legacy.horizon_length) || 5)),
     risk_profile: source.risk_profile || legacy.risk_profile,
   };
   localStorage.setItem("touchline-plan", JSON.stringify(plan));
@@ -820,3 +820,53 @@ async function init() {
 }
 
 init();
+
+
+$("#run-wildcard")?.addEventListener("click", async () => {
+  const button = $("#run-wildcard");
+  const output = $("#wildcard-results");
+  button.disabled = true;
+  output.textContent = "Comparing legal squads and transfer paths...";
+  try {
+    const payload = await api("/api/recommend/wildcard", {method: "POST", body: JSON.stringify({
+      ...requestBody(), horizon_length: state.plan.horizon_length,
+      roll_after_wildcard: Number($("#wc-roll").value),
+      terminal_ft_value: Number($("#wc-ft-value").value),
+    })});
+    output.replaceChildren();
+    for (const path of payload.paths) {
+      const card = document.createElement("section");
+      card.className = "wildcard-path";
+      const title = document.createElement("h4");
+      title.textContent = `${path.name}: ${points(path.net_xpts)} net xPts | ${path.terminal_free_transfers} FT at horizon end`;
+      card.append(title);
+      const assumptions = document.createElement("p");
+      assumptions.textContent = `Objective including assumed FT value: ${points(path.objective)}. This is a research scenario.`;
+      card.append(assumptions);
+      if (path.squad_fpl_ids) {
+        const squad = document.createElement("p");
+        squad.textContent = path.squad_fpl_ids.map(id => playerById(id)?.name || `#${id}`).join(", ");
+        card.append(squad);
+      }
+      for (const step of path.steps) {
+        const row = document.createElement("div");
+        row.className = "wildcard-step";
+        const action = document.createElement("strong");
+        const moves = step.transfers.map(m => `${playerById(m.out)?.name || m.out} to ${playerById(m.in)?.name || m.in}`).join("; ");
+        action.textContent = `GW${step.gameweek}: ${step.action}${moves ? " - " + moves : ""}`;
+        const detail = document.createElement("small");
+        detail.textContent = `${points(step.net_xpts)} net xPts | FT ${step.free_transfers_before} to ${step.free_transfers_after} | hit ${step.hit_cost} | bank ${(step.bank_tenths / 10).toFixed(1)}m | captain ${playerById(step.captain_fpl_id)?.name || step.captain_fpl_id}`;
+        row.append(action, detail);
+        card.append(row);
+      }
+      output.append(card);
+    }
+    const note = document.createElement("p");
+    note.textContent = payload.limitations.join(" ");
+    output.append(note);
+  } catch (error) {
+    output.textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+});

@@ -13,6 +13,7 @@ from fpl_model.storage import DEFAULT_DATABASE_PATH
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--horizon-length", type=int, choices=range(1, 6), default=5)
     parser.add_argument("--gameweek", type=int, required=True)
     parser.add_argument("--current-season", default="2026-27")
     parser.add_argument("--previous-season", default="2025-26")
@@ -53,6 +54,7 @@ def main() -> None:
     result = run_deadline_refresh(
         DeadlineRefreshConfig(
             target_gameweek=args.gameweek,
+            horizon_length=args.horizon_length,
             current_season=args.current_season,
             previous_season=args.previous_season,
             team_strength_csv=args.team_strength_csv,

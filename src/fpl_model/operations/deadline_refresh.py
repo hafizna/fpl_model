@@ -43,14 +43,15 @@ class DeadlineRefreshConfig:
     lock_file: Path
     backup_directory: Path | None = None
     previous_effective_fixtures: float = 5.0
+    horizon_length: int = 5
     allow_analytically_complete: bool = False
     require_production: bool = False
     alert_webhook_url: str | None = field(default=None, repr=False)
     alert_timeout_seconds: float = 10.0
 
     def __post_init__(self) -> None:
-        if not 2 <= self.target_gameweek <= 36:
-            raise ValueError("target_gameweek must be between 2 and 36")
+        if not 1 <= self.horizon_length <= 5 or not 2 <= self.target_gameweek <= 39 - self.horizon_length:
+            raise ValueError("target_gameweek/horizon must cover one to five GWs ending by GW38")
         if self.previous_effective_fixtures <= 0:
             raise ValueError("previous_effective_fixtures must be positive")
         if self.alert_timeout_seconds <= 0:
@@ -215,6 +216,7 @@ def run_deadline_refresh(
                 calibration_artifact_id=config.calibration_artifact_id,
                 uncertainty_artifact_id=config.uncertainty_artifact_id,
                 previous_effective_fixtures=config.previous_effective_fixtures,
+                horizon_length=config.horizon_length,
                 allow_analytically_complete=config.allow_analytically_complete,
                 database_path=config.database_path,
             )

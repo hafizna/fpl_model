@@ -4,7 +4,13 @@ An explainable Fantasy Premier League projection engine built around auditable e
 
 ## Project goal
 
-The first objective is **not** to build a black-box ML predictor. We will first reproduce the Benchwarmers 2026/27 spreadsheet model in Python, component by component, then test whether additional contextual features improve out-of-sample predictions.
+The explainable Benchwarmers component model is the baseline. In-season v2 now updates attacking,
+DefCon and saves inputs from final official evidence, with small-sample shrinkage. The active
+planning workflow is a five-Gameweek horizon refreshed every week, including Wildcard versus
+hold/free-transfer scenarios. See [the five-GW planner contract](docs/WILDCARD_FIVE_GAMEWEEK_PLANNER.md).
+
+This remains a research/shadow model: implementing an adaptive projection or decision policy does
+not establish its out-of-sample advantage. Tactical/context extensions still require evaluation.
 
 Planned contextual layers include:
 
@@ -47,7 +53,9 @@ This repository currently includes:
   history (Vaastav-only team strength, no workbook)
 - a deadline-safe GW2+ refresh that separates analytically complete official playing-time evidence
   from FPL's later whole-Gameweek finalisation
-- a frozen three-Gameweek projection horizon plus lineup, transfer, and squad-scenario prototypes
+- a configurable one-to-five-Gameweek projection horizon plus lineup, transfer, and squad scenarios
+- Wildcard comparison using actual selling prices, preserved FT, and an explicit post-WC roll period
+- atomic two-transfer paths and configurable terminal FT value, reported separately from xPts
 
 Selectable-player projection coverage now passes its explicit gate. The next milestone is a
 versioned production projection release: freshness, finality, coverage, calibration, uncertainty,

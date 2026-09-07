@@ -189,9 +189,7 @@ def test_preseason_baseline_rejects_in_season_gameweeks(tmp_path):
         )
 
 
-def test_inseason_baseline_uses_refreshed_minutes_and_keeps_frozen_priors_visible(
-    tmp_path,
-):
+def _seed_inseason_baseline(tmp_path):
     database_path = tmp_path / "baseline.duckdb"
     _seed_baseline_inputs(database_path)
     with duckdb.connect(str(database_path)) as connection:
@@ -271,6 +269,14 @@ def test_inseason_baseline_uses_refreshed_minutes_and_keeps_frozen_priors_visibl
             """
         )
 
+    return database_path
+
+
+def test_inseason_baseline_uses_refreshed_minutes_and_keeps_frozen_priors_visible(
+    tmp_path,
+):
+    database_path = _seed_inseason_baseline(tmp_path)
+
     result = materialize_inseason_baseline(
         target_gameweek=2,
         appearance_projection_run_id="appearance2",
@@ -302,7 +308,7 @@ def test_inseason_baseline_uses_refreshed_minutes_and_keeps_frozen_priors_visibl
 
     assert result.projected_fixture_rows == 1
     assert model[0].astimezone(UTC).isoformat() == "2026-08-21T02:00:00+00:00"
-    assert model[1] == "coherent_benchwarmers_inseason_baseline_v1"
+    assert model[1] == "coherent_benchwarmers_inseason_baseline_v2"
     assert projection[0] == pytest.approx(71.2)
     assert context_lineage == ("context2",)
     assert {

@@ -34,13 +34,13 @@ def load_initial_squad_inputs(
     model_run_ids: dict[int, str],
 ) -> StoredInitialSquadInputs:
     """Load three completed, pre-deadline runs without requiring a manager squad."""
-    if len(model_run_ids) != 3:
-        raise ValueError("exactly three distinct Gameweek model runs are required")
+    if not 1 <= len(model_run_ids) <= 5:
+        raise ValueError("one to five distinct Gameweek model runs are required")
     gameweeks = tuple(sorted(model_run_ids))
-    expected = tuple(range(gameweeks[0], gameweeks[0] + 3))
+    expected = tuple(range(gameweeks[0], gameweeks[0] + len(model_run_ids)))
     if gameweeks != expected:
         raise ValueError(f"model-run Gameweeks must be consecutive, expected {expected}")
-    if len(set(model_run_ids.values())) != 3:
+    if len(set(model_run_ids.values())) != len(model_run_ids):
         raise ValueError("model_run_id values must be distinct")
 
     metadata = []

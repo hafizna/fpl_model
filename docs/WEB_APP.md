@@ -41,15 +41,19 @@ Implemented surfaces:
 - exhaustive legal weekly XI, captain, vice-captain, and bench order;
 - marginal no-chip xPts and explained XI/captain/vice/bench-order changes against the manager's
   current submitted setup loaded by Team ID;
-- a frozen three-Gameweek raw-xPts outlook;
+- a frozen one-to-five-Gameweek raw-xPts outlook (published horizon length; the visible slice is a
+  browser-only Setting);
 - expected autosub value as a separate diagnostic;
 - every legal, affordable same-position single transfer rescored over the same horizon;
 - explicit `RESEARCH_ONLY`/`SHADOW`/`PRODUCTION` release status and pinned model-run metadata;
 - a visible `sensitive`-recommendation warning naming the exact rotation-risk player(s) whose
   blanking would change the starting XI or captain;
 - opponent/fixture (with home/away), bench depth, and confidence (projection uncertainty) on the
-  three-Gameweek outlook;
-- an explicit server-scored Hold / transfer / hit / Roll comparison on the transfers view.
+  outlook;
+- an explicit server-scored Hold / transfer / hit / Roll comparison on the transfers view;
+- a server-scored Wildcard-versus-hold/free-transfer comparison over the published horizon
+  (`POST /api/recommend/wildcard`), using the manager's actual selling prices and preserved free
+  transfers, with an explicit post-Wildcard roll period.
 
 ### Connected plan (Phase 1)
 
@@ -116,6 +120,36 @@ shown only if it improves on Hold, and a path requiring more than one hit is omi
 as a transparent reminder that the next Gameweek is not scored: `Banked FT next Gameweek; this app
 does not score GW+1.`
 
+### Wildcard comparison
+
+`POST /api/recommend/wildcard` extends the squad request with `horizon_length` (2--5),
+`roll_after_wildcard` (0--4), `terminal_ft_value` (0--10, an assumed points value per free transfer
+still banked after the final horizon deadline), and optional `locked_fpl_ids` / `excluded_fpl_ids`
+constraints for the Wildcard squad search. It requires no staged transfers -- the comparison starts
+from the committed squad -- and returns three fully server-scored paths:
+
+- **Hold** -- roll every Gameweek in the horizon;
+- **Use free transfers** -- the best bounded roll / one-transfer / atomic two-transfer path;
+- **Wildcard + roll** -- a Wildcard squad chosen for the horizon, then a forced roll for
+  `roll_after_wildcard` Gameweeks, then free transfer paths for the rest.
+
+Each path carries per-Gameweek XI, captain, bank, hits, and free-transfer transitions, plus
+`net_xpts` (cumulative lineup/captain xPts minus hits) and an `objective` that adds the assumed
+terminal free-transfer value. Wildcard affordability uses bank plus **actual sale proceeds**;
+retaining an owned player costs their sale value as opportunity cost and preserves their real
+market/purchase/selling values afterwards (no reset to £100m, no sell-and-rebuy spread on retained
+players). Preserved free transfers are carried through the Wildcard deadline without granting an
+extra one, matching the [official saved-transfer rules](https://www.premierleague.com/news/4661029).
+
+The response is `decision_status: RESEARCH_ONLY`, pinned to the release, and carries a decision
+receipt (`decision_type: wildcard_comparison`). It never changes the actual FPL team, Wildcard
+availability is *assumed* for the what-if, and the future option value of keeping the chip for a
+later week is **not** priced -- a small Wildcard gain is not by itself a reason to play the chip.
+The Wildcard squad search and the two-transfer bundle search are both bounded candidate/beam
+searches, not certified global optima; results carry an `APPROXIMATE_BUNDLE_SHORTLIST` flag where a
+proxy shortlist was used. The full contract, weekly workflow, and worked free-transfer table live
+in `docs/WILDCARD_FIVE_GAMEWEEK_PLANNER.md`.
+
 ### Sensitive-decision state
 
 `role_state` (from `validation/role_state.py`) is baked into `web/release.json` per player per
@@ -142,7 +176,7 @@ count as `release.coverage`:
 - `total_registered_players`: every player in the official snapshot this release's source ingestion
   run captured;
 - `fully_covered_players`: how many of them have a projection in EVERY Gameweek of the release's
-  three-Gameweek horizon;
+  published horizon (one to five Gameweeks);
 - `excluded_missing_projection`: registered players absent from the release's catalog entirely (no
   projection for any horizon Gameweek);
 - `excluded_partial_horizon_coverage`: players present in the catalog but missing one specific
@@ -229,7 +263,7 @@ materialized.
 
 ## Sprint 7 score contract
 
-The three-Gameweek screen remains an `outlook`, but it now carries a versioned benchmark-relative
+The outlook screen carries a versioned benchmark-relative
 `Model Score` (`Model Preview` while the release is not production-approved). The scale is not a
 min/max of open browser scenarios:
 
@@ -241,7 +275,7 @@ min/max of open browser scenarios:
   settings, and raw benchmark scores; reviewed role scenarios rescore the submitted squad but do
   not move this benchmark;
 - each Gameweek percentile is calculated separately; the overall percentile is calculated from
-  cumulative raw 3GW xPts, never by averaging rounded Gameweek display ratings;
+  cumulative raw horizon xPts, never by averaging rounded Gameweek display ratings;
 - model strength, data-quality flags, projection uncertainty, legal-squad health, and release
   approval are separate response fields and separate UI labels;
 - fewer than 100 legal benchmark squads causes the percentile to be withheld while raw xPts stays
@@ -284,11 +318,15 @@ freshness validation:
 
 ```powershell
 .venv\Scripts\python.exe scripts\export_web_release.py `
-  --model-run-id baseline_... `
-  --model-run-id baseline_... `
-  --model-run-id baseline_... `
+  --model-run-id baseline_...  # one --model-run-id per Gameweek, ascending, 1-5 total `
   --output web\release.json
 ```
+
+The current packaged release is the `coherent_benchwarmers_inseason_baseline_v2` five-Gameweek
+horizon (GW4--GW8). v2 updates attacking, DefCon, and saves inputs from final official prior-Gameweek
+evidence with small-sample shrinkage; earlier `v1` releases are not rewritten. The Wildcard
+comparison endpoint requires a horizon of at least the requested `horizon_length`, so a shorter
+packaged release will reject a longer Wildcard request with `422`.
 
 Use `--require-production` only after calibration and uncertainty artifacts are genuinely
 approved. Without it, a passing shadow release remains usable but is visibly labelled `SHADOW`.
@@ -314,10 +352,15 @@ external transactional manager-state store.
 - research/shadow projection release only;
 - controlled-alpha tester-code gate only; no account authentication, entitlement, or multi-user
   manager storage;
-- no general multi-transfer search or chip-aware optimization; Phase 2 compares one move and a
-  bounded shortlist-derived two-move alternative only, while multiple transfers can still be staged
+- no general multi-transfer search; the transfers view compares one move and a bounded
+  shortlist-derived two-move alternative only, while multiple transfers can still be staged
   manually in the browser plan and committed only after review;
-- transfer paths are evaluated over the frozen three-Gameweek horizon; Roll does not score GW+1;
+- chip support is limited to the Wildcard comparison endpoint (`docs/WILDCARD_FIVE_GAMEWEEK_PLANNER.md`);
+  Bench Boost, Triple Captain, and Free Hit are not scored, and no endpoint recommends *which week*
+  to play a chip -- the Wildcard comparison assumes the chip is available and does not price its
+  future option value;
+- transfer and Wildcard paths are evaluated over the frozen published horizon (one to five
+  Gameweeks); Roll does not score the Gameweek after the horizon ends;
 - percentile rating is implemented and reproducible, but remains labelled `Model Preview` until
   the underlying model release earns production approval;
 - no externally configured scheduled materialisation/deployment job (the deterministic worker and

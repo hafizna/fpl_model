@@ -1,4 +1,4 @@
-"""Materialise and validate one complete in-season three-Gameweek release."""
+"""Materialise and validate one complete in-season Gameweek release."""
 
 from __future__ import annotations
 
@@ -68,6 +68,7 @@ def materialize_inseason_release(
     calibration_artifact_id: str,
     uncertainty_artifact_id: str,
     previous_effective_fixtures: float = 5.0,
+    horizon_length: int = 5,
     allow_analytically_complete: bool = False,
     database_path: str | Path = DEFAULT_DATABASE_PATH,
     snapshot_raw_root: str | Path = DEFAULT_SNAPSHOT_RAW_ROOT,
@@ -82,8 +83,8 @@ def materialize_inseason_release(
     downstream quality flags.
     """
 
-    if not 2 <= target_gameweek <= 36:
-        raise ValueError("target_gameweek must be between 2 and 36 for a three-GW horizon")
+    if not 1 <= horizon_length <= 5 or not 2 <= target_gameweek <= 39 - horizon_length:
+        raise ValueError("target_gameweek/horizon must cover one to five GWs ending by GW38")
     if any(
         not value.strip()
         for value in (
@@ -174,6 +175,7 @@ def materialize_inseason_release(
     )
     horizon = materialize_frozen_projection_horizon(
         anchor_model_run_id=anchor.model_run_id,
+        horizon_length=horizon_length,
         database_path=database_path,
     )
 
@@ -215,6 +217,7 @@ def materialize_inseason_release(
         "schema_version": "inseason_release_materialization_v1",
         "inputs": {
             "target_gameweek": target_gameweek,
+            "horizon_length": horizon_length,
             "current_season": current_season,
             "previous_season": previous_season,
             "allow_analytically_complete": allow_analytically_complete,
