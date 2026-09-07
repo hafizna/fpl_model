@@ -1,10 +1,20 @@
 # Deadline-safe in-season refresh
 
-In-season baseline v2 refreshes appearance, player rates and descriptive context before each
-deadline. Final official xG/xA, DefCon and saves update the player-rate priors; team strength,
-discipline and bonus remain explicit historical priors. It never treats a partially completed
-Gameweek as final rate evidence. See [the current five-GW contract](WILDCARD_FIVE_GAMEWEEK_PLANNER.md)
-for posterior weighting, Wildcard planning and remaining limitations.
+In-season baseline v2 refreshes appearance, player rates, **team strength**, and descriptive
+context before each deadline from final official prior-Gameweek evidence, with small-sample
+shrinkage. Discipline and bonus remain explicit historical priors. It never treats a partially
+completed Gameweek as final evidence. See
+[the current five-GW contract](WILDCARD_FIVE_GAMEWEEK_PLANNER.md) for posterior weighting,
+Wildcard planning and remaining limitations.
+
+The appearance model additionally (a) treats an all-zero previous-season workbook row as *no*
+prior rather than an observed non-starter -- a promoted or newly signed player who has actually
+started this season is no longer buried at a ~0.38 start probability -- and (b) discounts a
+club-changer's old-club start history until they have banked more than two starts at the new club,
+so a deadline-day signing into a deep squad is not assumed nailed. Team strength shrinks the frozen
+workbook xG/xGC toward the season's own team-level xG for and against (default five-match
+pseudo-count, `--team-strength-prior-matches`), so a defence that has actually fallen apart over
+the opening Gameweeks stops being scored on a stale preseason belief.
 
 ## GW2+ run order
 

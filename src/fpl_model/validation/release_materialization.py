@@ -19,6 +19,7 @@ from fpl_model.ingest.fpl_snapshot import persist_fpl_snapshot
 from fpl_model.ingest.player_identity import import_player_identity_bridge
 from fpl_model.ingest.team_strength import (
     import_team_strength_history,
+    materialize_inseason_team_strength,
     materialize_preseason_team_strength,
 )
 from fpl_model.model.appearance_pipeline import materialize_inseason_appearance
@@ -68,6 +69,7 @@ def materialize_inseason_release(
     calibration_artifact_id: str,
     uncertainty_artifact_id: str,
     previous_effective_fixtures: float = 5.0,
+    team_strength_prior_matches: float = 5.0,
     horizon_length: int = 5,
     allow_analytically_complete: bool = False,
     database_path: str | Path = DEFAULT_DATABASE_PATH,
@@ -155,12 +157,30 @@ def materialize_inseason_release(
         source_label=team_strength_source_label,
         database_path=database_path,
     )
-    strength = materialize_preseason_team_strength(
-        source_import_run_id=strength_import.import_run_id,
-        target_gameweek=target_gameweek,
-        source_ingestion_run_id=snapshot.ingestion_run_id,
-        database_path=database_path,
-    )
+    # GW2+ blends the frozen workbook prior toward the season's own team-level
+    # xG for/against (deadline-safe, final Gameweeks only). A team with no final
+    # current-season fixture keeps the preseason prior. GW1 has no such evidence.
+    if target_gameweek >= 2:
+        # The team-strength blend only reads Gameweeks whose own deadline is
+        # before the target's -- the same no-lookahead boundary the appearance
+        # run uses -- so ``availability.as_of`` is a safe capture-time bound even
+        # though the final live runs may have been captured a few seconds later.
+        strength = materialize_inseason_team_strength(
+            source_import_run_id=strength_import.import_run_id,
+            target_gameweek=target_gameweek,
+            current_season=current_season,
+            source_ingestion_run_id=snapshot.ingestion_run_id,
+            as_of=availability.as_of,
+            prior_matches=team_strength_prior_matches,
+            database_path=database_path,
+        )
+    else:
+        strength = materialize_preseason_team_strength(
+            source_import_run_id=strength_import.import_run_id,
+            target_gameweek=target_gameweek,
+            source_ingestion_run_id=snapshot.ingestion_run_id,
+            database_path=database_path,
+        )
     context = materialize_context_features(
         target_gameweek=target_gameweek,
         appearance_projection_run_id=appearance.projection_run_id,

@@ -24,6 +24,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--calibration-artifact-id", required=True)
     parser.add_argument("--uncertainty-artifact-id", required=True)
     parser.add_argument("--previous-effective-fixtures", type=float, default=5.0)
+    parser.add_argument("--team-strength-prior-matches", type=float, default=5.0)
     parser.add_argument("--allow-analytically-complete", action="store_true")
     parser.add_argument("--require-production", action="store_true")
     parser.add_argument("--database", type=Path, default=DEFAULT_DATABASE_PATH)
@@ -70,6 +71,7 @@ def main() -> None:
             lock_file=args.lock_file,
             backup_directory=args.backup_directory,
             previous_effective_fixtures=args.previous_effective_fixtures,
+            team_strength_prior_matches=args.team_strength_prior_matches,
             allow_analytically_complete=args.allow_analytically_complete,
             require_production=args.require_production,
             alert_webhook_url=os.environ.get(args.alert_webhook_env),

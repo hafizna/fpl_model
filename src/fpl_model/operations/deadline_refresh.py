@@ -43,6 +43,7 @@ class DeadlineRefreshConfig:
     lock_file: Path
     backup_directory: Path | None = None
     previous_effective_fixtures: float = 5.0
+    team_strength_prior_matches: float = 5.0
     horizon_length: int = 5
     allow_analytically_complete: bool = False
     require_production: bool = False
@@ -54,6 +55,8 @@ class DeadlineRefreshConfig:
             raise ValueError("target_gameweek/horizon must cover one to five GWs ending by GW38")
         if self.previous_effective_fixtures <= 0:
             raise ValueError("previous_effective_fixtures must be positive")
+        if self.team_strength_prior_matches <= 0:
+            raise ValueError("team_strength_prior_matches must be positive")
         if self.alert_timeout_seconds <= 0:
             raise ValueError("alert_timeout_seconds must be positive")
         required_labels = (
@@ -216,6 +219,7 @@ def run_deadline_refresh(
                 calibration_artifact_id=config.calibration_artifact_id,
                 uncertainty_artifact_id=config.uncertainty_artifact_id,
                 previous_effective_fixtures=config.previous_effective_fixtures,
+                team_strength_prior_matches=config.team_strength_prior_matches,
                 horizon_length=config.horizon_length,
                 allow_analytically_complete=config.allow_analytically_complete,
                 database_path=config.database_path,

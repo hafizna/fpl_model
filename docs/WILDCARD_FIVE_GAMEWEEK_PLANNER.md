@@ -18,12 +18,30 @@ cohort prior; a one-match raw rate is not sent directly to the optimizer. Zero
 current minutes preserve the prior. DefCon uses its own historical exposure
 denominator. Saves are blended against the baseline's goalkeeper rate.
 
+The appearance model treats an all-zero previous-season workbook row as the
+absence of a prior (89 of 568 rows: promoted, new-signing, returning players),
+so a player who has started this season is shrunk toward a neutral squad-player
+prior (two effective fixtures) rather than a hard 0.0 start probability at ~62%
+weight. A player who changed clubs since the current season opened keeps the old
+club's start history discounted only until banking more than two starts at the
+new club, so a deadline-day signing is not assumed nailed on another club's role
+(`CHANGED_CLUBS_SINCE_SEASON_START`).
+
+Team strength shrinks the frozen workbook xG/xGC per team toward the season's own
+team-level xG for and against, deadline-safe and final-Gameweek-only, with a
+tunable pseudo-count (default five matches, `--team-strength-prior-matches`;
+`SHRUNK_CURRENT_SEASON_TEAM_STRENGTH`). A team with no final current-season
+fixture keeps the frozen prior. Every downstream ratio (attack, defensive
+weakness, bonus multiplier) and the corrected xGC are recomputed from the blended
+values. The pseudo-count is a fixed constant that self-corrects as Gameweeks
+accumulate; recency-weighting the current sample is a future refinement.
+
 Both attacking windows receive the same posterior, avoiding a second short-form
 weight on the same current sample. xG remains total xG; there is no additional
-penalty component to double count. Cards/BPS/bonus and team strength remain
-explicit historical priors. Tactical annotations remain diagnostic, and reviewed
-appearance scenarios remain available for sourced role changes. Cross-league
-rate translation and automatic team-strength adaptation are not implemented.
+penalty component to double count. Cards/BPS/bonus remain explicit historical
+priors. Tactical annotations remain diagnostic, and reviewed appearance scenarios
+remain available for sourced role changes. Cross-league rate translation and a
+team-attacking-style multiplier are not implemented.
 
 The changed projection policy remains research/shadow. Old residual/calibration
 artifacts are diagnostic references, not validation of v2. This does not alter

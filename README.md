@@ -5,9 +5,12 @@ An explainable Fantasy Premier League projection engine built around auditable e
 ## Project goal
 
 The explainable Benchwarmers component model is the baseline. In-season v2 now updates attacking,
-DefCon and saves inputs from final official evidence, with small-sample shrinkage. The active
-planning workflow is a five-Gameweek horizon refreshed every week, including Wildcard versus
-hold/free-transfer scenarios. See [the five-GW planner contract](docs/WILDCARD_FIVE_GAMEWEEK_PLANNER.md).
+DefCon, saves, appearance, and team-strength inputs from final official evidence, with small-sample
+shrinkage: new-signing and promoted-team start probabilities are no longer buried by an empty
+workbook row, a mid-window transfer does not carry the old club's role, and a team's xG/xGC blends
+toward its own current-season results. The active planning workflow is a five-Gameweek horizon
+refreshed every week, including Wildcard versus hold/free-transfer scenarios. See
+[the five-GW planner contract](docs/WILDCARD_FIVE_GAMEWEEK_PLANNER.md).
 
 This remains a research/shadow model: implementing an adaptive projection or decision policy does
 not establish its out-of-sample advantage. Tactical/context extensions still require evaluation.
