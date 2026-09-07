@@ -1,9 +1,15 @@
-"""Transparent rolling three-Gameweek transfer planning."""
+"""Transparent rolling one-to-five-Gameweek transfer planning.
+
+``plan_rolling_horizon`` is the general entry point (1--5 consecutive Gameweeks,
+optional atomic two-transfer bundles and a terminal free-transfer value).
+``plan_three_gameweeks`` preserves the original exactly-three-Gameweek contract for
+the legacy CLI and its backtest continuity.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import sqrt
+from math import isfinite, sqrt
 
 from fpl_model.decision.lineup import LineupRecommendation, recommend_lineup
 from fpl_model.decision.squad import MAX_FREE_TRANSFERS, ValidatedSquad, validate_squad
@@ -13,8 +19,9 @@ from fpl_model.decision.transfer import (
     apply_single_transfer,
     recommend_single_transfers,
 )
+from fpl_model.decision.transfer_bundle import shortlisted_pairs
 
-PLANNING_HORIZON_GAMEWEEKS = 3
+PLANNING_HORIZON_GAMEWEEKS = 5
 DEFAULT_BEAM_WIDTH = 30
 DEFAULT_CANDIDATES_PER_POSITION = 6
 DEFAULT_RETURNED_PLANS = 5
@@ -38,10 +45,11 @@ class RollingPlanStep:
     transfer_cost: float
     lineup: LineupRecommendation
     net_gameweek_xpts: float
+    transfers: tuple[tuple[int, int], ...] = ()
 
     @property
     def decision(self) -> str:
-        return "roll" if self.outgoing_fpl_id is None else "transfer"
+        return "transfer" if self.transfers or self.outgoing_fpl_id is not None else "roll"
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +61,8 @@ class RollingPlan:
     terminal_free_transfers: int
     uncertainty: float | None
     data_quality_flags: tuple[str, ...]
+    terminal_ft_value: float = 0.0
+    objective_score: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,7 +101,7 @@ def _validate_pools(
     pools: tuple[GameweekProjectionPool, ...],
 ) -> tuple[dict[int, TransferTarget], ...]:
     if not 1 <= len(pools) <= PLANNING_HORIZON_GAMEWEEKS:
-        raise ValueError("rolling horizon requires between one and three Gameweek pools")
+        raise ValueError("rolling horizon requires between one and five Gameweek pools")
     expected = tuple(range(pools[0].gameweek, pools[0].gameweek + len(pools)))
     actual = tuple(pool.gameweek for pool in pools)
     if actual != expected:
@@ -222,7 +232,10 @@ def _candidate_targets(
             if maps[index][fpl_id].player.position == position
         ]
         position_ids.sort(key=lambda fpl_id: (-scores[fpl_id], fpl_id))
-        result.extend(maps[index][fpl_id] for fpl_id in position_ids[:per_position])
+        chosen = list(position_ids[:per_position])
+        cheap = sorted(position_ids, key=lambda pid: (maps[index][pid].player.current_price_tenths, -scores[pid], pid))
+        chosen.extend(pid for pid in cheap[:2] if pid not in chosen)
+        result.extend(maps[index][fpl_id] for fpl_id in chosen)
     return tuple(result)
 
 
@@ -236,14 +249,26 @@ def plan_rolling_horizon(
     hit_cost: float = DEFAULT_HIT_COST,
     protected_fpl_ids: frozenset[int] = frozenset(),
     excluded_target_fpl_ids: frozenset[int] = frozenset(),
+    max_transfers_per_gameweek: int = 1,
+    forced_roll_gameweeks: frozenset[int] = frozenset(),
+    terminal_ft_value: float = 0.0,
+    bundle_shortlist: int = 20,
 ) -> RollingPlannerResult:
-    """Search no-transfer/single-transfer paths over one to three GWs.
+    """Search roll / single-transfer / atomic two-transfer paths over one to five GWs.
 
-    Candidate pruning and beam search make this intentionally approximate.
-    Every retained state still obeys exact FPL squad, budget, and FT rules.
+    Candidate pruning and beam search make this intentionally approximate. Two-transfer
+    bundles (``max_transfers_per_gameweek=2``) additionally prune to a proxy shortlist
+    before exact XI scoring. Every retained state still obeys exact FPL squad, budget,
+    and free-transfer rules.
     """
     if beam_width <= 0 or candidates_per_position <= 0 or returned_plans <= 0:
         raise ValueError("beam_width, candidates_per_position, and returned_plans must be positive")
+    if max_transfers_per_gameweek not in (1, 2):
+        raise ValueError("max_transfers_per_gameweek must be 1 or 2")
+    if not isfinite(terminal_ft_value) or terminal_ft_value < 0 or bundle_shortlist < 1:
+        raise ValueError("terminal FT value must be finite/non-negative and bundle shortlist positive")
+    if not forced_roll_gameweeks <= {pool.gameweek for pool in pools}:
+        raise ValueError("forced roll Gameweeks must belong to the horizon")
     owned_ids = {player.fpl_id for player in squad.players}
     unknown_protected = sorted(protected_fpl_ids - owned_ids)
     if unknown_protected:
@@ -296,10 +321,12 @@ def plan_rolling_horizon(
                     total_transfer_cost=state.total_transfer_cost,
                     uncertainty_variance=variance,
                     flags=state.flags | frozenset(lineup.data_quality_flags),
-                    ranking_score=roll_total + _future_hold_score(advanced, future_maps),
+                    ranking_score=roll_total + _future_hold_score(advanced, future_maps) + terminal_ft_value * min(5, int(advanced.free_transfers) + len(future_maps)),
                 )
             )
 
+            if pool.gameweek in forced_roll_gameweeks:
+                continue
             targets = _candidate_targets(
                 index=index,
                 maps=maps,
@@ -364,19 +391,45 @@ def plan_rolling_horizon(
                         total_transfer_cost=state.total_transfer_cost + option.transfer_cost,
                         uncertainty_variance=variance,
                         flags=state.flags | frozenset(option.lineup.data_quality_flags),
-                        ranking_score=cumulative + _future_hold_score(advanced, future_maps),
+                        ranking_score=cumulative + _future_hold_score(advanced, future_maps) + terminal_ft_value * min(5, int(advanced.free_transfers) + len(future_maps)),
                     )
                 )
+
+            if max_transfers_per_gameweek == 2:
+                scores = {pid: sum(rows[pid].projection.expected_points for rows in maps[index:]) for pid in common_ids}
+                for moves, transferred in shortlisted_pairs(
+                    state.squad, targets, scores, protected=protected_fpl_ids, limit=bundle_shortlist,
+                ):
+                    advanced = _advance_free_transfers(transferred, transfers_used=2)
+                    lineup = _lineup_for_squad(transferred, current_rows)
+                    cost = max(0, 2 - int(state.squad.free_transfers)) * hit_cost
+                    step = RollingPlanStep(
+                        gameweek=pool.gameweek, outgoing_fpl_id=None, incoming_fpl_id=None,
+                        transfers=tuple((out, new.fpl_id) for out, new in moves),
+                        free_transfers_before=int(state.squad.free_transfers),
+                        free_transfers_after=int(advanced.free_transfers), bank_after_tenths=advanced.bank_tenths,
+                        transfer_cost=cost, lineup=lineup, net_gameweek_xpts=lineup.total_xpts - cost,
+                    )
+                    cumulative = state.cumulative_net_xpts + step.net_gameweek_xpts
+                    variance = None if state.uncertainty_variance is None or lineup.uncertainty is None else state.uncertainty_variance + lineup.uncertainty ** 2
+                    expanded.append(_SearchState(
+                        squad=advanced, steps=(*state.steps, step), cumulative_net_xpts=cumulative,
+                        total_transfer_cost=state.total_transfer_cost + cost, uncertainty_variance=variance,
+                        flags=state.flags | frozenset(lineup.data_quality_flags) | {"APPROXIMATE_BUNDLE_SHORTLIST"},
+                        ranking_score=cumulative + _future_hold_score(advanced, future_maps) + terminal_ft_value * min(5, int(advanced.free_transfers) + len(future_maps)),
+                    ))
 
         best_by_state: dict[tuple[object, ...], _SearchState] = {}
         for state in sorted(expanded, key=_state_sort_key):
             best_by_state.setdefault(_state_key(state), state)
         states = sorted(best_by_state.values(), key=_state_sort_key)[:beam_width]
 
-    states.sort(key=lambda state: (-state.cumulative_net_xpts, state.total_transfer_cost, _state_sort_key(state)))
+    states.sort(key=lambda state: (-(state.cumulative_net_xpts + terminal_ft_value * int(state.squad.free_transfers)), state.total_transfer_cost, _state_sort_key(state)))
     plans = tuple(
         RollingPlan(
             steps=state.steps,
+            terminal_ft_value=terminal_ft_value * int(state.squad.free_transfers),
+            objective_score=state.cumulative_net_xpts + terminal_ft_value * int(state.squad.free_transfers),
             cumulative_net_xpts=state.cumulative_net_xpts,
             total_transfer_cost=state.total_transfer_cost,
             terminal_bank_tenths=state.squad.bank_tenths,
@@ -412,7 +465,7 @@ def plan_three_gameweeks(
 ) -> RollingPlannerResult:
     """Preserve the public exactly-three-Gameweek planner contract."""
 
-    if len(pools) != PLANNING_HORIZON_GAMEWEEKS:
+    if len(pools) != 3:
         raise ValueError("rolling planner requires exactly three Gameweek projection pools")
     return plan_rolling_horizon(
         squad,

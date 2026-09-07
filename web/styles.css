@@ -345,3 +345,12 @@ h2 { margin: 4px 0 0; font-size: 19px; letter-spacing: -0.02em; }
 
   .squad-player { grid-template-columns: 28px minmax(0, 1fr) 32px; }
 }
+.wildcard-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 18px 0 10px; }
+.wildcard-controls label { display: flex; flex-direction: column; gap: 8px; font-size: 12px; color: var(--muted); }
+.wildcard-controls input { width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: inherit; font: inherit; }
+.wildcard-path { border-top: 1px solid var(--line); margin-top: 24px; padding-top: 20px; }
+.wildcard-path h4 { margin: 0 0 12px; line-height: 1.6; }
+.wildcard-step { display: grid; gap: 6px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.wildcard-step strong { font-size: 12px; line-height: 1.6; }
+.wildcard-step small { line-height: 1.8; color: var(--muted); }
+@media (max-width: 600px) { .wildcard-controls { grid-template-columns: 1fr; } }

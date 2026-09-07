@@ -61,6 +61,7 @@ def test_materialize_inseason_release_runs_complete_stage_order(monkeypatch, tmp
             SimpleNamespace(
                 source_ingestion_run_id="snapshot_final",
                 resolution_run_id="availability_final",
+                as_of=datetime(2026, 8, 21, 2, 0, tzinfo=UTC),
                 status="completed",
             ),
         ),
@@ -89,6 +90,11 @@ def test_materialize_inseason_release_runs_complete_stage_order(monkeypatch, tmp
     monkeypatch.setattr(
         module,
         "materialize_preseason_team_strength",
+        stage("strength", SimpleNamespace(strength_run_id="strength_final")),
+    )
+    monkeypatch.setattr(
+        module,
+        "materialize_inseason_team_strength",
         stage("strength", SimpleNamespace(strength_run_id="strength_final")),
     )
     monkeypatch.setattr(

@@ -423,7 +423,17 @@ def _gameweek_entry(connection: duckdb.DuckDBPyConnection, model_run_id: str) ->
         if baseline["team_strength_run_id"] is not None:
             team_strength = _team_strength_run(connection, baseline["team_strength_run_id"])
 
+    current_rate_lineage = None
+    if connection.execute("SELECT 1 FROM information_schema.tables WHERE table_name = 'baseline_current_rate_lineage'").fetchone():
+        current = connection.execute(
+            "SELECT l.rate_run_id, l.previous_rate_run_id, l.final_live_run_ids, r.as_of, r.policy_version, r.source_ingestion_run_id FROM baseline_current_rate_lineage l JOIN current_season_player_rate_run r USING (rate_run_id) WHERE model_run_id = ?",
+            [model_run_id],
+        ).fetchone()
+        if current:
+            current_rate_lineage = {"rate_run_id": current[0], "previous_rate_run_id": current[1],
+                                    "final_live_run_ids": json.loads(current[2]), "as_of": _timestamp(current[3]), "policy_version": current[4], "source_ingestion_run_id": current[5]}
     return {
+        "current_season_rate_lineage": current_rate_lineage,
         "model_run": model_run,
         "baseline_projection_run": baseline,
         "ingestion_run": _ingestion_run(connection, model_run["source_ingestion_run_id"]),
@@ -491,11 +501,24 @@ def build_release_manifest(
             f"model runs do not share one frozen as_of: as_of values={sorted(as_of_values)}"
         )
 
+    rate_ids = {gw["current_season_rate_lineage"]["rate_run_id"]
+                for gw in gameweeks if gw["current_season_rate_lineage"] is not None}
+    if len(rate_ids) > 1:
+        problems.append("model runs do not share one frozen current-season rate run")
+
     for gw in gameweeks:
         gameweek = gw["model_run"]["target_gameweek"]
         if gw["baseline_projection_run"] is None:
             problems.append(f"GW{gameweek}: no baseline_projection_run linked to its model_run")
             continue
+        current_rate = gw["current_season_rate_lineage"]
+        if current_rate is not None:
+            if current_rate["as_of"] != gw["model_run"]["as_of"]:
+                problems.append(f"GW{gameweek}: current-season rate cutoff differs from the model")
+            if current_rate["source_ingestion_run_id"] != gw["model_run"]["source_ingestion_run_id"]:
+                problems.append(f"GW{gameweek}: current-season rates use a different official snapshot")
+            if current_rate["previous_rate_run_id"] != gw["baseline_projection_run"]["player_rate_run_id"]:
+                problems.append(f"GW{gameweek}: current-season rates use a different historical prior")
         if gw["player_identity_bridge_run"] is None:
             problems.append(f"GW{gameweek}: no player identity bridge for its source snapshot")
         if gw["appearance_lineage"] is None:

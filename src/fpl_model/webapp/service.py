@@ -123,9 +123,9 @@ def _flags(value: str | None) -> set[str]:
 
 
 def resolve_research_horizon(connection: duckdb.DuckDBPyConnection) -> ResearchHorizon:
-    """Return the newest compatible completed three-Gameweek horizon.
+    """Return the newest compatible completed published Gameweek horizon.
 
-    The app never silently combines unrelated runs. All three must share the
+    The app never silently combines unrelated runs. All runs must share the
     same official snapshot, model version, and causal ``as_of`` timestamp.
     """
 
@@ -146,7 +146,9 @@ def resolve_research_horizon(connection: duckdb.DuckDBPyConnection) -> ResearchH
     candidates: list[tuple[object, int, tuple[str, str, str], tuple[tuple[int, str], ...]]] = []
     for key, by_gameweek in groups.items():
         for start in sorted(by_gameweek):
-            gameweeks = (start, start + 1, start + 2)
+            if start != min(by_gameweek):
+                continue
+            gameweeks = tuple(range(start, min(start + 5, max(by_gameweek) + 1)))
             if not all(gameweek in by_gameweek for gameweek in gameweeks):
                 continue
             run_ids = tuple((gameweek, by_gameweek[gameweek][0]) for gameweek in gameweeks)
@@ -336,10 +338,10 @@ def load_release_catalog(
         (int(row["gameweek"]), str(row["model_run_id"]))
         for row in release.get("model_runs", [])
     )
-    if len(model_runs) != 3 or tuple(row[0] for row in model_runs) != tuple(
-        range(model_runs[0][0], model_runs[0][0] + 3)
+    if not 1 <= len(model_runs) <= 5 or tuple(row[0] for row in model_runs) != tuple(
+        range(model_runs[0][0], model_runs[0][0] + len(model_runs))
     ):
-        raise ValueError("web release must contain three consecutive Gameweeks")
+        raise ValueError("web release must contain one to five consecutive Gameweeks")
     horizon = ResearchHorizon(
         source_ingestion_run_id=str(release["source_ingestion_run_id"]),
         model_version=str(release["model_version"]),
@@ -1610,7 +1612,73 @@ def recommend_web_transfers(
         "suggestions": suggestions[:top_n],
         "method_note": (
             "Every legal affordable same-position single transfer is rescored over the frozen "
-            "three-Gameweek horizon. The optional two-move comparison pairs only a bounded "
+            "published Gameweek horizon. The optional two-move comparison pairs only a bounded "
             "shortlist of those single moves; future transfer value and price changes are excluded."
         ),
     }
+
+
+def compare_web_wildcard(
+    fpl_ids: tuple[int, ...], *, bank_tenths: int = 0, free_transfers: int = 2,
+    selling_prices: dict[int, int] | None = None, horizon_length: int = 5,
+    roll_after_wildcard: int = 3, terminal_ft_value: float = 0.0,
+    locked_fpl_ids: tuple[int, ...] = (), excluded_fpl_ids: tuple[int, ...] = (),
+    role_scenario_overrides: tuple[RoleScenarioOverride, ...] = (),
+    database_path: str | Path = DEFAULT_DATABASE_PATH, release_path: str | Path | None = None,
+) -> dict[str, Any]:
+    from fpl_model.decision.initial_squad import SquadConstraints
+    from fpl_model.decision.wildcard import compare_wildcard
+
+    horizon, catalog, projections, health, release_id, _ = _load_web_inputs(
+        database_path=database_path, release_path=release_path,
+    )
+    if not 2 <= horizon_length <= 5 or horizon_length > len(horizon.model_runs):
+        raise ValueError("requested planning horizon is not published; refresh the release first")
+    projections = apply_role_scenario_overrides(projections, role_scenario_overrides, horizon=horizon)
+    squad = _validated_web_squad(catalog, fpl_ids, bank_tenths=bank_tenths,
+                                 free_transfers=free_transfers, selling_prices=selling_prices or {})
+    pools = rating_pools_from_catalog(horizon, catalog, projections)[:horizon_length]
+    result = compare_wildcard(
+        squad, pools, roll_after_wildcard=roll_after_wildcard, terminal_ft_value=terminal_ft_value,
+        constraints=SquadConstraints(frozenset(locked_fpl_ids), frozenset(excluded_fpl_ids)),
+    )
+
+    def step_payload(step):
+        moves = step.transfers or (((step.outgoing_fpl_id, step.incoming_fpl_id),)
+                                   if step.outgoing_fpl_id is not None else ())
+        return {"gameweek": step.gameweek, "action": step.decision,
+                "transfers": [{"out": out, "in": incoming} for out, incoming in moves],
+                "free_transfers_before": step.free_transfers_before,
+                "free_transfers_after": step.free_transfers_after,
+                "bank_tenths": step.bank_after_tenths, "hit_cost": step.transfer_cost,
+                "net_xpts": step.net_gameweek_xpts,
+                "captain_fpl_id": step.lineup.captain.fpl_id,
+                "starter_fpl_ids": [p.fpl_id for p in step.lineup.starters]}
+
+    def path_payload(name, plan):
+        return {"name": name, "net_xpts": plan.cumulative_net_xpts,
+                "objective": plan.objective_score, "terminal_ft_value": plan.terminal_ft_value,
+                "terminal_free_transfers": plan.terminal_free_transfers,
+                "steps": [step_payload(s) for s in plan.steps]}
+
+    wildcard = path_payload("Wildcard + roll", result.wildcard)
+    wildcard.update(net_xpts=result.wildcard_total_xpts, objective=result.wildcard_objective,
+                    squad_fpl_ids=[p.fpl_id for p in result.wildcard_squad.players],
+                    gain_vs_hold=result.wildcard_gain_vs_hold,
+                    gain_vs_transfers=result.wildcard_gain_vs_transfers)
+    wildcard["steps"].insert(0, {
+        "gameweek": pools[0].gameweek, "action": "wildcard", "hit_cost": 0,
+        "net_xpts": result.wildcard_first_lineup.total_xpts,
+        "bank_tenths": result.wildcard_squad.bank_tenths,
+        "free_transfers_before": free_transfers, "free_transfers_after": free_transfers,
+        "transfers": [], "captain_fpl_id": result.wildcard_first_lineup.captain.fpl_id,
+        "starter_fpl_ids": [p.fpl_id for p in result.wildcard_first_lineup.starters],
+    })
+    return {"release_id": release_id, "health": health, "decision_status": "RESEARCH_ONLY",
+            "horizon": [p.gameweek for p in pools], "terminal_ft_value_per_transfer": terminal_ft_value,
+            "paths": [path_payload("Hold", result.hold), path_payload("Use free transfers", result.transfers), wildcard],
+            "limitations": ["Approximate candidate and beam search; at most two transfers per ordinary GW.",
+                            "Wildcard availability is assumed for this comparison; its future option value is not priced.",
+                            "Terminal FT value is a user scenario assumption, not calibrated expected points.",
+                            "Prices and player rates are frozen at the release timestamp. Refresh and review every GW.",
+                            "Wildcard shortlist is ranked before subsequent transfer-path evaluation."]}

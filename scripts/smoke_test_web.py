@@ -73,8 +73,8 @@ def check_web_runtime(
         raise ValueError(f"expected release {expected_release_id!r}, received {release_id!r}")
     if health not in allowed_health or release.get("health") != health:
         raise ValueError(f"release health {health!r} is not allowed or internally consistent")
-    if horizon != bootstrap_horizon or len(horizon or []) != 3:
-        raise ValueError("readiness and bootstrap must expose the same three-Gameweek horizon")
+    if horizon != bootstrap_horizon or not 1 <= len(horizon or []) <= 5:
+        raise ValueError("readiness and bootstrap must expose the same one-to-five-Gameweek horizon")
     if ready.get("catalog_players") != len(players) or not players:
         raise ValueError("readiness and bootstrap catalog sizes differ or are empty")
     if ready.get("rating_benchmark_status") != "ready":

@@ -100,7 +100,7 @@
 
             <section id="outlook-view" class="view">
               <div class="section-heading">
-                <div><div class="eyebrow">Core planning</div><h2>Three-Gameweek outlook</h2></div>
+                <div><div class="eyebrow">Core planning</div><h2>Gameweek outlook</h2></div>
               </div>
               <div id="outlook-total" class="hero-score skeleton"></div>
               <div id="outlook-rating-detail" class="rating-detail skeleton"></div>
@@ -118,6 +118,21 @@
               </div>
               <div id="transfers-pending-transfers" class="pending-transfers" aria-live="polite"></div>
               <div id="transfer-paths" class="transfer-paths" aria-live="polite"></div>
+              <div class="settings-card">
+                <h3>Wildcard or keep the chip?</h3>
+                <p>Compare your committed squad with a Wildcard built for the selected horizon. Review the plan every week, even when rolling.</p>
+                <div class="wildcard-controls">
+                  <label for="wc-roll">Gameweeks to roll after Wildcard
+                    <input id="wc-roll" type="number" min="0" max="4" value="3">
+                  </label>
+                  <label for="wc-ft-value">Assumed points per saved FT at horizon end
+                    <input id="wc-ft-value" type="number" min="0" max="10" step="0.5" value="0">
+                  </label>
+                </div>
+                <p>Start at 0; try other values to see whether the decision changes. The value of keeping the Wildcard for later is not included.</p>
+                <button id="run-wildcard" class="button primary">Compare Wildcard, hold and FT paths</button>
+                <div id="wildcard-results" aria-live="polite"></div>
+              </div>
               <div id="transfer-results" class="transfer-list empty-state">Run the scan to compare the current squad with every legal, affordable same-position move.</div>
             </section>
 

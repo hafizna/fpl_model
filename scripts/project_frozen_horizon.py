@@ -13,6 +13,7 @@ from fpl_model.storage import DEFAULT_DATABASE_PATH
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--anchor-model-run-id", required=True)
+    parser.add_argument("--horizon-length", type=int, choices=range(1, 6), default=5)
     parser.add_argument("--database", type=Path, default=DEFAULT_DATABASE_PATH)
     return parser.parse_args()
 
@@ -21,6 +22,7 @@ def main() -> None:
     args = parse_args()
     result = materialize_frozen_projection_horizon(
         anchor_model_run_id=args.anchor_model_run_id,
+        horizon_length=args.horizon_length,
         database_path=args.database,
     )
     print(

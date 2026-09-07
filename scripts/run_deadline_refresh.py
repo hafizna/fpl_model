@@ -13,6 +13,7 @@ from fpl_model.storage import DEFAULT_DATABASE_PATH
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--horizon-length", type=int, choices=range(1, 6), default=5)
     parser.add_argument("--gameweek", type=int, required=True)
     parser.add_argument("--current-season", default="2026-27")
     parser.add_argument("--previous-season", default="2025-26")
@@ -23,6 +24,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--calibration-artifact-id", required=True)
     parser.add_argument("--uncertainty-artifact-id", required=True)
     parser.add_argument("--previous-effective-fixtures", type=float, default=5.0)
+    parser.add_argument("--team-strength-prior-matches", type=float, default=5.0)
     parser.add_argument("--allow-analytically-complete", action="store_true")
     parser.add_argument("--require-production", action="store_true")
     parser.add_argument("--database", type=Path, default=DEFAULT_DATABASE_PATH)
@@ -53,6 +55,7 @@ def main() -> None:
     result = run_deadline_refresh(
         DeadlineRefreshConfig(
             target_gameweek=args.gameweek,
+            horizon_length=args.horizon_length,
             current_season=args.current_season,
             previous_season=args.previous_season,
             team_strength_csv=args.team_strength_csv,
@@ -68,6 +71,7 @@ def main() -> None:
             lock_file=args.lock_file,
             backup_directory=args.backup_directory,
             previous_effective_fixtures=args.previous_effective_fixtures,
+            team_strength_prior_matches=args.team_strength_prior_matches,
             allow_analytically_complete=args.allow_analytically_complete,
             require_production=args.require_production,
             alert_webhook_url=os.environ.get(args.alert_webhook_env),

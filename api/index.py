@@ -29,6 +29,7 @@ from fpl_model.webapp.service import (
     CurrentSquadSetup,
     PendingTransfer,
     RoleScenarioOverride,
+    compare_web_wildcard,
     load_web_bootstrap,
     recommend_web_lineups,
     recommend_web_transfers,
@@ -142,6 +143,14 @@ class SquadRequest(BaseModel):
     role_scenario_overrides: list[RoleScenarioOverrideRequest] = Field(default_factory=list)
     current_setup: CurrentSetupRequest | None = None
     pending_transfers: list[PendingTransferRequest] = Field(default_factory=list)
+
+
+class WildcardRequest(SquadRequest):
+    horizon_length: int = Field(default=5, ge=2, le=5)
+    roll_after_wildcard: int = Field(default=3, ge=0, le=4)
+    terminal_ft_value: float = Field(default=0.0, ge=0.0, le=10.0, allow_inf_nan=False)
+    locked_fpl_ids: list[int] = Field(default_factory=list, max_length=15)
+    excluded_fpl_ids: list[int] = Field(default_factory=list)
 
 
 expose_api_docs = _env_bool(
@@ -582,6 +591,27 @@ def transfers(request: SquadRequest, top_n: int = 8) -> dict[str, object]:
             request=request,
             decision_type="single_transfer_scan",
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/recommend/wildcard")
+def wildcard(request: WildcardRequest) -> dict[str, object]:
+    if not _env_bool("FPL_TRANSFER_SCAN_ENABLED", default=True):
+        raise HTTPException(status_code=503, detail="transfer scan is disabled by the operator")
+    if request.pending_transfers:
+        raise HTTPException(status_code=422, detail="Clear staged transfers to compare against your committed squad")
+    try:
+        payload = compare_web_wildcard(
+            tuple(request.fpl_ids), bank_tenths=request.bank_tenths,
+            free_transfers=request.free_transfers, selling_prices=request.selling_prices,
+            horizon_length=request.horizon_length, roll_after_wildcard=request.roll_after_wildcard,
+            terminal_ft_value=request.terminal_ft_value, locked_fpl_ids=tuple(request.locked_fpl_ids),
+            excluded_fpl_ids=tuple(request.excluded_fpl_ids),
+            role_scenario_overrides=tuple(row.to_override() for row in request.role_scenario_overrides),
+            database_path=_database_path(), release_path=_release_path(),
+        )
+        return _attach_and_log_receipt(payload, request=request, decision_type="wildcard_comparison")
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
