@@ -163,6 +163,30 @@ h2 { margin: 4px 0 0; font-size: 19px; letter-spacing: -0.02em; }
 .state-inputs label > span { position: relative; display: block; }
 .state-inputs label > span input { padding-right: 25px; }
 .state-inputs label > span::after { content: ""; }
+.chip-panel { margin: 0 0 14px; padding: 10px 10px 4px; border: 1px solid var(--line); border-radius: 10px; }
+.chip-panel legend { padding: 0 5px; color: var(--muted); font-size: 9px; text-transform: uppercase; letter-spacing: .08em; }
+.chip-panel .private-note { margin: 6px 2px 4px; }
+.chip-options { display: grid; gap: 5px; }
+.chip-row { padding: 6px 7px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 1px solid transparent; border-radius: 8px; background: var(--panel-2); }
+.chip-row label { flex: 1 1 auto; display: flex; align-items: flex-start; gap: 7px; cursor: pointer; }
+.chip-row input { margin: 2px 0 0; accent-color: var(--green); }
+.chip-row strong, .chip-row small { display: block; }
+.chip-row strong { font-size: 11px; }
+.chip-row small { margin-top: 2px; color: var(--muted); font-size: 9px; line-height: 1.35; }
+.chip-row.transfer-chip { border-left: 2px solid rgba(123,174,255,.55); }
+.chip-row.active { border-color: var(--green); background: rgba(61,224,143,.07); }
+.chip-row.used label { cursor: not-allowed; opacity: .55; }
+.chip-status { flex: 0 0 auto; padding: 4px 7px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--muted); font-size: 9px; font-weight: 700; cursor: pointer; }
+.chip-status[aria-pressed="true"] { border-color: rgba(255,123,114,.45); color: var(--red); }
+.chip-status:focus-visible, .chip-row input:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.chip-badge { padding: 2px 7px; border-radius: 999px; background: rgba(123,174,255,.16); color: #c9ddff; font-size: 10px; font-weight: 800; }
+.plan-header .plan-chip small { color: var(--green); font-size: 10px; font-weight: 700; }
+.plan-header .plan-note { flex-basis: 100%; margin: 0; color: var(--muted); font-size: 10px; }
+.gw-card p.chip-effect { color: var(--green); font-weight: 700; }
+.gw-card p.chip-effect .chip-badge { margin-right: 4px; }
+.transfer-mode.chip { margin-bottom: 8px; border: 1px solid rgba(61,224,143,.3); background: rgba(61,224,143,.07); color: #c6f5dc; }
+.chip-explainer { margin: 0 0 14px; padding-left: 16px; color: var(--muted); font-size: 11px; line-height: 1.55; }
+.chip-explainer strong { color: var(--ink); }
 .position-group { margin-bottom: 12px; }
 .position-label { margin-bottom: 5px; color: #68776e; font-size: 9px; font-weight: 800; letter-spacing: .12em; }
 .squad-player { min-height: 36px; padding: 5px 0; display: grid; grid-template-columns: 35px minmax(0, 1fr) 38px; gap: 7px; align-items: center; border-bottom: 1px solid rgba(255,255,255,.05); }

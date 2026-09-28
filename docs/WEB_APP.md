@@ -22,8 +22,9 @@ password or session cookie.
 browser (not just the FastAPI `TestClient`), covering "Team ID to weekly decision without a CLI":
 entering a Team ID, loading the resolved squad, and confirming the rendered pitch, marginal-change
 explanation, outlook, and squad editor. It also covers staging one transfer and checking that the
-connected plan header and pitch update, plus the scored Hold / free-transfer / -4 / Roll paths. It
-runs a real `uvicorn` server in a background thread against a fixture compact release, with
+connected plan header and pitch update, plus the scored Hold / free-transfer / -4 / Roll paths,
+toggling Bench Boost in place (plan header badge, outlook total, marking the chip used and reloading)
+and a Free Hit move that is free but cannot be committed. It runs a real `uvicorn` server in a background thread against a fixture compact release, with
 `FPLClient.entry_picks` monkeypatched so no request reaches the real FPL API. Needs the `dev` extra
 installed with a Chromium binary:
 
@@ -53,13 +54,17 @@ Implemented surfaces:
 - an explicit server-scored Hold / transfer / hit / Roll comparison on the transfers view;
 - a server-scored Wildcard-versus-hold/free-transfer comparison over the published horizon
   (`POST /api/recommend/wildcard`), using the manager's actual selling prices and preserved free
-  transfers, with an explicit post-Wildcard roll period.
+  transfers, with an explicit post-Wildcard roll period;
+- browser-held chip state (which chips are spent this half-season) and one chip played as a what-if
+  for the first horizon Gameweek -- Bench Boost, Triple Captain, Free Hit, or Wildcard -- scored by
+  the Python service across the plan header, lineup, outlook, and transfer scan.
 
 ### Connected plan (Phase 1)
 
 The browser persists one working plan under `localStorage["touchline-plan"]`:
 `squad`, `bank_tenths`, `free_transfers`, `selling_prices`, `current_setup`,
-`pending_transfers`, `horizon_length`, and `risk_profile`. On first load it migrates the earlier
+`pending_transfers`, `horizon_length`, `risk_profile`, `chip`, and `chip_status` (the last two
+added in Phase 3; older stored plans default to no chip and every chip available). On first load it migrates the earlier
 `touchline-squad`, `touchline-selling-prices`, `touchline-selling-estimated`,
 `touchline-current-setup`, `touchline-horizon`, and `touchline-risk-profile` keys into that object;
 the legacy keys remain for one release as a safety fallback. Manager state is never written to the
@@ -68,8 +73,10 @@ server.
 Transfer recommendations expose an `Apply move` action. This adds an `{out_fpl_id, in_fpl_id}`
 record to `pending_transfers`, then sends the whole staged list to both recommendation endpoints.
 The Python service validates and applies those moves to an in-memory working squad copy using the
-same squad/transfer rules as the decision layer; the frozen release and rating benchmark are not
-mutated. Lineup responses include a `plan_summary` with the effective squad, bank, free transfers,
+same squad rules as the decision layer; the frozen release and rating benchmark are not mutated.
+Like FPL's own confirm step, the staged set is validated as one batch: every move must sell an
+owned player for an available same-position player, and budget plus the three-per-club limit are
+checked on the final squad rather than after each intermediate move. Lineup responses include a `plan_summary` with the effective squad, bank, free transfers,
 formation, captain, staged count, and server-computed `net_xpts_vs_holding`, so JavaScript never
 calculates transfer legality or xPts. Decision receipts hash the complete request, including staged
 moves, and remain reproducible.
@@ -79,9 +86,8 @@ folds the server-validated effective state into the browser plan, decrements eac
 `4.0` point hit is included in `pending_hit_cost` once the count is exhausted), clears pending
 moves, and clears the submitted-XI comparison because the committed squad has changed. A staged
 move is not silently committed; removing it or committing it always re-runs lineup/outlook scoring.
-The current Phase 1
-surface deliberately does not add chips, multi-move path comparison, projection editing, locks/bans,
-or risk-adjusted backend ranking; those remain later phases of the planning-flow brief.
+Projection editing, locks/bans, risk-adjusted backend ranking, and named scenarios remain Phase 4
+of the planning-flow brief (`docs/research/CODEX_PROMPT_intuitive_planning_flow.md`).
 
 ### Fixtures, bench depth, and confidence
 
@@ -120,6 +126,58 @@ shown only if it improves on Hold, and a path requiring more than one hit is omi
 as a transparent reminder that the next Gameweek is not scored: `Banked FT next Gameweek; this app
 does not score GW+1.`
 
+### Chips (Phase 3)
+
+`POST /api/recommend/lineups` and `POST /api/recommend/transfers` accept two optional fields:
+
+- `chip_status`: `{wildcard|free_hit|bench_boost|triple_captain: "available"|"used"}` for the
+  current half-season (FPL's second chip set opens at GW20; the service derives `chip_period` from
+  the horizon's first Gameweek instead of hard-coding it);
+- `chip`: at most one chip to play in the **first** horizon Gameweek. Playing a chip marked `used`
+  is rejected with `422`.
+
+Both fields are part of the hashed request, so `decision_receipt_v1` stays reproducible. The
+browser keeps them in `touchline-plan` only, with a Chips block in the Squad panel (a radio group
+for the chip to play, plus an `Available`/`Used` toggle per chip; marking the active chip used
+clears it) and an explanation card in Settings.
+
+Scoring (all in `webapp/service.py`; JavaScript only renders it):
+
+- **Bench Boost** adds the four bench players' projected points to the first Gameweek total;
+- **Triple Captain** adds the captain's projected points once more (3x in total). Neither points
+  chip changes the optimal XI or captain, so the exhaustive no-chip lineup is kept and only the
+  total moves. Combined uncertainty is widened to match (bench variances added; captain standard
+  deviation weighted 3x instead of 2x);
+- **Wildcard** makes staged transfers free, keeps the saved free-transfer count, and keeps the
+  rebuilt squad; weekly scoring is otherwise unchanged. `Commit to squad` then marks the Wildcard
+  used and clears the active chip;
+- **Free Hit** makes staged transfers free for the first Gameweek only. Later horizon Gameweeks are
+  scored from the committed squad Free Hit reverts to, held with no further transfers. Because the
+  squad reverts, `plan_summary.commit_allowed` is `false` and the browser disables `Commit to squad`.
+
+The first Gameweek's lineup payload carries `chip_effect: {chip, label, delta_xpts, note}`
+(`delta_xpts` is `0` for Wildcard/Free Hit, whose value is in the transfers). `plan_summary` adds
+`chip`, `chip_label`, `chip_effect_xpts`, `commit_allowed`, and `squad_reverts_after_gameweek`;
+`net_xpts_vs_holding` still compares against the committed squad with **no chip and no staged
+transfer**, so switching Bench Boost on raises it by the summed bench xPts. Responses carry `chip`,
+`chip_status`, and `chip_scenario: true` whenever a chip is played, and the outlook labels the
+rating as chip-free.
+
+The squad rating never includes the chip: benchmark squads are never scored with one, so
+`squad_rating` is computed from the no-chip lineups (for Free Hit, from the committed squad it
+reverts to). Toggling a chip therefore never moves the percentile or the benchmark.
+
+On the transfers endpoint, every suggestion and path is scored with the chosen chip played. Under
+Bench Boost or Triple Captain the Phase 2 Hold / FT / −4 / Roll comparison is unchanged apart from
+that. Under Wildcard or Free Hit every move is free and saved transfers are preserved, so the
+comparison collapses to **Hold**, **Best single move** (no hit), and a rebuilt **Wildcard squad** /
+**Free Hit squad**. The rebuild reuses the Wildcard squad search (`decision/wildcard.py`, bounded
+beam, owned players priced at their sale value) over the full horizon for Wildcard or the first
+Gameweek alone for Free Hit, is paired into same-position moves the browser can stage, and is
+re-scored through the same staged-transfer path so staging it reproduces the path's number. If the
+bounded search finds no legal rebuild the path is omitted rather than failing the scan. Free Hit
+suggestions score only their own Gameweek, because later Gameweeks revert.
+
 ### Wildcard comparison
 
 `POST /api/recommend/wildcard` extends the squad request with `horizon_length` (2--5),
@@ -141,9 +199,13 @@ market/purchase/selling values afterwards (no reset to £100m, no sell-and-rebuy
 players). Preserved free transfers are carried through the Wildcard deadline without granting an
 extra one, matching the [official saved-transfer rules](https://www.premierleague.com/news/4661029).
 
+The comparison always starts from the no-chip committed squad: a request with an active `chip` or
+with `chip_status.wildcard == "used"` is rejected with `422`, and the browser disables the button
+while the Wildcard is marked used.
+
 The response is `decision_status: RESEARCH_ONLY`, pinned to the release, and carries a decision
 receipt (`decision_type: wildcard_comparison`). It never changes the actual FPL team, Wildcard
-availability is *assumed* for the what-if, and the future option value of keeping the chip for a
+availability is otherwise *assumed* for the what-if, and the future option value of keeping the chip for a
 later week is **not** priced -- a small Wildcard gain is not by itself a reason to play the chip.
 The Wildcard squad search and the two-transfer bundle search are both bounded candidate/beam
 searches, not certified global optima; results carry an `APPROXIMATE_BUNDLE_SHORTLIST` flag where a
@@ -234,7 +296,8 @@ projections. The response includes current/recommended raw totals, marginal xPts
 starting-XI and captain gains, players started/benched, captain and vice changes, and whether the
 bench order changed. The browser renders the reasons; it does not recompute points.
 
-This is explicitly a no-chip comparison because chip-aware optimization is outside the MVP. The
+This stays a no-chip comparison even while a chip is played: it explains XI and captaincy choices,
+and the chip's own effect is shown separately in the plan header. The
 snapshot is stored in browser local storage alongside the squad and is cleared as soon as a player
 is edited or the projection horizon changes, so the app cannot silently compare against stale
 picks. A manually assembled squad has no submitted XI/C/VC baseline, so the Weekly menu asks the
@@ -352,13 +415,16 @@ external transactional manager-state store.
 - research/shadow projection release only;
 - controlled-alpha tester-code gate only; no account authentication, entitlement, or multi-user
   manager storage;
-- no general multi-transfer search; the transfers view compares one move and a bounded
-  shortlist-derived two-move alternative only, while multiple transfers can still be staged
+- no general multi-transfer search; without Wildcard/Free Hit the transfers view compares one move
+  and a bounded shortlist-derived two-move alternative only, while multiple transfers can still be staged
   manually in the browser plan and committed only after review;
-- chip support is limited to the Wildcard comparison endpoint (`docs/WILDCARD_FIVE_GAMEWEEK_PLANNER.md`);
-  Bench Boost, Triple Captain, and Free Hit are not scored, and no endpoint recommends *which week*
-  to play a chip -- the Wildcard comparison assumes the chip is available and does not price its
-  future option value;
+- chips are scored only for the chip *you choose* in the first horizon Gameweek; no endpoint
+  recommends *which week* to play a chip, and neither the chip view nor the Wildcard comparison
+  prices the future option value of keeping a chip;
+- Free Hit is scored as one Gameweek on the rebuilt squad followed by the committed squad held
+  unchanged; transfers after the reversion are not planned;
+- Wildcard/Free Hit rebuilds use the bounded Wildcard squad search, not a certified global squad
+  optimum; chip status is entered by hand in the browser (it is not read from FPL's chip history);
 - transfer and Wildcard paths are evaluated over the frozen published horizon (one to five
   Gameweeks); Roll does not score the Gameweek after the horizon ends;
 - percentile rating is implemented and reproducible, but remains labelled `Model Preview` until

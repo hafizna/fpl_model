@@ -78,7 +78,7 @@
                 <div class="journey-step"><span>3</span><div><strong>Review, then act</strong><small>Lineup first; transfer suggestions stay in context.</small></div></div>
               </div>
               <div id="setup-summary" class="setup-summary"></div>
-              <div class="model-note"><strong>One workspace, one source of truth</strong><p>Every menu uses the same squad, bank, free transfers, and frozen projection release. The current release has three published Gameweeks; longer horizons will appear automatically when released.</p></div>
+              <div class="model-note"><strong>One workspace, one source of truth</strong><p>Every menu uses the same squad, bank, free transfers, and frozen projection release. The published horizon length comes from the release itself; longer horizons appear automatically when released.</p></div>
             </section>
 
             <section id="weekly-view" class="view active">
@@ -131,6 +131,7 @@
                 </div>
                 <p>Start at 0; try other values to see whether the decision changes. The value of keeping the Wildcard for later is not included.</p>
                 <button id="run-wildcard" class="button primary">Compare Wildcard, hold and FT paths</button>
+                <p id="wildcard-status" class="control-note" aria-live="polite"></p>
                 <div id="wildcard-results" aria-live="polite"></div>
               </div>
               <div id="transfer-results" class="transfer-list empty-state">Run the scan to compare the current squad with every legal, affordable same-position move.</div>
@@ -141,6 +142,7 @@
               <div class="settings-grid">
                 <div class="settings-card"><div class="eyebrow">Decision stance</div><h3>How much swing is comfortable?</h3><p>Changes how suggestions are grouped in this browser. It does not retrain the frozen projection model.</p><div id="risk-profiles" class="risk-profiles"></div></div>
                 <div class="settings-card"><div class="eyebrow">Timeline</div><h3>Gameweeks ahead</h3><p>Select how much of the published horizon to keep in view. Future options unlock when the release contains them.</p><label class="control-label" for="horizon-select">Visible horizon</label><select id="horizon-select" class="settings-select"></select><div id="horizon-note" class="control-note"></div></div>
+                <div class="settings-card"><div class="eyebrow">Chips</div><h3>How a chip is scored</h3><p>Use the Chips panel beside your squad to mark chips you have already played this half-season and to try one for the first published Gameweek. A chip is always a what-if: the squad rating and its benchmark stay chip-free.</p><ul class="chip-explainer"><li><strong>Bench Boost</strong> adds all four bench players' projected points.</li><li><strong>Triple Captain</strong> counts the captain's projected points three times.</li><li><strong>Wildcard</strong> makes staged moves free, keeps your saved free transfers, and keeps the new squad.</li><li><strong>Free Hit</strong> makes staged moves free for one Gameweek; later Gameweeks use your committed squad.</li></ul><p>The app scores the chip you choose. It does not tell you which week to play it.</p></div>
               </div>
             </section>
           </div>
@@ -167,6 +169,11 @@
                 </select>
               </label>
             </div>
+            <fieldset class="chip-panel" aria-describedby="chip-note">
+              <legend>Chips</legend>
+              <div id="chip-options" class="chip-options"></div>
+              <p id="chip-note" class="private-note" aria-live="polite"></p>
+            </fieldset>
             <div id="squad-pending-transfers" class="pending-transfers" aria-live="polite"></div>
             <div id="squad-editor" class="squad-editor skeleton"></div>
             <p class="private-note">Saved in this browser only. No FPL password or session cookie is stored.</p>

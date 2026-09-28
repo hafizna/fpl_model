@@ -27,7 +27,7 @@ from fpl_model.decision.lineup import (
 from fpl_model.decision.lineup_store import combine_appearance_probability
 from fpl_model.decision.role_scenario_sensitivity import evaluate_role_scenario_sensitivity
 from fpl_model.decision.rolling import GameweekProjectionPool
-from fpl_model.decision.squad import CHIP_NAMES, SquadPlayer, validate_squad
+from fpl_model.decision.squad import CHIP_NAMES, POSITION_COUNTS, SquadPlayer, validate_squad
 from fpl_model.decision.squad_rating import (
     BENCHMARK_POLICY_VERSION,
     MATERIALIZED_BENCHMARK_SCHEMA_VERSION,
@@ -38,13 +38,31 @@ from fpl_model.decision.squad_rating import (
     build_squad_benchmark,
     rate_squad,
 )
-from fpl_model.decision.transfer import TransferTarget, apply_single_transfer
+from fpl_model.decision.transfer import TransferTarget
 from fpl_model.ingest.squad_snapshot import validate_entry_picks_payload
 from fpl_model.storage import DEFAULT_DATABASE_PATH
 from fpl_model.validation.role_state import RoleStateResult
 
 _SQUAD_BENCHMARK_CACHE: dict[tuple[str, int], SquadBenchmark] = {}
 _TRANSFER_PATH_SHORTLIST_SIZE = 8
+# FPL splits the season into two chip sets; the second opens at GW20.
+_SECOND_CHIP_PERIOD_START_GAMEWEEK = 20
+_UNLIMITED_TRANSFER_CHIPS = frozenset({"wildcard", "free_hit"})
+CHIP_LABELS = {
+    "wildcard": "Wildcard",
+    "free_hit": "Free Hit",
+    "bench_boost": "Bench Boost",
+    "triple_captain": "Triple Captain",
+}
+_CHIP_NOTES = {
+    "wildcard": "Staged transfers are free; weekly scoring is unchanged and the squad is kept.",
+    "free_hit": (
+        "Staged transfers are free for this Gameweek only; later Gameweeks are scored from the "
+        "committed squad Free Hit reverts to. Transfers after the reversion are not planned."
+    ),
+    "bench_boost": "All four bench players' projected points are added to this Gameweek.",
+    "triple_captain": "The captain's projected points count three times instead of twice.",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,6 +127,52 @@ class PendingTransfer:
             raise ValueError("pending transfer player IDs must be positive")
         if self.out_fpl_id == self.in_fpl_id:
             raise ValueError("pending transfer must change the player")
+
+
+@dataclass(frozen=True, slots=True)
+class ChipPlan:
+    """Browser-held chip state for the first horizon Gameweek (a what-if only).
+
+    ``used`` records the chips the manager has already spent in the current
+    half-season; ``active`` is the one chip being tried for this Gameweek.
+    """
+
+    active: str | None = None
+    used: frozenset[str] = frozenset()
+
+    def __post_init__(self) -> None:
+        unknown = sorted(set(self.used) - set(CHIP_NAMES))
+        if unknown:
+            raise ValueError(f"unknown chip names: {unknown}")
+        if self.active is not None and self.active not in CHIP_NAMES:
+            raise ValueError(f"unknown chip: {self.active}")
+        if self.active in self.used:
+            raise ValueError(
+                f"{CHIP_LABELS[self.active]} is marked used this half-season; "
+                "mark it available before playing it"
+            )
+
+    @property
+    def unlimited_transfers(self) -> bool:
+        return self.active in _UNLIMITED_TRANSFER_CHIPS
+
+    @property
+    def chip_states(self) -> dict[str, str]:
+        return {
+            chip: "active" if chip == self.active else "played" if chip in self.used else "available"
+            for chip in CHIP_NAMES
+        }
+
+    @property
+    def status(self) -> dict[str, str]:
+        return {chip: "used" if chip in self.used else "available" for chip in CHIP_NAMES}
+
+
+NO_CHIPS = ChipPlan()
+
+
+def _chip_period(gameweek: int) -> int:
+    return 1 if gameweek < _SECOND_CHIP_PERIOD_START_GAMEWEEK else 2
 
 
 def _flags(value: str | None) -> set[str]:
@@ -607,9 +671,17 @@ def _validated_web_squad(
     fpl_ids: tuple[int, ...],
     *,
     bank_tenths: int,
-    free_transfers: int,
+    free_transfers: int | None,
     selling_prices: dict[int, int],
+    chips: ChipPlan = NO_CHIPS,
+    chip_period: int = 1,
 ):
+    """Validate a browser squad; Wildcard/Free Hit make transfers unlimited.
+
+    Under an unlimited-transfer chip the saved free-transfer count is not
+    consumed, so the squad carries ``free_transfers=None`` (as
+    ``validate_squad`` requires) and callers keep the committed count.
+    """
     if len(fpl_ids) != 15 or len(set(fpl_ids)) != 15:
         raise ValueError("fpl_ids must contain 15 unique players")
     missing = sorted(set(fpl_ids) - set(catalog))
@@ -650,10 +722,10 @@ def _validated_web_squad(
     return validate_squad(
         players,
         bank_tenths=bank_tenths,
-        free_transfers=free_transfers,
-        unlimited_transfers=False,
-        chip_period=1,
-        chip_states=dict.fromkeys(CHIP_NAMES, "available"),
+        free_transfers=None if chips.unlimited_transfers else free_transfers,
+        unlimited_transfers=chips.unlimited_transfers,
+        chip_period=chip_period,
+        chip_states=chips.chip_states,
     )
 
 
@@ -826,6 +898,81 @@ def _lineup_payload(
         "role_scenario_sensitivity": sensitivity_report,
         "current_setup_comparison": current_setup_comparison,
     }
+
+
+def _with_chip_effect(payload: dict[str, Any], chip: str | None) -> dict[str, Any]:
+    """Return a copy of one no-chip lineup payload scored with ``chip`` played.
+
+    Neither points chip changes the optimal XI or captain (Bench Boost scores
+    every squad player; Triple Captain still wants the top projected starter),
+    so the exhaustive no-chip lineup is kept and only the total moves.
+    """
+
+    if chip is None:
+        return {**payload, "chip_effect": None}
+    delta = 0.0
+    uncertainty = payload["uncertainty"]
+    if chip == "bench_boost":
+        delta = sum(player["xpts"] for player in payload["bench"])
+        bench_uncertainty = [player["uncertainty"] for player in payload["bench"]]
+        uncertainty = (
+            None
+            if uncertainty is None or any(value is None for value in bench_uncertainty)
+            else sqrt(uncertainty**2 + sum(value**2 for value in bench_uncertainty))
+        )
+    elif chip == "triple_captain":
+        delta = payload["captain"]["xpts"]
+        captain_uncertainty = payload["captain"]["uncertainty"]
+        # Same independence approximation as recommend_lineup: the captain's
+        # standard deviation now carries a 3x (not 2x) multiplier.
+        uncertainty = (
+            None
+            if uncertainty is None or captain_uncertainty is None
+            else sqrt(uncertainty**2 + 5.0 * captain_uncertainty**2)
+        )
+    return {
+        **payload,
+        "total_xpts": payload["total_xpts"] + delta,
+        "uncertainty": uncertainty,
+        "chip_effect": {
+            "chip": chip,
+            "label": CHIP_LABELS[chip],
+            "delta_xpts": delta,
+            "note": _CHIP_NOTES[chip],
+        },
+    }
+
+
+def _plan_lineups(
+    squad,
+    *,
+    horizon: ResearchHorizon,
+    projections: dict[int, dict[int, PlayerGameweekProjection]],
+    catalog: dict[int, dict[str, Any]] | None = None,
+    current_setup: CurrentSquadSetup | None = None,
+    reverted_squad=None,
+) -> list[dict[str, Any]]:
+    """No-chip lineups over the horizon; ``reverted_squad`` scores GW+1 onward."""
+
+    return [
+        _lineup_payload(
+            squad if reverted_squad is None or index == 0 else reverted_squad,
+            projections[gameweek],
+            gameweek,
+            catalog=catalog,
+            current_setup=current_setup if index == 0 else None,
+        )
+        for index, (gameweek, _) in enumerate(horizon.model_runs)
+    ]
+
+
+def _chip_lineups(lineups: list[dict[str, Any]], chip: str | None) -> list[dict[str, Any]]:
+    """A chip is played in the first horizon Gameweek only."""
+
+    return [
+        _with_chip_effect(payload, chip if index == 0 else None)
+        for index, payload in enumerate(lineups)
+    ]
 
 
 def _rating_source_identity(
@@ -1050,20 +1197,28 @@ def _apply_pending_transfers(
     *,
     catalog: dict[int, dict[str, Any]],
 ) -> tuple[Any, float]:
-    """Apply staged moves to a validated copy without mutating release state."""
+    """Apply staged moves to a validated copy without mutating release state.
 
-    hit_cost = 0.0
+    FPL confirms a set of transfers together, so budget and the three-per-club
+    limit are checked on the final squad, not after every intermediate move.
+    Wildcard/Free Hit (``unlimited_transfers``) charge no hit and leave the
+    saved free-transfer count untouched.
+    """
+
+    if not pending_transfers:
+        return squad, 0.0
+    players = {player.fpl_id: player for player in squad.players}
+    bank_after = squad.bank_tenths
     for pending in pending_transfers:
-        owned = {player.fpl_id for player in squad.players}
-        if pending.out_fpl_id not in owned:
+        if pending.out_fpl_id not in players:
             raise ValueError(
                 f"pending transfer outgoing player {pending.out_fpl_id} is not in the squad"
             )
-        if pending.in_fpl_id in owned:
+        if pending.in_fpl_id in players:
             raise ValueError(
                 f"pending transfer incoming player {pending.in_fpl_id} is already in the squad"
             )
-        outgoing = next(player for player in squad.players if player.fpl_id == pending.out_fpl_id)
+        outgoing = players.pop(pending.out_fpl_id)
         incoming_row = catalog.get(pending.in_fpl_id)
         if incoming_row is None:
             raise ValueError(
@@ -1075,16 +1230,8 @@ def _apply_pending_transfers(
             )
         if incoming_row["position"] != outgoing.position:
             raise ValueError("pending transfer must keep the same player position")
-        bank_after = (
-            squad.bank_tenths
-            + outgoing.selling_price_tenths
-            - incoming_row["price_tenths"]
-        )
-        if bank_after < 0:
-            raise ValueError(
-                f"pending transfer {pending.out_fpl_id} → {pending.in_fpl_id} is not affordable"
-            )
-        incoming = SquadPlayer(
+        bank_after += outgoing.selling_price_tenths - incoming_row["price_tenths"]
+        players[pending.in_fpl_id] = SquadPlayer(
             fpl_id=incoming_row["fpl_id"],
             player_code=incoming_row["player_code"],
             player_name=incoming_row["name"],
@@ -1097,16 +1244,24 @@ def _apply_pending_transfers(
             is_captain=outgoing.is_captain,
             is_vice_captain=outgoing.is_vice_captain,
         )
-        free_transfers = squad.free_transfers or 0
-        if free_transfers < 1:
-            hit_cost += 4.0
-        squad = apply_single_transfer(
-            squad,
-            outgoing=outgoing,
-            incoming=incoming,
-            bank_after_tenths=bank_after,
+    if bank_after < 0:
+        raise ValueError(
+            f"staged transfers are not affordable: bank would be £{bank_after / 10:.1f}m"
         )
-        squad = replace(squad, free_transfers=max(0, free_transfers - 1))
+    if squad.unlimited_transfers:
+        free_transfers_after, hit_cost = None, 0.0
+    else:
+        free_transfers = squad.free_transfers or 0
+        free_transfers_after = max(0, free_transfers - len(pending_transfers))
+        hit_cost = 4.0 * max(0, len(pending_transfers) - free_transfers)
+    squad = validate_squad(
+        tuple(players.values()),
+        bank_tenths=bank_after,
+        free_transfers=free_transfers_after,
+        unlimited_transfers=squad.unlimited_transfers,
+        chip_period=squad.chip_period,
+        chip_states=dict(squad.chip_states),
+    )
     return squad, hit_cost
 
 
@@ -1118,10 +1273,15 @@ def _plan_summary(
     pending_transfers: tuple[PendingTransfer, ...],
     hit_cost: float,
     squad,
+    chips: ChipPlan,
+    committed_free_transfers: int,
 ) -> dict[str, Any]:
+    """Glue for the browser plan header; ``baseline_lineups`` are no-chip holds."""
+
     first = lineups[0]
     baseline_total = sum(row["total_xpts"] for row in baseline_lineups)
     effective_total = sum(row["total_xpts"] for row in lineups)
+    chip_effect = first["chip_effect"]
     return {
         "gameweek": horizon.start_gameweek,
         "formation": first["formation"],
@@ -1129,9 +1289,21 @@ def _plan_summary(
         "staged_transfer_count": len(pending_transfers),
         "net_xpts_vs_holding": effective_total - baseline_total - hit_cost,
         "pending_hit_cost": hit_cost,
+        "chip": chips.active,
+        "chip_label": None if chips.active is None else CHIP_LABELS[chips.active],
+        "chip_effect_xpts": 0.0 if chip_effect is None else chip_effect["delta_xpts"],
+        # A Free Hit squad reverts after its Gameweek, so there is nothing to
+        # fold into the committed squad.
+        "commit_allowed": chips.active != "free_hit",
+        "squad_reverts_after_gameweek": (
+            horizon.start_gameweek if chips.active == "free_hit" else None
+        ),
         "effective_fpl_ids": [player.fpl_id for player in squad.players],
         "effective_bank_tenths": squad.bank_tenths,
-        "effective_free_transfers": squad.free_transfers,
+        # Wildcard/Free Hit preserve the saved free-transfer count.
+        "effective_free_transfers": (
+            committed_free_transfers if squad.unlimited_transfers else squad.free_transfers
+        ),
         "effective_selling_prices": {
             player.fpl_id: player.selling_price_tenths for player in squad.players
         },
@@ -1185,13 +1357,15 @@ def _score_web_squad_over_horizon(
     *,
     horizon: ResearchHorizon,
     projections: dict[int, dict[int, PlayerGameweekProjection]],
+    chip: str | None = None,
+    reverted_squad=None,
 ) -> float:
     """Score a working squad without altering the frozen release or benchmark."""
 
-    return sum(
-        _lineup_payload(squad, projections[gameweek], gameweek)["total_xpts"]
-        for gameweek, _ in horizon.model_runs
+    lineups = _plan_lineups(
+        squad, horizon=horizon, projections=projections, reverted_squad=reverted_squad
     )
+    return sum(row["total_xpts"] for row in _chip_lineups(lineups, chip))
 
 
 def _best_two_move_path(
@@ -1201,6 +1375,7 @@ def _best_two_move_path(
     horizon: ResearchHorizon,
     catalog: dict[int, dict[str, Any]],
     projections: dict[int, dict[int, PlayerGameweekProjection]],
+    chip: str | None = None,
 ) -> tuple[tuple[PendingTransfer, ...], float, float] | None:
     """Return the best affordable two-move plan from a small single-move shortlist.
 
@@ -1238,6 +1413,7 @@ def _best_two_move_path(
                 candidate_squad,
                 horizon=horizon,
                 projections=projections,
+                chip=chip,
             ) - hit
             if best is None or net_xpts > best[2]:
                 best = (transfers, hit, net_xpts)
@@ -1252,8 +1428,13 @@ def _transfer_paths(
     horizon: ResearchHorizon,
     catalog: dict[int, dict[str, Any]],
     projections: dict[int, dict[int, PlayerGameweekProjection]],
+    chip: str | None = None,
 ) -> tuple[list[dict[str, Any]], str]:
-    """Build the bounded Hold / FT / -4 / Roll decision comparison."""
+    """Build the bounded Hold / FT / -4 / Roll decision comparison.
+
+    A points chip (Bench Boost / Triple Captain) is scored inside every path,
+    so Hold here means "keep the squad and play the chosen chip".
+    """
 
     paths = [
         _transfer_path_payload(
@@ -1305,6 +1486,7 @@ def _transfer_paths(
         horizon=horizon,
         catalog=catalog,
         projections=projections,
+        chip=chip,
     )
     if two_move is not None:
         transfers, hit, net_xpts = two_move
@@ -1365,6 +1547,150 @@ def _transfer_paths(
     return paths, recommended_path_id
 
 
+def _squad_change_transfers(current, target) -> tuple[PendingTransfer, ...]:
+    """Pair a squad rebuild into same-position moves the browser can stage."""
+
+    current_ids = {player.fpl_id for player in current.players}
+    target_ids = {player.fpl_id for player in target.players}
+    transfers: list[PendingTransfer] = []
+    for position in POSITION_COUNTS:
+        outgoing = sorted(
+            (p for p in current.players if p.position == position and p.fpl_id not in target_ids),
+            key=lambda p: (-p.selling_price_tenths, p.fpl_id),
+        )
+        incoming = sorted(
+            (p for p in target.players if p.position == position and p.fpl_id not in current_ids),
+            key=lambda p: (-p.current_price_tenths, p.fpl_id),
+        )
+        transfers.extend(
+            PendingTransfer(out_fpl_id=out.fpl_id, in_fpl_id=incoming_player.fpl_id)
+            for out, incoming_player in zip(outgoing, incoming, strict=True)
+        )
+    return tuple(transfers)
+
+
+def _chip_transfer_paths(
+    *,
+    baseline_squad,
+    baseline_xpts: float,
+    suggestions: list[dict[str, Any]],
+    horizon: ResearchHorizon,
+    catalog: dict[int, dict[str, Any]],
+    projections: dict[int, dict[int, PlayerGameweekProjection]],
+    chips: ChipPlan,
+    committed_free_transfers: int,
+    reverted_squad=None,
+) -> tuple[list[dict[str, Any]], str]:
+    """Hold / best single move / rebuilt squad under Wildcard or Free Hit.
+
+    Every move is free and saved free transfers are preserved, so the Phase 2
+    FT/-4/Roll split collapses. The rebuilt squad reuses the Wildcard squad
+    search (bounded beam, sale-value budget) over the full horizon for a
+    Wildcard, or over the chip Gameweek alone for a Free Hit.
+    """
+
+    from fpl_model.decision.wildcard import wildcard_candidates
+
+    label = CHIP_LABELS[chips.active]
+    paths = [
+        _transfer_path_payload(
+            path_id="hold",
+            label="Hold",
+            transfers=(),
+            catalog=catalog,
+            hit=0.0,
+            net_xpts=baseline_xpts,
+            baseline_xpts=baseline_xpts,
+        )
+    ]
+    if suggestions:
+        best_single = suggestions[0]
+        paths.append(
+            _transfer_path_payload(
+                path_id="one_move",
+                label="Best single move",
+                transfers=(
+                    PendingTransfer(
+                        out_fpl_id=best_single["out"]["fpl_id"],
+                        in_fpl_id=best_single["in"]["fpl_id"],
+                    ),
+                ),
+                catalog=catalog,
+                hit=0.0,
+                net_xpts=baseline_xpts + best_single["net_xpts_gain"],
+                baseline_xpts=baseline_xpts,
+                note=f"No hit while {label} is active.",
+            )
+        )
+
+    # The squad search wants explicit saved transfers and no active chip.
+    search_squad = _validated_web_squad(
+        catalog,
+        tuple(player.fpl_id for player in baseline_squad.players),
+        bank_tenths=baseline_squad.bank_tenths,
+        free_transfers=committed_free_transfers,
+        selling_prices={
+            player.fpl_id: player.selling_price_tenths for player in baseline_squad.players
+        },
+        chips=ChipPlan(used=chips.used),
+        chip_period=baseline_squad.chip_period,
+    )
+    pools = rating_pools_from_catalog(horizon, catalog, projections)
+    if chips.active == "free_hit":
+        pools = pools[:1]
+    try:
+        candidates = wildcard_candidates(search_squad, pools)
+    except ValueError:
+        # The bounded beam can fail on a very small or club-concentrated pool;
+        # Hold and the best single move still stand on their own.
+        candidates = ()
+    best: tuple[tuple[PendingTransfer, ...], float] | None = None
+    for candidate in candidates:
+        transfers = _squad_change_transfers(baseline_squad, candidate)
+        if not transfers:
+            continue
+        try:
+            rebuilt, _ = _apply_pending_transfers(baseline_squad, transfers, catalog=catalog)
+        except ValueError:
+            continue
+        net_xpts = _score_web_squad_over_horizon(
+            rebuilt,
+            horizon=horizon,
+            projections=projections,
+            chip=chips.active,
+            reverted_squad=reverted_squad,
+        )
+        if best is None or net_xpts > best[1]:
+            best = (transfers, net_xpts)
+    if best is not None:
+        transfers, net_xpts = best
+        note = (
+            f"{len(transfers)} free move(s) for GW{horizon.start_gameweek} only; "
+            "the squad reverts afterwards."
+            if chips.active == "free_hit"
+            else f"{len(transfers)} free move(s); the rebuilt squad is kept."
+        )
+        paths.append(
+            _transfer_path_payload(
+                path_id="chip_squad",
+                label=f"{label} squad",
+                transfers=transfers,
+                catalog=catalog,
+                hit=0.0,
+                net_xpts=net_xpts,
+                baseline_xpts=baseline_xpts,
+                note=f"{note} Bounded squad search, not a certified optimum.",
+            )
+        )
+
+    recommended_path_id = "hold"
+    best_delta = 0.0
+    for path in paths:
+        if path["delta_xpts_vs_hold"] > best_delta:
+            recommended_path_id, best_delta = path["id"], path["delta_xpts_vs_hold"]
+    return paths, recommended_path_id
+
+
 def recommend_web_lineups(
     fpl_ids: tuple[int, ...],
     *,
@@ -1374,6 +1700,7 @@ def recommend_web_lineups(
     role_scenario_overrides: tuple[RoleScenarioOverride, ...] = (),
     pending_transfers: tuple[PendingTransfer, ...] = (),
     current_setup: CurrentSquadSetup | None = None,
+    chips: ChipPlan = NO_CHIPS,
     database_path: str | Path = DEFAULT_DATABASE_PATH,
     release_path: str | Path | None = None,
 ) -> dict[str, Any]:
@@ -1395,6 +1722,8 @@ def recommend_web_lineups(
         bank_tenths=bank_tenths,
         free_transfers=free_transfers,
         selling_prices={} if selling_prices is None else selling_prices,
+        chips=chips,
+        chip_period=_chip_period(horizon.start_gameweek),
     )
     if current_setup is not None:
         if current_setup.gameweek != horizon.start_gameweek:
@@ -1404,52 +1733,69 @@ def recommend_web_lineups(
         setup_ids = set((*current_setup.starter_fpl_ids, *current_setup.bench_fpl_ids))
         if setup_ids != set(fpl_ids):
             raise ValueError("current setup players must exactly match the submitted squad")
-    baseline_lineups = [
-        _lineup_payload(
-            committed_squad,
-            projections[gameweek],
-            gameweek,
-            catalog=catalog,
-            current_setup=current_setup if gameweek == horizon.start_gameweek else None,
-        )
-        for gameweek, _ in horizon.model_runs
-    ]
+    # Holding means the committed squad with no chip and no staged transfer.
+    baseline_lineups = _plan_lineups(
+        committed_squad,
+        horizon=horizon,
+        projections=projections,
+        catalog=catalog,
+        current_setup=current_setup,
+    )
     squad, pending_hit_cost = _apply_pending_transfers(
         committed_squad,
         pending_transfers,
         catalog=catalog,
     )
-    lineups = [
-        _lineup_payload(
-            squad,
-            projections[gameweek],
-            gameweek,
-            catalog=catalog,
-            current_setup=(
-                current_setup
-                if not pending_transfers and gameweek == horizon.start_gameweek
-                else None
-            ),
-        )
-        for gameweek, _ in horizon.model_runs
-    ]
+    reverted_squad = committed_squad if chips.active == "free_hit" else None
+    no_chip_lineups = _plan_lineups(
+        squad,
+        horizon=horizon,
+        projections=projections,
+        catalog=catalog,
+        current_setup=None if pending_transfers else current_setup,
+        reverted_squad=reverted_squad,
+    )
+    lineups = _chip_lineups(no_chip_lineups, chips.active)
+    # A chip is a one-week bonus the benchmark squads never receive, so the
+    # rating always scores the no-chip lineups. Free Hit is rated on the
+    # committed squad it reverts to.
+    rated_squad, rated_lineups = (
+        (committed_squad, baseline_lineups)
+        if reverted_squad is not None
+        else (squad, no_chip_lineups)
+    )
     rating = _squad_rating_payload(
         horizon=horizon,
         catalog=catalog,
         base_projections=base_projections,
         release_id=release_id,
         release_health=health,
-        fpl_ids=tuple(player.fpl_id for player in squad.players),
-        bank_tenths=squad.bank_tenths,
-        squad=squad,
-        lineups=lineups,
+        fpl_ids=tuple(player.fpl_id for player in rated_squad.players),
+        bank_tenths=rated_squad.bank_tenths,
+        squad=rated_squad,
+        lineups=rated_lineups,
         reviewed_scenario=bool(role_scenario_overrides),
         materialized_artifact=release_metadata.get("rating_benchmark"),
     )
+    method_note = (
+        "Exhaustive legal XI and captain search over one frozen research horizon."
+        if not role_scenario_overrides
+        else "Exhaustive legal XI and captain search recomputed from one or more reviewed "
+        "xPts overrides over the same frozen research horizon. The underlying release is "
+        "unchanged; this is a what-if scenario, not a new projection run."
+    )
+    if chips.active is not None:
+        method_note += (
+            f" {CHIP_LABELS[chips.active]} is scored for GW{horizon.start_gameweek} as a "
+            f"what-if: {_CHIP_NOTES[chips.active]} The squad rating excludes the chip."
+        )
     return {
         "health": health,
         "release_id": release_id,
         "is_reviewed_scenario": bool(role_scenario_overrides),
+        "chip": chips.active,
+        "chip_status": chips.status,
+        "chip_scenario": chips.active is not None,
         "coverage": release_metadata.get("coverage"),
         "freshness": release_metadata.get("freshness"),
         "horizon": [gameweek for gameweek, _ in horizon.model_runs],
@@ -1463,15 +1809,11 @@ def recommend_web_lineups(
             pending_transfers=pending_transfers,
             hit_cost=pending_hit_cost,
             squad=squad,
+            chips=chips,
+            committed_free_transfers=free_transfers,
         ),
         "squad_rating": rating,
-        "method_note": (
-            "Exhaustive legal XI and captain search over one frozen research horizon."
-            if not role_scenario_overrides
-            else "Exhaustive legal XI and captain search recomputed from one or more reviewed "
-            "xPts overrides over the same frozen research horizon. The underlying release is "
-            "unchanged; this is a what-if scenario, not a new projection run."
-        ),
+        "method_note": method_note,
     }
 
 
@@ -1483,6 +1825,7 @@ def recommend_web_transfers(
     selling_prices: dict[int, int] | None = None,
     role_scenario_overrides: tuple[RoleScenarioOverride, ...] = (),
     pending_transfers: tuple[PendingTransfer, ...] = (),
+    chips: ChipPlan = NO_CHIPS,
     top_n: int = 8,
     database_path: str | Path = DEFAULT_DATABASE_PATH,
     release_path: str | Path | None = None,
@@ -1497,40 +1840,59 @@ def recommend_web_transfers(
     projections = apply_role_scenario_overrides(
         base_projections, role_scenario_overrides, horizon=horizon
     )
+    chip_period = _chip_period(horizon.start_gameweek)
     committed_squad = _validated_web_squad(
         catalog,
         fpl_ids,
         bank_tenths=bank_tenths,
         free_transfers=free_transfers,
         selling_prices=selling_prices,
+        chips=chips,
+        chip_period=chip_period,
     )
     baseline_squad, pending_hit_cost = _apply_pending_transfers(
         committed_squad,
         pending_transfers,
         catalog=catalog,
     )
-    baseline_lineups = [
-        # role_scenario_sensitivity only for the baseline (current, pre-
-        # transfer) squad -- computing it for every candidate transfer too
-        # would multiply the cost of an already-expensive brute-force scan
-        # (recommend_lineup already re-runs once per rotation-risk player).
-        _lineup_payload(baseline_squad, projections[gameweek], gameweek, catalog=catalog)
-        for gameweek, _ in horizon.model_runs
-    ]
+    reverted_squad = committed_squad if chips.active == "free_hit" else None
+    # role_scenario_sensitivity only for the baseline (current, pre-transfer)
+    # squad -- computing it for every candidate transfer too would multiply
+    # the cost of an already-expensive brute-force scan (recommend_lineup
+    # already re-runs once per rotation-risk player).
+    baseline_no_chip = _plan_lineups(
+        baseline_squad,
+        horizon=horizon,
+        projections=projections,
+        catalog=catalog,
+        reverted_squad=reverted_squad,
+    )
+    baseline_lineups = _chip_lineups(baseline_no_chip, chips.active)
     baseline_xpts = sum(row["total_xpts"] for row in baseline_lineups)
+    rated_squad, rated_lineups = (
+        (
+            committed_squad,
+            _plan_lineups(committed_squad, horizon=horizon, projections=projections),
+        )
+        if reverted_squad is not None
+        else (baseline_squad, baseline_no_chip)
+    )
     baseline_rating = _squad_rating_payload(
         horizon=horizon,
         catalog=catalog,
         base_projections=base_projections,
         release_id=release_id,
         release_health=health,
-        fpl_ids=tuple(player.fpl_id for player in baseline_squad.players),
-        bank_tenths=baseline_squad.bank_tenths,
-        squad=baseline_squad,
-        lineups=baseline_lineups,
+        fpl_ids=tuple(player.fpl_id for player in rated_squad.players),
+        bank_tenths=rated_squad.bank_tenths,
+        squad=rated_squad,
+        lineups=rated_lineups,
         reviewed_scenario=bool(role_scenario_overrides),
         materialized_artifact=release_metadata.get("rating_benchmark"),
     )
+    # A Free Hit move only changes its own Gameweek; later ones revert.
+    scored_gameweeks = horizon.model_runs[:1] if reverted_squad is not None else horizon.model_runs
+    unchanged_tail = baseline_lineups[len(scored_gameweeks) :]
     owned = {player.fpl_id for player in baseline_squad.players}
     suggestions: list[dict[str, Any]] = []
     for outgoing_player in baseline_squad.players:
@@ -1557,15 +1919,23 @@ def recommend_web_transfers(
                     bank_tenths=available - incoming["price_tenths"],
                     free_transfers=max(0, (baseline_squad.free_transfers or 0) - 1),
                     selling_prices=selling_prices,
+                    chips=chips,
+                    chip_period=chip_period,
                 )
             except ValueError:
                 continue
-            candidate_lineups = [
-                _lineup_payload(candidate_squad, projections[gameweek], gameweek)
-                for gameweek, _ in horizon.model_runs
-            ]
+            candidate_lineups = _chip_lineups(
+                [
+                    _lineup_payload(candidate_squad, projections[gameweek], gameweek)
+                    for gameweek, _ in scored_gameweeks
+                ],
+                chips.active,
+            ) + unchanged_tail
             candidate_xpts = sum(row["total_xpts"] for row in candidate_lineups)
-            hit_cost = 0 if (baseline_squad.free_transfers or 0) >= 1 else 4
+            hit_cost = (
+                0 if baseline_squad.unlimited_transfers or (baseline_squad.free_transfers or 0) >= 1
+                else 4
+            )
             lineup_changed = (
                 tuple(row["fpl_id"] for row in candidate_lineups[0]["starters"])
                 != tuple(row["fpl_id"] for row in baseline_lineups[0]["starters"])
@@ -1587,18 +1957,45 @@ def recommend_web_transfers(
     suggestions.sort(
         key=lambda row: (-row["net_xpts_gain"], -row["gross_xpts_gain"], row["in"]["name"])
     )
-    paths, recommended_path_id = _transfer_paths(
-        baseline_squad=baseline_squad,
-        baseline_xpts=baseline_xpts,
-        suggestions=suggestions,
-        horizon=horizon,
-        catalog=catalog,
-        projections=projections,
+    if chips.unlimited_transfers:
+        paths, recommended_path_id = _chip_transfer_paths(
+            baseline_squad=baseline_squad,
+            baseline_xpts=baseline_xpts,
+            suggestions=suggestions,
+            horizon=horizon,
+            catalog=catalog,
+            projections=projections,
+            chips=chips,
+            committed_free_transfers=free_transfers,
+            reverted_squad=reverted_squad,
+        )
+    else:
+        paths, recommended_path_id = _transfer_paths(
+            baseline_squad=baseline_squad,
+            baseline_xpts=baseline_xpts,
+            suggestions=suggestions,
+            horizon=horizon,
+            catalog=catalog,
+            projections=projections,
+            chip=chips.active,
+        )
+    method_note = (
+        "Every legal affordable same-position single transfer is rescored over the frozen "
+        "published Gameweek horizon. The optional two-move comparison pairs only a bounded "
+        "shortlist of those single moves; future transfer value and price changes are excluded."
     )
+    if chips.active is not None:
+        method_note += (
+            f" Every path and suggestion is scored with {CHIP_LABELS[chips.active]} played in "
+            f"GW{horizon.start_gameweek}: {_CHIP_NOTES[chips.active]}"
+        )
     return {
         "health": health,
         "release_id": release_id,
         "is_reviewed_scenario": bool(role_scenario_overrides),
+        "chip": chips.active,
+        "chip_status": chips.status,
+        "chip_scenario": chips.active is not None,
         "coverage": release_metadata.get("coverage"),
         "freshness": release_metadata.get("freshness"),
         "horizon": [gameweek for gameweek, _ in horizon.model_runs],
@@ -1610,11 +2007,7 @@ def recommend_web_transfers(
         "recommended_path_id": recommended_path_id,
         "recommendation": "hold" if recommended_path_id == "hold" else "transfer",
         "suggestions": suggestions[:top_n],
-        "method_note": (
-            "Every legal affordable same-position single transfer is rescored over the frozen "
-            "published Gameweek horizon. The optional two-move comparison pairs only a bounded "
-            "shortlist of those single moves; future transfer value and price changes are excluded."
-        ),
+        "method_note": method_note,
     }
 
 
@@ -1624,11 +2017,16 @@ def compare_web_wildcard(
     roll_after_wildcard: int = 3, terminal_ft_value: float = 0.0,
     locked_fpl_ids: tuple[int, ...] = (), excluded_fpl_ids: tuple[int, ...] = (),
     role_scenario_overrides: tuple[RoleScenarioOverride, ...] = (),
+    chips: ChipPlan = NO_CHIPS,
     database_path: str | Path = DEFAULT_DATABASE_PATH, release_path: str | Path | None = None,
 ) -> dict[str, Any]:
     from fpl_model.decision.initial_squad import SquadConstraints
     from fpl_model.decision.wildcard import compare_wildcard
 
+    if chips.active is not None:
+        raise ValueError("Wildcard comparison starts from the no-chip squad; clear the active chip")
+    if "wildcard" in chips.used:
+        raise ValueError("Wildcard is marked used this half-season")
     horizon, catalog, projections, health, release_id, _ = _load_web_inputs(
         database_path=database_path, release_path=release_path,
     )
@@ -1636,7 +2034,8 @@ def compare_web_wildcard(
         raise ValueError("requested planning horizon is not published; refresh the release first")
     projections = apply_role_scenario_overrides(projections, role_scenario_overrides, horizon=horizon)
     squad = _validated_web_squad(catalog, fpl_ids, bank_tenths=bank_tenths,
-                                 free_transfers=free_transfers, selling_prices=selling_prices or {})
+                                 free_transfers=free_transfers, selling_prices=selling_prices or {},
+                                 chips=chips, chip_period=_chip_period(horizon.start_gameweek))
     pools = rating_pools_from_catalog(horizon, catalog, projections)[:horizon_length]
     result = compare_wildcard(
         squad, pools, roll_after_wildcard=roll_after_wildcard, terminal_ft_value=terminal_ft_value,

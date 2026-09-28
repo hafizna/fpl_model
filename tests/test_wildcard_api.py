@@ -39,5 +39,11 @@ def test_wildcard_api_respects_horizon_and_preserves_ft(tmp_path, monkeypatch):
                 'fpl_ids': list(range(1, 16)), 'horizon_length': 2, 'roll_after_wildcard': 3,
             })
             assert too_short.status_code == 422
+            spent = client.post('/api/recommend/wildcard', json={
+                'fpl_ids': list(range(1, 16)), 'horizon_length': 3, 'roll_after_wildcard': 1,
+                'chip_status': {'wildcard': 'used'},
+            })
+            assert spent.status_code == 422
+            assert 'marked used' in spent.json()['detail']
     finally:
         _bootstrap.cache_clear()

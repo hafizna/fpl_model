@@ -9,6 +9,7 @@ import time
 import uuid
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 import requests
 from fastapi import FastAPI, HTTPException, Request
@@ -26,6 +27,7 @@ from fpl_model.webapp.alpha_access import (
 from fpl_model.webapp.alpha_operations import AlphaOperationsConfig
 from fpl_model.webapp.decision_receipt import attach_decision_receipt
 from fpl_model.webapp.service import (
+    ChipPlan,
     CurrentSquadSetup,
     PendingTransfer,
     RoleScenarioOverride,
@@ -135,6 +137,9 @@ class PendingTransferRequest(BaseModel):
         )
 
 
+ChipName = Literal["wildcard", "free_hit", "bench_boost", "triple_captain"]
+
+
 class SquadRequest(BaseModel):
     fpl_ids: list[int] = Field(min_length=15, max_length=15)
     bank_tenths: int = Field(default=0, ge=0)
@@ -143,6 +148,17 @@ class SquadRequest(BaseModel):
     role_scenario_overrides: list[RoleScenarioOverrideRequest] = Field(default_factory=list)
     current_setup: CurrentSetupRequest | None = None
     pending_transfers: list[PendingTransferRequest] = Field(default_factory=list)
+    # Browser-held chip state: the chip tried for the first horizon Gameweek
+    # and which chips are already spent this half-season. Part of the hashed
+    # request, so decision receipts stay reproducible.
+    chip: ChipName | None = None
+    chip_status: dict[ChipName, Literal["available", "used"]] = Field(default_factory=dict)
+
+    def to_chip_plan(self) -> ChipPlan:
+        return ChipPlan(
+            active=self.chip,
+            used=frozenset(chip for chip, status in self.chip_status.items() if status == "used"),
+        )
 
 
 class WildcardRequest(SquadRequest):
@@ -547,6 +563,7 @@ def lineups(request: SquadRequest) -> dict[str, object]:
             pending_transfers=tuple(
                 row.to_transfer() for row in request.pending_transfers
             ),
+            chips=request.to_chip_plan(),
             current_setup=(
                 None if request.current_setup is None else request.current_setup.to_setup()
             ),
@@ -582,6 +599,7 @@ def transfers(request: SquadRequest, top_n: int = 8) -> dict[str, object]:
             pending_transfers=tuple(
                 row.to_transfer() for row in request.pending_transfers
             ),
+            chips=request.to_chip_plan(),
             top_n=max(1, min(top_n, 20)),
             database_path=_database_path(),
             release_path=_release_path(),
@@ -602,6 +620,7 @@ def wildcard(request: WildcardRequest) -> dict[str, object]:
     if request.pending_transfers:
         raise HTTPException(status_code=422, detail="Clear staged transfers to compare against your committed squad")
     try:
+        chips = request.to_chip_plan()
         payload = compare_web_wildcard(
             tuple(request.fpl_ids), bank_tenths=request.bank_tenths,
             free_transfers=request.free_transfers, selling_prices=request.selling_prices,
@@ -609,7 +628,7 @@ def wildcard(request: WildcardRequest) -> dict[str, object]:
             terminal_ft_value=request.terminal_ft_value, locked_fpl_ids=tuple(request.locked_fpl_ids),
             excluded_fpl_ids=tuple(request.excluded_fpl_ids),
             role_scenario_overrides=tuple(row.to_override() for row in request.role_scenario_overrides),
-            database_path=_database_path(), release_path=_release_path(),
+            chips=chips, database_path=_database_path(), release_path=_release_path(),
         )
         return _attach_and_log_receipt(payload, request=request, decision_type="wildcard_comparison")
     except ValueError as exc:
