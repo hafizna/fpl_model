@@ -614,7 +614,10 @@ def optimize_initial_squad(
         )
     )
     complete_squads_evaluated = len(plans)
-    if plan_future_transfers:
+    # A one-Gameweek horizon has no later Gameweek to plan transfers into, so
+    # the frozen-squad ranking already is the planned answer.
+    plan_transfers = plan_future_transfers and len(pools) > 1
+    if plan_transfers:
         plans = [
             _evaluate_planned_transfers(
                 plan,
@@ -643,6 +646,6 @@ def optimize_initial_squad(
         complete_squads_evaluated=complete_squads_evaluated,
         beam_width=beam_width,
         candidates_per_position_per_lens=candidates_per_position_per_lens,
-        planned_transfers=plan_future_transfers,
-        planned_transfer_shortlist=(planned_transfer_shortlist if plan_future_transfers else 0),
+        planned_transfers=plan_transfers,
+        planned_transfer_shortlist=(planned_transfer_shortlist if plan_transfers else 0),
     )

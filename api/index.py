@@ -579,14 +579,20 @@ def lineups(request: SquadRequest) -> dict[str, object]:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@app.post("/api/recommend/transfers")
-def transfers(request: SquadRequest, top_n: int = 8) -> dict[str, object]:
+def _require_transfer_scan_enabled() -> None:
+    """Operator switch for the expensive scans; a malformed value is a 503, not a 500."""
+
     try:
         transfer_scan_enabled = _env_bool("FPL_TRANSFER_SCAN_ENABLED", default=True)
     except ValueError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if not transfer_scan_enabled:
         raise HTTPException(status_code=503, detail="transfer scan is disabled by the operator")
+
+
+@app.post("/api/recommend/transfers")
+def transfers(request: SquadRequest, top_n: int = 8) -> dict[str, object]:
+    _require_transfer_scan_enabled()
     try:
         payload = recommend_web_transfers(
             tuple(request.fpl_ids),
@@ -615,8 +621,7 @@ def transfers(request: SquadRequest, top_n: int = 8) -> dict[str, object]:
 
 @app.post("/api/recommend/wildcard")
 def wildcard(request: WildcardRequest) -> dict[str, object]:
-    if not _env_bool("FPL_TRANSFER_SCAN_ENABLED", default=True):
-        raise HTTPException(status_code=503, detail="transfer scan is disabled by the operator")
+    _require_transfer_scan_enabled()
     if request.pending_transfers:
         raise HTTPException(status_code=422, detail="Clear staged transfers to compare against your committed squad")
     try:

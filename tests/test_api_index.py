@@ -622,6 +622,19 @@ def test_recommend_endpoints_reject_playing_a_chip_marked_used(
     assert unknown.status_code == 422
 
 
+@pytest.mark.parametrize("route", ["/api/recommend/transfers", "/api/recommend/wildcard"])
+def test_malformed_transfer_scan_switch_is_a_controlled_503(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, route: str
+):
+    _use_release(tmp_path, monkeypatch)
+    monkeypatch.setenv("FPL_TRANSFER_SCAN_ENABLED", "maybe")
+
+    response = client.post(route, json={"fpl_ids": list(range(1, 16))})
+
+    assert response.status_code == 503
+    assert "FPL_TRANSFER_SCAN_ENABLED" in response.json()["detail"]
+
+
 def test_transfer_scan_can_be_disabled_by_operator(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
