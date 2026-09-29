@@ -1,0 +1,503 @@
+<title>Keep the Model, Change the Cadence</title>
+<meta name="description" content="A strategic briefing on the fpl_model repo: why the projection engine is sound, where the rigidity actually lives, and how to run a five-Gameweek Wildcard plan without switching models.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --ground: #F7F5F0;
+    --surface: #FFFFFF;
+    --ink: #1A1712;
+    --ink-soft: #4A453C;
+    --muted: #6E685C;
+    --hair: #DAD5C9;
+    --hair-soft: #E7E3D8;
+    --accent: #0E6E42;
+    --accent-ink: #0B5533;
+    --warn: #A55E00;
+    --template: #5B7A99;
+    --shadow: 0 1px 2px rgba(26, 23, 18, 0.04), 0 8px 28px -14px rgba(26, 23, 18, 0.12);
+  }
+  :root:not([data-theme="light"]) {
+    @media (prefers-color-scheme: dark) {
+      --ground: #14120F;
+      --surface: #1C1A16;
+      --ink: #ECE8DF;
+      --ink-soft: #B8B2A4;
+      --muted: #8A8375;
+      --hair: #322E27;
+      --hair-soft: #2C2925;
+      --accent: #4FBF88;
+      --accent-ink: #7BD3A6;
+      --warn: #D69039;
+      --template: #85A3C0;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 32px -16px rgba(0, 0, 0, 0.6);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #14120F;
+    --surface: #1C1A16;
+    --ink: #ECE8DF;
+    --ink-soft: #B8B2A4;
+    --muted: #8A8375;
+    --hair: #322E27;
+    --hair-soft: #2C2925;
+    --accent: #4FBF88;
+    --accent-ink: #7BD3A6;
+    --warn: #D69039;
+    --template: #85A3C0;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 32px -16px rgba(0, 0, 0, 0.6);
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "Source Serif 4", Georgia, "Times New Roman", serif;
+    font-size: 18px;
+    line-height: 1.62;
+    font-optical-sizing: auto;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    html { scroll-behavior: smooth; }
+  }
+
+  .wrap {
+    max-width: 1140px;
+    margin: 0 auto;
+    padding: clamp(28px, 5vw, 72px) clamp(20px, 5vw, 56px) 96px;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+  @media (min-width: 1000px) {
+    .wrap {
+      grid-template-columns: 200px minmax(0, 660px);
+      column-gap: 64px;
+      justify-content: center;
+    }
+  }
+
+  /* ---- side index rail ---- */
+  .rail { display: none; }
+  @media (min-width: 1000px) {
+    .rail {
+      display: block;
+      position: sticky;
+      top: 56px;
+      align-self: start;
+      font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+      font-size: 12px;
+      line-height: 1.7;
+      border-top: 2px solid var(--ink);
+      padding-top: 14px;
+    }
+    .rail ol { list-style: none; margin: 0; padding: 0; counter-reset: r; }
+    .rail li { counter-increment: r; margin: 0 0 10px; }
+    .rail a {
+      color: var(--muted);
+      text-decoration: none;
+      display: grid;
+      grid-template-columns: 22px 1fr;
+      gap: 8px;
+      transition: color 0.15s ease;
+    }
+    .rail a::before { content: counter(r, decimal-leading-zero); color: var(--accent); }
+    .rail a:hover { color: var(--ink); }
+    .rail .meta {
+      margin-top: 22px;
+      padding-top: 14px;
+      border-top: 1px solid var(--hair);
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-size: 10.5px;
+    }
+    .rail .meta span { display: block; color: var(--ink-soft); letter-spacing: 0; text-transform: none; font-size: 12px; margin-top: 2px; }
+  }
+
+  main { min-width: 0; }
+
+  /* ---- masthead ---- */
+  .eyebrow {
+    font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent-ink);
+    margin: 0 0 18px;
+  }
+  h1 {
+    font-family: "Fraunces", Georgia, serif;
+    font-weight: 500;
+    font-size: clamp(2.1rem, 6vw, 3.4rem);
+    line-height: 1.06;
+    letter-spacing: -0.015em;
+    text-wrap: balance;
+    margin: 0 0 20px;
+  }
+  .standfirst {
+    font-size: clamp(1.05rem, 2.4vw, 1.28rem);
+    line-height: 1.5;
+    color: var(--ink-soft);
+    margin: 0 0 28px;
+    text-wrap: pretty;
+  }
+  .byline {
+    font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    font-size: 12px;
+    color: var(--muted);
+    border-top: 1px solid var(--hair);
+    border-bottom: 1px solid var(--hair);
+    padding: 12px 0;
+    margin: 0 0 44px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 20px;
+  }
+  .byline b { color: var(--ink-soft); font-weight: 500; }
+
+  h2 {
+    font-family: "Fraunces", Georgia, serif;
+    font-weight: 500;
+    font-size: clamp(1.5rem, 3.6vw, 1.95rem);
+    line-height: 1.15;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+    margin: 56px 0 6px;
+    scroll-margin-top: 32px;
+  }
+  h2 .n {
+    font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    font-size: 0.7em;
+    color: var(--accent);
+    font-weight: 400;
+    margin-right: 0.6em;
+    vertical-align: 0.15em;
+  }
+  h3 {
+    font-family: "Fraunces", Georgia, serif;
+    font-weight: 600;
+    font-size: 1.12rem;
+    margin: 32px 0 4px;
+    color: var(--ink);
+  }
+  .dek {
+    color: var(--muted);
+    font-style: italic;
+    margin: 0 0 20px;
+  }
+  p { margin: 0 0 18px; }
+  a { color: var(--accent-ink); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  strong { font-weight: 600; }
+  code, .mono {
+    font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    font-size: 0.82em;
+    background: var(--hair-soft);
+    padding: 0.12em 0.4em;
+    border-radius: 3px;
+    word-break: break-word;
+  }
+
+  ul, ol { margin: 0 0 18px; padding-left: 1.3em; }
+  li { margin: 0 0 8px; }
+  li::marker { color: var(--accent); }
+
+  /* ---- pull quote / hard truth ---- */
+  .truth {
+    margin: 28px 0;
+    padding: 4px 0 4px 22px;
+    border-left: 3px solid var(--accent);
+    font-family: "Fraunces", Georgia, serif;
+    font-size: 1.24rem;
+    line-height: 1.32;
+    font-weight: 500;
+    color: var(--ink);
+    text-wrap: pretty;
+  }
+  .truth span { display: block; font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); font-weight: 400; margin-bottom: 8px; }
+
+  /* ---- caveat block ---- */
+  .caveat {
+    margin: 24px 0;
+    border: 1px solid var(--hair);
+    border-left: 3px solid var(--warn);
+    background: var(--surface);
+    border-radius: 4px;
+    padding: 16px 20px;
+    font-size: 0.95rem;
+    line-height: 1.5;
+    box-shadow: var(--shadow);
+  }
+  .caveat .tag {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--warn);
+    display: block;
+    margin-bottom: 6px;
+  }
+  .caveat p:last-child { margin-bottom: 0; }
+
+  /* ---- recommendation block ---- */
+  .rx {
+    margin: 24px 0;
+    border: 1px solid var(--hair);
+    border-radius: 4px;
+    background: var(--surface);
+    padding: 4px 22px 4px;
+    box-shadow: var(--shadow);
+  }
+  .rx h3 { margin-top: 20px; display: flex; align-items: baseline; gap: 10px; }
+  .rx h3::before {
+    content: "DO";
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    background: var(--accent);
+    color: var(--surface);
+    padding: 3px 6px;
+    border-radius: 3px;
+    position: relative;
+    top: -2px;
+  }
+  .rx p:last-child { margin-bottom: 20px; }
+
+  /* ---- diagram ---- */
+  figure { margin: 32px 0; }
+  figure svg { width: 100%; height: auto; display: block; border-radius: 4px; }
+  figcaption {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11.5px;
+    color: var(--muted);
+    line-height: 1.5;
+    margin-top: 10px;
+    text-align: left;
+  }
+
+  /* ---- table ---- */
+  .tablewrap { overflow-x: auto; margin: 24px 0; border: 1px solid var(--hair); border-radius: 4px; box-shadow: var(--shadow); }
+  table { border-collapse: collapse; width: 100%; font-family: "IBM Plex Mono", monospace; font-size: 13px; background: var(--surface); }
+  caption {
+    caption-side: top;
+    text-align: left;
+    padding: 14px 16px 10px;
+    font-family: "Fraunces", Georgia, serif;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--ink);
+  }
+  th, td { padding: 9px 16px; text-align: left; border-bottom: 1px solid var(--hair-soft); }
+  thead th {
+    font-size: 10.5px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 500;
+    border-bottom: 1px solid var(--hair);
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .wc-row td { background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
+  tfoot td { font-size: 11px; color: var(--muted); border-top: 1px solid var(--hair); }
+
+  .divider {
+    border: none;
+    border-top: 1px solid var(--hair);
+    margin: 56px 0 0;
+  }
+  .endnote {
+    margin-top: 44px;
+    font-size: 0.9rem;
+    color: var(--muted);
+    line-height: 1.55;
+  }
+  .endnote code { font-size: 0.85em; }
+
+  .kicker {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent-ink);
+    margin: 0 0 6px;
+  }
+
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
+</style>
+
+<div class="wrap">
+  <nav class="rail" aria-label="Sections">
+    <ol>
+      <li><a href="#verdict">The verdict</a></li>
+      <li><a href="#two-layers">Two layers, one of them rigid</a></li>
+      <li><a href="#v2">What v2 actually fixes</a></li>
+      <li><a href="#edge">Your edge vs the model's edge</a></li>
+      <li><a href="#cadence">The cadence change</a></li>
+      <li><a href="#wildcard">This week: the Wildcard run</a></li>
+      <li><a href="#eo">The one real concept gap</a></li>
+      <li><a href="#not">What not to do</a></li>
+    </ol>
+    <div class="meta">
+      Prepared
+      <span>7 Sep 2026 &middot; after GW3</span>
+      Repo
+      <span>fpl_model @ main</span>
+    </div>
+  </nav>
+
+  <main>
+    <p class="eyebrow">Strategic briefing &middot; internal</p>
+    <h1>Keep the model. Change the cadence.</h1>
+    <p class="standfirst">You asked whether to replace the projection model or change how you play. The honest answer is neither is the real question &mdash; the model is sound, and most of the rigidity you feel lives in the decision policy wrapped around it, not the projections themselves. Two of the three things you need are already half-built in the uncommitted work.</p>
+    <p class="byline"><span><b>Context:</b> rank ~1M, outperforming template through GW3, zero transfers</span><span><b>Intent:</b> Wildcard soon, then roll 3 GW to bank free transfers</span><span><b>Horizon:</b> 5 Gameweeks</span></p>
+
+    <h2 id="verdict"><span class="n">01</span>The verdict</h2>
+    <p>Do not switch models. The Benchwarmers component base is an <em>explainable</em> projection engine &mdash; every xPts number decomposes into eleven auditable pieces (appearance, goals, assists, clean sheet, saves, cards, bonus, defensive contribution, and the fixture adjustments). That is a feature for projection and it is worth keeping. It is a liability only if you let its author's low-transfer, pattern-hunting <em>style</em> leak into your <em>cadence</em>. It has been leaking. That is fixable without touching the model.</p>
+    <p>Three moves, in priority order: <strong>(1)</strong> finish and run the in-season v2 update so the model can actually see the players you bought this season; <strong>(2)</strong> switch to a weekly review at a five-Gameweek horizon &mdash; which is exactly what your Wildcard plan needs anyway; <strong>(3)</strong> express "I will take variance to beat template" as a <em>decision objective</em>, never as a tweak to the xPts numbers.</p>
+
+    <h2 id="two-layers"><span class="n">02</span>Two layers, and only one of them is rigid</h2>
+    <p class="dek">The projection layer answers "how many points will this player score?" The decision layer answers "so what should I do?" They are different code and different problems.</p>
+
+    <figure>
+      <svg viewBox="0 0 640 340" role="img" aria-labelledby="difig-t difig-d">
+        <title id="difig-t">Where the rigidity lives</title>
+        <desc id="difig-d">Two stacked bands. The projection layer is marked sound. The decision layer holds the three rigid rules: review after GW3, one transfer per Gameweek, three-Gameweek frozen horizon.</desc>
+        <defs>
+          <style>
+            .lbl { font-family: "IBM Plex Mono", monospace; font-size: 12px; fill: var(--ink); }
+            .lbl-s { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; fill: var(--muted); letter-spacing: 0.04em; }
+            .head { font-family: "Fraunces", Georgia, serif; font-size: 16px; font-weight: 600; fill: var(--ink); }
+            .ok { fill: var(--accent); }
+          </style>
+        </defs>
+
+        <!-- projection band -->
+        <rect x="8" y="12" width="624" height="120" rx="6" fill="var(--surface)" stroke="var(--hair)"/>
+        <rect x="8" y="12" width="6" height="120" rx="3" fill="var(--accent)"/>
+        <text class="head" x="30" y="40">Projection layer</text>
+        <text class="lbl-s" x="30" y="60">baseline_pipeline.py &middot; 11 components &middot; frozen, immutable per run</text>
+        <text class="lbl" x="30" y="92">xG / xA &middot; minutes &middot; clean sheet &middot; saves &middot; cards &middot; bonus &middot; DefCon</text>
+        <text class="lbl-s ok" x="30" y="114">STATUS: sound. Beats a naive per-player average out of sample (small but stable).</text>
+
+        <!-- arrow -->
+        <path d="M320 132 L320 156" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#a)"/>
+        <marker id="a" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"/></marker>
+
+        <!-- decision band -->
+        <rect x="8" y="160" width="624" height="168" rx="6" fill="var(--surface)" stroke="var(--warn)"/>
+        <rect x="8" y="160" width="6" height="168" rx="3" fill="var(--warn)"/>
+        <text class="head" x="30" y="188">Decision layer</text>
+        <text class="lbl-s" x="30" y="208">decision/rolling.py &middot; decision/lineup.py &middot; the planner contract</text>
+
+        <g transform="translate(30,226)">
+          <rect x="0" y="0" width="580" height="26" rx="4" fill="var(--hair-soft)" stroke="var(--hair)"/>
+          <text class="lbl" x="12" y="17">&ldquo;Review the plan after the third Gameweek&rdquo;</text>
+          <text class="lbl-s" x="470" y="17">&larr; too slow</text>
+        </g>
+        <g transform="translate(30,258)">
+          <rect x="0" y="0" width="580" height="26" rx="4" fill="var(--hair-soft)" stroke="var(--hair)"/>
+          <text class="lbl" x="12" y="17">&ldquo;At most one transfer per Gameweek&rdquo;</text>
+          <text class="lbl-s" x="440" y="17">&larr; too timid</text>
+        </g>
+        <g transform="translate(30,290)">
+          <rect x="0" y="0" width="580" height="26" rx="4" fill="var(--hair-soft)" stroke="var(--hair)"/>
+          <text class="lbl" x="12" y="17">&ldquo;Exactly three frozen Gameweeks&rdquo;</text>
+          <text class="lbl-s" x="405" y="17">&larr; too short for a WC plan</text>
+        </g>
+      </svg>
+      <figcaption>The uncommitted Codex work loosens all three lines in the lower band: a 1&ndash;5&nbsp;GW horizon, atomic two-transfer bundles, and a weekly-review workflow. None of it changes a single xPts formula.</figcaption>
+    </figure>
+
+    <p class="truth"><span>Hard truth &middot; 01</span>The model was never the thing stopping you from being aggressive. A policy that says "one move, review in three weeks" was.</p>
+
+    <h2 id="v2"><span class="n">03</span>What the v2 update actually fixes</h2>
+    <p class="dek">Until this week, the in-season model scored every Gameweek off <em>last season's</em> per-90 rates.</p>
+    <p>Every in-season projection carried the flag <code>FROZEN_PREVIOUS_SEASON_PLAYER_RATES</code>. A player's 2026/27 form &mdash; their actual xG, xA, defensive contributions, saves across GW1&ndash;GW3 &mdash; never updated their rate inputs. That is the single biggest reason the model cannot "see" the new signings you bought on judgement: to the model, a player with no Premier League history last season is still a near-blank.</p>
+    <p><strong>In-season baseline v2 closes exactly this.</strong> It blends each player's current-season rate toward their prior with small-sample shrinkage (900 prior minutes &mdash; ten full matches &mdash; so one good game does not swing the projection). New signings with no usable history shrink toward the position-and-price cohort prior instead of getting their raw one-match rate. The historical prior is pinned by ID and the final event IDs are hashed into the run identity, so the update is fully auditable and old v1 projections are never rewritten.</p>
+
+    <div class="caveat">
+      <span class="tag">Status &middot; needs your sign-off to ship</span>
+      <p>The v2 code and the GW4&ndash;GW8 model runs already exist in the local database. The published <code>web/release.json</code> has now been regenerated from them (5-Gameweek, <code>inseason_baseline_v2</code>, health: <code>shadow</code>). It is still a research/shadow release &mdash; implementing an adaptive rate policy does not by itself prove it beats v1 out of sample. Treat v2 as a better-informed input, not a validated one.</p>
+    </div>
+
+    <h2 id="edge"><span class="n">04</span>Your edge and the model's edge are different sizes</h2>
+    <p>On the one honest backtest in the repo &mdash; a walk-forward replay of 2025/26, scoring each Gameweek from only its own prior weeks &mdash; the model beats a naive "just use each player's running average" predictor by:</p>
+    <ul>
+      <li><strong>MAE:</strong> ~0.019 points per player-fixture better (95% gameweek-cluster interval <span class="mono">[0.006, 0.035]</span> &mdash; excludes zero, so real, but small)</li>
+      <li><strong>RMSE:</strong> ~0.064 better <span class="mono">[0.042, 0.093]</span> &mdash; it mostly helps by being less wrong on the big misses</li>
+    </ul>
+    <p>That is a genuine but <em>modest</em> edge over the dumbest possible baseline. Meanwhile you are at rank ~1M, beating template on judgement, with no transfers. Read those two facts together:</p>
+    <p class="truth"><span>Hard truth &middot; 02</span>Your player evaluation is the sharper instrument. The model's job is to be the disciplined second opinion &mdash; the thing that says "your gut likes this, here is where the components disagree and by how much" &mdash; not the thing that decides.</p>
+    <p>This also tells you how to use it: when the model and your judgement <em>agree</em>, move with confidence. When they <em>disagree</em>, that is the signal to slow down and work out which of you is seeing something the other is not &mdash; a fixture, a role change, a minutes risk.</p>
+
+    <h2 id="cadence"><span class="n">05</span>The cadence change</h2>
+    <p class="dek">Adopt a weekly review at a five-Gameweek horizon. Keep the three-Gameweek wrapper only for backtest continuity.</p>
+    <p>The planner already supports this in the uncommitted work. Concretely:</p>
+    <ul>
+      <li><strong>Every week</strong>, refresh the release and re-score the next five Gameweeks &mdash; even when the planned action is "roll". A five-Gameweek decision window is a planning aid, not a commitment to ignore new evidence for five weeks.</li>
+      <li><strong>Future Gameweeks use their own fixtures</strong> but freeze appearance, rate, and team-strength inputs to the anchor. Every future row is flagged as such. This is a projection of "if nothing else changes", which is why you re-run it weekly.</li>
+      <li><strong>Two-transfer bundles are now evaluated</strong> where a single move checked in isolation would fail &mdash; a jointly funded upgrade, a club swap that briefly breaks the 3-per-club limit mid-transfer. The result is flagged <code>APPROXIMATE_BUNDLE_SHORTLIST</code> because it prunes to a proxy shortlist before exact scoring.</li>
+    </ul>
+
+    <h2 id="wildcard"><span class="n">06</span>This week: the Wildcard run</h2>
+    <p>Your stated plan &mdash; two free transfers now, Wildcard soon, then roll three Gameweeks to bank up to five FT &mdash; is exactly the scenario the new <code>compare_wildcard</code> path was built for. It returns three fully server-scored paths over the published horizon:</p>
+    <ol>
+      <li><strong>Hold</strong> &mdash; roll every week, bank the transfers.</li>
+      <li><strong>Use your free transfers</strong> &mdash; the best bounded roll / one-move / two-move path.</li>
+      <li><strong>Wildcard + roll</strong> &mdash; a Wildcard squad built for the five-Gameweek horizon, then a forced roll for three weeks, then free-transfer paths.</li>
+    </ol>
+    <p>Wildcard affordability uses your <em>actual</em> bank plus real sale proceeds; keeping a player you own costs their sale value as opportunity cost and preserves their real purchase and selling prices afterward. No reset to &pound;100m, no phantom sell-and-rebuy spread on players you keep.</p>
+
+    <div class="tablewrap">
+      <table>
+        <caption>Free-transfer trajectory &mdash; Wildcard at GW4, two FT banked</caption>
+        <thead>
+          <tr><th>Deadline</th><th>Planned action</th><th class="num">FT entering</th><th class="num">FT next GW</th></tr>
+        </thead>
+        <tbody>
+          <tr class="wc-row"><td>GW4</td><td>Wildcard</td><td class="num">2</td><td class="num">2</td></tr>
+          <tr><td>GW5</td><td>Roll</td><td class="num">2</td><td class="num">3</td></tr>
+          <tr><td>GW6</td><td>Roll</td><td class="num">3</td><td class="num">4</td></tr>
+          <tr><td>GW7</td><td>Roll</td><td class="num">4</td><td class="num">5</td></tr>
+          <tr><td>GW8</td><td>Review</td><td class="num">5</td><td class="num">&mdash;</td></tr>
+        </tbody>
+        <tfoot>
+          <tr><td colspan="4">The Wildcard deadline retains banked FT without granting another. Ordinary deadlines apply min(5, max(0, FT &minus; transfers) + 1). Source: the official saved-transfer rules through Wildcard / Free Hit.</td></tr>
+        </tfoot>
+      </table>
+    </div>
+
+    <div class="caveat">
+      <span class="tag">Read this before you play the chip</span>
+      <p>The comparison <em>assumes</em> the Wildcard is available and does <strong>not</strong> price the option value of keeping it for a later week &mdash; an injury crisis, a fixture swing, a price collapse. A small modelled gain for playing it now is <em>not</em> a recommendation to play it. If the "Wildcard + roll" path only edges out "use your free transfers" by a point or two over five Gameweeks, hold the chip.</p>
+    </div>
+
+    <div class="rx">
+      <h3>Set the run up like this</h3>
+      <p>Horizon <span class="mono">5</span>, Wildcard this Gameweek, <span class="mono">roll_after_wildcard = 3</span>. Start <span class="mono">terminal_ft_value</span> at <span class="mono">0</span>, then raise it to 1 and 2 and watch whether the ranking between the three paths changes. If it does not, the decision is robust. If a small assumed value for banked transfers is what flips it, you are deciding on an assumption, not on points &mdash; treat that as "too close to call, use judgement".</p>
+    </div>
+
+    <h2 id="eo"><span class="n">07</span>The one genuine concept gap: no ownership term</h2>
+    <p>You are beating template <em>because</em> you diverge from it. A pure expected-points optimiser, run to convergence, will quietly pull you back <em>toward</em> template &mdash; maximising mean points and matching the crowd are nearly the same objective once everyone owns the same high-xPts players.</p>
+    <p class="truth"><span>Hard truth &middot; 03</span>If you want the model to <em>support</em> your edge instead of eroding it, it needs an optional ownership-aware objective &mdash; and right now it does not have one.</p>
+    <p>The shape: rank moves not by raw xPts gain but by something like <span class="mono">xPts_gain + &lambda; &middot; (xPts_above_replacement) &middot; (1 &minus; effective_ownership)</span>, as a <strong>toggle</strong>, never the default, with raw xPts always shown beside it. This is on the roadmap (Sprint 6, "ownership/EO objectives") but unbuilt. It is the highest-value <em>new</em> feature for a manager in your position &mdash; more than any projection refinement.</p>
+
+    <h2 id="not"><span class="n">08</span>What not to do</h2>
+    <ul>
+      <li><strong>Do not switch to a black-box ML predictor.</strong> You would lose the eleven-component "why", and you do not have the multi-season prospective, labelled data to trust one. The repo's own principle &mdash; every extension must beat the baseline in backtesting &mdash; is correct.</li>
+      <li><strong>Do not make the model "more aggressive" by tuning xPts.</strong> That destroys the audit trail and does not actually change your decisions in a controlled way. Aggression belongs in the objective (the <code>terminal_ft_value</code> knob, a risk-adjusted ranking with a negative uncertainty weight), where you can dial it and see it.</li>
+      <li><strong>Do not hand projection authority to an LLM.</strong> Presentation layer or structured-input helper only.</li>
+      <li><strong>Do not build the 12&ndash;19 Gameweek branching solver.</strong> You have a Wildcard decision this week. A bounded five-Gameweek comparison is the right scope; the season-long stochastic planner is a much larger project with much less marginal value.</li>
+    </ul>
+
+    <hr class="divider">
+    <p class="endnote">
+      <span class="kicker">Provenance</span>
+      Figures from <code>docs/research/walk_forward_benchwarmers_2025_26_uncertainty.json</code> (model vs matched-naive, gameweek-cluster bootstrap). Free-transfer table from <code>docs/WILDCARD_FIVE_GAMEWEEK_PLANNER.md</code>. Layer diagram is a reading of <code>decision/rolling.py</code>, <code>decision/lineup.py</code>, and the planner contract as they stand on <code>main</code> plus the uncommitted work. This briefing is advice, not a validated result &mdash; the v2 projection policy and the weekly-review decision policy both still owe an out-of-sample evaluation before they can lose the research label.
+    </p>
+  </main>
+</div>

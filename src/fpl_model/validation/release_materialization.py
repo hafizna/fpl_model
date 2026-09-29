@@ -1,4 +1,4 @@
-"""Materialise and validate one complete in-season three-Gameweek release."""
+"""Materialise and validate one complete in-season Gameweek release."""
 
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ from fpl_model.ingest.fpl_snapshot import persist_fpl_snapshot
 from fpl_model.ingest.player_identity import import_player_identity_bridge
 from fpl_model.ingest.team_strength import (
     import_team_strength_history,
+    materialize_inseason_team_strength,
     materialize_preseason_team_strength,
 )
 from fpl_model.model.appearance_pipeline import materialize_inseason_appearance
@@ -68,6 +69,8 @@ def materialize_inseason_release(
     calibration_artifact_id: str,
     uncertainty_artifact_id: str,
     previous_effective_fixtures: float = 5.0,
+    team_strength_prior_matches: float = 5.0,
+    horizon_length: int = 5,
     allow_analytically_complete: bool = False,
     database_path: str | Path = DEFAULT_DATABASE_PATH,
     snapshot_raw_root: str | Path = DEFAULT_SNAPSHOT_RAW_ROOT,
@@ -82,8 +85,8 @@ def materialize_inseason_release(
     downstream quality flags.
     """
 
-    if not 2 <= target_gameweek <= 36:
-        raise ValueError("target_gameweek must be between 2 and 36 for a three-GW horizon")
+    if not 1 <= horizon_length <= 5 or not 2 <= target_gameweek <= 39 - horizon_length:
+        raise ValueError("target_gameweek/horizon must cover one to five GWs ending by GW38")
     if any(
         not value.strip()
         for value in (
@@ -154,12 +157,31 @@ def materialize_inseason_release(
         source_label=team_strength_source_label,
         database_path=database_path,
     )
-    strength = materialize_preseason_team_strength(
-        source_import_run_id=strength_import.import_run_id,
-        target_gameweek=target_gameweek,
-        source_ingestion_run_id=snapshot.ingestion_run_id,
-        database_path=database_path,
-    )
+    # GW2+ blends the frozen workbook prior toward the season's own team-level
+    # xG for/against (deadline-safe, final Gameweeks only). A team with no final
+    # current-season fixture keeps the preseason prior. GW1 has no such evidence.
+    if target_gameweek >= 2:
+        # The team-strength blend only reads final Gameweeks whose own deadline
+        # is before the target's, from live runs captured no later than the
+        # target deadline -- the same capture bound the appearance run uses, so
+        # the final live runs captured a few seconds after ``availability.as_of``
+        # still count while later captures cannot leak in.
+        strength = materialize_inseason_team_strength(
+            source_import_run_id=strength_import.import_run_id,
+            target_gameweek=target_gameweek,
+            current_season=current_season,
+            source_ingestion_run_id=snapshot.ingestion_run_id,
+            as_of=availability.as_of,
+            prior_matches=team_strength_prior_matches,
+            database_path=database_path,
+        )
+    else:
+        strength = materialize_preseason_team_strength(
+            source_import_run_id=strength_import.import_run_id,
+            target_gameweek=target_gameweek,
+            source_ingestion_run_id=snapshot.ingestion_run_id,
+            database_path=database_path,
+        )
     context = materialize_context_features(
         target_gameweek=target_gameweek,
         appearance_projection_run_id=appearance.projection_run_id,
@@ -174,6 +196,7 @@ def materialize_inseason_release(
     )
     horizon = materialize_frozen_projection_horizon(
         anchor_model_run_id=anchor.model_run_id,
+        horizon_length=horizon_length,
         database_path=database_path,
     )
 
@@ -215,6 +238,7 @@ def materialize_inseason_release(
         "schema_version": "inseason_release_materialization_v1",
         "inputs": {
             "target_gameweek": target_gameweek,
+            "horizon_length": horizon_length,
             "current_season": current_season,
             "previous_season": previous_season,
             "allow_analytically_complete": allow_analytically_complete,

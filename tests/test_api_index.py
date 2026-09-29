@@ -569,6 +569,72 @@ def test_recommend_lineups_rejects_a_negative_override_xpts(
     assert response.status_code == 422
 
 
+def test_recommend_lineups_scores_a_chip_and_hashes_chip_state_into_the_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    _use_release(tmp_path, monkeypatch)
+    fpl_ids = list(range(1, 16))
+
+    baseline = client.post("/api/recommend/lineups", json={"fpl_ids": fpl_ids}).json()
+    bench_boost = client.post(
+        "/api/recommend/lineups", json={"fpl_ids": fpl_ids, "chip": "bench_boost"}
+    ).json()
+    status_only = client.post(
+        "/api/recommend/lineups",
+        json={"fpl_ids": fpl_ids, "chip_status": {"wildcard": "used"}},
+    ).json()
+
+    first = baseline["lineups"][0]
+    bench_xpts = sum(row["xpts"] for row in first["bench"])
+    assert bench_boost["chip_scenario"] is True
+    assert bench_boost["plan_summary"]["chip"] == "bench_boost"
+    assert bench_boost["lineups"][0]["total_xpts"] == pytest.approx(
+        first["total_xpts"] + bench_xpts
+    )
+    assert status_only["chip_status"]["wildcard"] == "used"
+    assert status_only["cumulative_xpts"] == pytest.approx(baseline["cumulative_xpts"])
+    # Chip state is part of the hashed request, so the receipt changes with it.
+    decision_ids = {
+        row["decision_receipt"]["decision_id"] for row in (baseline, bench_boost, status_only)
+    }
+    assert len(decision_ids) == 3
+
+
+def test_recommend_endpoints_reject_playing_a_chip_marked_used(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    _use_release(tmp_path, monkeypatch)
+    body = {
+        "fpl_ids": list(range(1, 16)),
+        "chip": "triple_captain",
+        "chip_status": {"triple_captain": "used"},
+    }
+
+    lineups = client.post("/api/recommend/lineups", json=body)
+    transfers = client.post("/api/recommend/transfers", json=body)
+    unknown = client.post(
+        "/api/recommend/lineups", json={"fpl_ids": list(range(1, 16)), "chip": "double_up"}
+    )
+
+    assert lineups.status_code == 422
+    assert "marked used" in lineups.json()["detail"]
+    assert transfers.status_code == 422
+    assert unknown.status_code == 422
+
+
+@pytest.mark.parametrize("route", ["/api/recommend/transfers", "/api/recommend/wildcard"])
+def test_malformed_transfer_scan_switch_is_a_controlled_503(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, route: str
+):
+    _use_release(tmp_path, monkeypatch)
+    monkeypatch.setenv("FPL_TRANSFER_SCAN_ENABLED", "maybe")
+
+    response = client.post(route, json={"fpl_ids": list(range(1, 16))})
+
+    assert response.status_code == 503
+    assert "FPL_TRANSFER_SCAN_ENABLED" in response.json()["detail"]
+
+
 def test_transfer_scan_can_be_disabled_by_operator(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):

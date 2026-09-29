@@ -9,6 +9,7 @@ import time
 import uuid
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 import requests
 from fastapi import FastAPI, HTTPException, Request
@@ -26,9 +27,11 @@ from fpl_model.webapp.alpha_access import (
 from fpl_model.webapp.alpha_operations import AlphaOperationsConfig
 from fpl_model.webapp.decision_receipt import attach_decision_receipt
 from fpl_model.webapp.service import (
+    ChipPlan,
     CurrentSquadSetup,
     PendingTransfer,
     RoleScenarioOverride,
+    compare_web_wildcard,
     load_web_bootstrap,
     recommend_web_lineups,
     recommend_web_transfers,
@@ -134,6 +137,9 @@ class PendingTransferRequest(BaseModel):
         )
 
 
+ChipName = Literal["wildcard", "free_hit", "bench_boost", "triple_captain"]
+
+
 class SquadRequest(BaseModel):
     fpl_ids: list[int] = Field(min_length=15, max_length=15)
     bank_tenths: int = Field(default=0, ge=0)
@@ -142,6 +148,25 @@ class SquadRequest(BaseModel):
     role_scenario_overrides: list[RoleScenarioOverrideRequest] = Field(default_factory=list)
     current_setup: CurrentSetupRequest | None = None
     pending_transfers: list[PendingTransferRequest] = Field(default_factory=list)
+    # Browser-held chip state: the chip tried for the first horizon Gameweek
+    # and which chips are already spent this half-season. Part of the hashed
+    # request, so decision receipts stay reproducible.
+    chip: ChipName | None = None
+    chip_status: dict[ChipName, Literal["available", "used"]] = Field(default_factory=dict)
+
+    def to_chip_plan(self) -> ChipPlan:
+        return ChipPlan(
+            active=self.chip,
+            used=frozenset(chip for chip, status in self.chip_status.items() if status == "used"),
+        )
+
+
+class WildcardRequest(SquadRequest):
+    horizon_length: int = Field(default=5, ge=2, le=5)
+    roll_after_wildcard: int = Field(default=3, ge=0, le=4)
+    terminal_ft_value: float = Field(default=0.0, ge=0.0, le=10.0, allow_inf_nan=False)
+    locked_fpl_ids: list[int] = Field(default_factory=list, max_length=15)
+    excluded_fpl_ids: list[int] = Field(default_factory=list)
 
 
 expose_api_docs = _env_bool(
@@ -538,6 +563,7 @@ def lineups(request: SquadRequest) -> dict[str, object]:
             pending_transfers=tuple(
                 row.to_transfer() for row in request.pending_transfers
             ),
+            chips=request.to_chip_plan(),
             current_setup=(
                 None if request.current_setup is None else request.current_setup.to_setup()
             ),
@@ -553,14 +579,20 @@ def lineups(request: SquadRequest) -> dict[str, object]:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@app.post("/api/recommend/transfers")
-def transfers(request: SquadRequest, top_n: int = 8) -> dict[str, object]:
+def _require_transfer_scan_enabled() -> None:
+    """Operator switch for the expensive scans; a malformed value is a 503, not a 500."""
+
     try:
         transfer_scan_enabled = _env_bool("FPL_TRANSFER_SCAN_ENABLED", default=True)
     except ValueError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if not transfer_scan_enabled:
         raise HTTPException(status_code=503, detail="transfer scan is disabled by the operator")
+
+
+@app.post("/api/recommend/transfers")
+def transfers(request: SquadRequest, top_n: int = 8) -> dict[str, object]:
+    _require_transfer_scan_enabled()
     try:
         payload = recommend_web_transfers(
             tuple(request.fpl_ids),
@@ -573,6 +605,7 @@ def transfers(request: SquadRequest, top_n: int = 8) -> dict[str, object]:
             pending_transfers=tuple(
                 row.to_transfer() for row in request.pending_transfers
             ),
+            chips=request.to_chip_plan(),
             top_n=max(1, min(top_n, 20)),
             database_path=_database_path(),
             release_path=_release_path(),
@@ -582,6 +615,27 @@ def transfers(request: SquadRequest, top_n: int = 8) -> dict[str, object]:
             request=request,
             decision_type="single_transfer_scan",
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/recommend/wildcard")
+def wildcard(request: WildcardRequest) -> dict[str, object]:
+    _require_transfer_scan_enabled()
+    if request.pending_transfers:
+        raise HTTPException(status_code=422, detail="Clear staged transfers to compare against your committed squad")
+    try:
+        chips = request.to_chip_plan()
+        payload = compare_web_wildcard(
+            tuple(request.fpl_ids), bank_tenths=request.bank_tenths,
+            free_transfers=request.free_transfers, selling_prices=request.selling_prices,
+            horizon_length=request.horizon_length, roll_after_wildcard=request.roll_after_wildcard,
+            terminal_ft_value=request.terminal_ft_value, locked_fpl_ids=tuple(request.locked_fpl_ids),
+            excluded_fpl_ids=tuple(request.excluded_fpl_ids),
+            role_scenario_overrides=tuple(row.to_override() for row in request.role_scenario_overrides),
+            chips=chips, database_path=_database_path(), release_path=_release_path(),
+        )
+        return _attach_and_log_receipt(payload, request=request, decision_type="wildcard_comparison")
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

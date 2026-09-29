@@ -113,9 +113,9 @@ def _pool_by_id(pool: GameweekProjectionPool) -> dict[int, TransferTarget]:
 def _validate_pools(
     pools: tuple[GameweekProjectionPool, ...],
 ) -> tuple[tuple[dict[int, TransferTarget], ...], set[int]]:
-    if len(pools) != 3:
-        raise ValueError("initial-squad optimizer requires exactly three Gameweek pools")
-    expected = tuple(range(pools[0].gameweek, pools[0].gameweek + 3))
+    if not 1 <= len(pools) <= 5:
+        raise ValueError("initial-squad optimizer requires one to five Gameweek pools")
+    expected = tuple(range(pools[0].gameweek, pools[0].gameweek + len(pools)))
     actual = tuple(pool.gameweek for pool in pools)
     if actual != expected:
         raise ValueError(f"projection pools must be consecutive, expected {expected}, got {actual}")
@@ -614,7 +614,10 @@ def optimize_initial_squad(
         )
     )
     complete_squads_evaluated = len(plans)
-    if plan_future_transfers:
+    # A one-Gameweek horizon has no later Gameweek to plan transfers into, so
+    # the frozen-squad ranking already is the planned answer.
+    plan_transfers = plan_future_transfers and len(pools) > 1
+    if plan_transfers:
         plans = [
             _evaluate_planned_transfers(
                 plan,
@@ -643,6 +646,6 @@ def optimize_initial_squad(
         complete_squads_evaluated=complete_squads_evaluated,
         beam_width=beam_width,
         candidates_per_position_per_lens=candidates_per_position_per_lens,
-        planned_transfers=plan_future_transfers,
-        planned_transfer_shortlist=(planned_transfer_shortlist if plan_future_transfers else 0),
+        planned_transfers=plan_transfers,
+        planned_transfer_shortlist=(planned_transfer_shortlist if plan_transfers else 0),
     )

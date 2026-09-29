@@ -2,9 +2,10 @@
 
 ## Decision policy
 
-The intended operating cadence is to create one plan for three consecutive Gameweeks and normally
-review it after the third. The plan contains an action, lineup, bench, captain, and vice-captain for
-each Gameweek. It may be regenerated earlier only when new evidence creates an emergency trigger:
+The legacy three-Gameweek wrapper remains available. The active workflow now supports five GWs
+and reviews fresh evidence every week, including when the planned action is roll. See
+[Wildcard and five-GW planning](WILDCARD_FIVE_GAMEWEEK_PLANNER.md). The plan contains an action,
+lineup, bench, captain, and vice-captain for each Gameweek. Reasons to reconsider a planned roll include:
 
 - confirmed injury or material availability downgrade;
 - suspension or red card;
@@ -16,7 +17,8 @@ confirmatory protocol, which remains an upstream model evaluation.
 
 ## Projection contract
 
-The command requires exactly three consecutive model runs. They must:
+The legacy command requires exactly three consecutive model runs. The general Python planner and
+the Wildcard API support longer published horizons. Runs must:
 
 - be completed no later than the GW N deadline and target GW N, N+1, and N+2;
 - use the official FPL ingestion pinned by the squad snapshot;
@@ -50,8 +52,10 @@ bank, player selling values, and free transfers.
 - A purchased player enters at the frozen current price.
 - Every post-transfer squad must satisfy position and club constraints.
 
-Active chips are rejected. Prices are frozen through the horizon. At most one transfer is allowed
-per GW in this version.
+The legacy wrapper rejects active chips and allows one transfer per GW. The general planner can
+evaluate atomic two-transfer bundles; the separate Wildcard comparison handles WC and its FT
+transition. Prices are frozen through the horizon. Optional terminal FT value is a sensitivity
+assumption and is reported separately from cumulative net xPts.
 
 ## Search method
 

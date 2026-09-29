@@ -1,11 +1,9 @@
 """Materialize a deadline-safe current-season player-rate update.
 
-P0 (`README.md`'s "Production critical path") asks for a current-season
-player-rate update from final official xG, xA, DefCon, saves, cards, BPS, and
-minutes, with small-sample shrinkage and no retrospective post-match xP
-leakage. `baseline_pipeline.py`'s in-season path currently still consumes only
-the frozen previous-season `player_rate_history` (flagged
-`FROZEN_PREVIOUS_SEASON_PLAYER_RATES`) -- this module closes that gap.
+The in-season baseline consumes these xG/xA and DefCon posteriors. Saves
+are additionally shrunk against its existing own-player/cohort rate there;
+cards and bonus remain explicit historical priors. Integrated v2 runs pin the
+historical rate ID and hash the snapshot, cutoff and final event IDs.
 
 Deadline safety: a row is built ONLY from `fpl_event_live_run` entries that
 were already FINAL (`event_finished AND data_checked`) as of this run's own
@@ -17,8 +15,7 @@ completed Gameweek's own final outcome can only enter a LATER Gameweek's rate
 update, never the projection that predicted it.
 
 Shrinkage: each per-90 rate is blended toward the SAME player's own
-previous-season rate (the latest `player_rate_history` row for that
-`player_code`), weighted by `SHRINKAGE_PRIOR_MINUTES` --
+previous-season rate (the pinned `player_rate_history` run), weighted by `SHRINKAGE_PRIOR_MINUTES` --
 
     blended = (current_minutes * current_rate + K * prior_rate)
               / (current_minutes + K)
@@ -38,9 +35,10 @@ not duplicate or compete with that mechanism.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 import duckdb
@@ -89,6 +87,7 @@ def materialize_current_season_rates(
     as_of_gameweek: int,
     as_of: datetime,
     database_path: str | Path = DEFAULT_DATABASE_PATH,
+    previous_rate_run_id: str | None = None,
 ) -> CurrentSeasonRateRunResult:
     """Materialize one deadline-safe, shrunk current-season rate snapshot.
 
@@ -117,16 +116,34 @@ def materialize_current_season_rates(
               AND event_finished AND data_checked
               AND captured_at <= ?
             QUALIFY row_number() OVER (
-                PARTITION BY gameweek ORDER BY captured_at DESC
+                PARTITION BY gameweek ORDER BY captured_at DESC, live_run_id DESC
             ) = 1
             """,
             [source_ingestion_run_id, season, as_of_gameweek, as_of],
         ).fetchall()
 
+        # Pin the exact historical prior selected by the baseline. Legacy callers
+        # retain their original selection, but integrated runs never select latest.
+        pinned_prior = previous_rate_run_id
+        if pinned_prior is None:
+            prior = connection.execute(
+                "SELECT r.rate_run_id FROM player_rate_history_run r JOIN player_fixture_history_import_run h ON h.import_run_id = r.source_import_run_id WHERE h.source_committed_at <= ? AND h.imported_at <= ? ORDER BY r.created_at DESC, r.rate_run_id DESC LIMIT 1",
+                [as_of, as_of],
+            ).fetchone()
+            pinned_prior = str(prior[0]) if prior else ""
+        elif connection.execute("SELECT 1 FROM player_rate_history_run r JOIN player_fixture_history_import_run h ON h.import_run_id = r.source_import_run_id WHERE r.rate_run_id = ? AND h.source_committed_at <= ? AND h.imported_at <= ?", [pinned_prior, as_of, as_of]).fetchone() is None:
+            raise ValueError("unknown or future-dated previous rate run")
+        policy = POLICY_VERSION
+        if previous_rate_run_id is not None:
+            identity = json.dumps([source_ingestion_run_id, season, as_of_gameweek,
+                                   as_of.astimezone(UTC).isoformat(), pinned_prior, sorted(final_runs)], default=str)
+            policy = "current_season_rate_shrinkage_v2_" + hashlib.sha256(identity.encode()).hexdigest()[:16]
         rate_run_id = (
             f"current_season_rates_gw{as_of_gameweek}_"
             f"{as_of.strftime('%Y%m%dT%H%M%SZ')}"
         )
+        if previous_rate_run_id is not None:
+            rate_run_id = policy
         existing = connection.execute(
             "SELECT status, player_rows FROM current_season_player_rate_run WHERE rate_run_id = ?",
             [rate_run_id],
@@ -177,7 +194,7 @@ def materialize_current_season_rates(
                     as_of_gameweek,
                     as_of,
                     SHRINKAGE_PRIOR_MINUTES,
-                    POLICY_VERSION,
+                    policy,
                 ],
             )
             return CurrentSeasonRateRunResult(
@@ -218,33 +235,22 @@ def materialize_current_season_rates(
                        long_form_expected_goals, long_form_expected_assists,
                        long_form_minutes
                 FROM player_rate_history
-                WHERE rate_run_id = (
-                    SELECT rate_run_id FROM player_rate_history_run
-                    ORDER BY created_at DESC, rate_run_id DESC LIMIT 1
-                )
+                WHERE rate_run_id = ?
                 ORDER BY player_code
-                """
+                """, [pinned_prior]
             ).fetchall()
         }
-        # DefCon/saves have no equivalent previous-season per-player rate in
-        # player_rate_history's own long-form columns above and beyond the
-        # long-form minutes already read there, so their own prior uses the
-        # SAME long-form-minutes denominator against player_rate_history's
-        # own long_form_defensive_contribution -- read separately below to
-        # avoid overloading the 3-tuple above.
+        # DefCon has its own exposure window, independent of the xG denominator.
         secondary_prior_rows = {
             int(row[0]): (float(row[1]), float(row[2]))
             for row in connection.execute(
                 """
                 SELECT DISTINCT ON (player_code) player_code,
-                       long_form_defensive_contribution, long_form_minutes
+                       long_form_defensive_contribution, long_form_defcon_minutes
                 FROM player_rate_history
-                WHERE rate_run_id = (
-                    SELECT rate_run_id FROM player_rate_history_run
-                    ORDER BY created_at DESC, rate_run_id DESC LIMIT 1
-                )
+                WHERE rate_run_id = ?
                 ORDER BY player_code
-                """
+                """, [pinned_prior]
             ).fetchall()
         }
         # player_rate_history has no per-player saves rate column at all
@@ -265,7 +271,7 @@ def materialize_current_season_rates(
                 as_of_gameweek,
                 as_of,
                 SHRINKAGE_PRIOR_MINUTES,
-                POLICY_VERSION,
+                policy,
                 len(current_rows),
             ],
         )

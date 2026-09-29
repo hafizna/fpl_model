@@ -5,6 +5,19 @@ const DEFAULT_SQUAD = [
   194, 379, 165,
 ];
 
+// Chip labels and copy only -- every chip's points effect is scored by the
+// Python service (`chip_effect` / `plan_summary`), never in this file.
+const CHIPS = {
+  wildcard: { label: "Wildcard", note: "Unlimited free transfers; the new squad is kept.", changesTransfers: true },
+  free_hit: { label: "Free Hit", note: "Unlimited free transfers for this Gameweek; the squad then reverts.", changesTransfers: true },
+  bench_boost: { label: "Bench Boost", note: "All four bench players score this Gameweek." },
+  triple_captain: { label: "Triple Captain", note: "Your captain scores three times instead of twice." },
+};
+
+function normalizeChipStatus(value) {
+  return Object.fromEntries(Object.keys(CHIPS).map((chip) => [chip, value?.[chip] === "used" ? "used" : "available"]));
+}
+
 function readStoredJson(key, fallback) {
   try {
     const value = JSON.parse(localStorage.getItem(key) || "null");
@@ -21,7 +34,7 @@ function loadPlan() {
     selling_prices: readStoredJson("touchline-selling-prices", {}),
     selling_price_is_estimated: readStoredJson("touchline-selling-estimated", false),
     current_setup: readStoredJson("touchline-current-setup", null),
-    horizon_length: Math.max(1, Math.min(5, Number(localStorage.getItem("touchline-horizon") || 3) || 3)),
+    horizon_length: Math.max(1, Math.min(5, Number(localStorage.getItem("touchline-horizon") || 5) || 3)),
     risk_profile: localStorage.getItem("touchline-risk-profile") || "balanced",
   };
   const source = stored && typeof stored === "object" ? stored : legacy;
@@ -33,9 +46,13 @@ function loadPlan() {
     selling_price_is_estimated: Boolean(source.selling_price_is_estimated),
     current_setup: source.current_setup || null,
     pending_transfers: Array.isArray(source.pending_transfers) ? source.pending_transfers : [],
-    horizon_length: Math.max(1, Math.min(5, Number(source.horizon_length || legacy.horizon_length) || 3)),
+    horizon_length: Math.max(1, Math.min(5, Number(source.horizon_length || legacy.horizon_length) || 5)),
     risk_profile: source.risk_profile || legacy.risk_profile,
+    chip_status: normalizeChipStatus(source.chip_status),
+    chip: null,
   };
+  // A stored chip survives reload only while it is known and still available.
+  if (CHIPS[source.chip] && plan.chip_status[source.chip] !== "used") plan.chip = source.chip;
   localStorage.setItem("touchline-plan", JSON.stringify(plan));
   return plan;
 }
@@ -77,6 +94,8 @@ function requestBody() {
     role_scenario_overrides: state.roleScenarioOverrides,
     current_setup: state.plan.current_setup,
     pending_transfers: state.plan.pending_transfers,
+    chip: state.plan.chip,
+    chip_status: state.plan.chip_status,
   };
 }
 
@@ -208,6 +227,7 @@ function renderPlanningControls() {
     renderPlanningControls();
     renderTransfers();
   }));
+  renderWildcardControls();
 }
 
 function renderSetupSummary() {
@@ -215,7 +235,7 @@ function renderSetupSummary() {
   if (!container) return;
   const teamName = state.teamProfile?.name;
   const squadCount = state.plan.squad.filter((id) => playerById(id)).length;
-  container.innerHTML = `<div><span>Workspace</span><strong>${teamName || "Default squad"}</strong><small>${squadCount}/15 players loaded · ${state.plan.risk_profile} stance · ${state.plan.horizon_length} GW visible</small></div><button type="button" class="button secondary" id="setup-settings">Adjust settings</button>`;
+  container.innerHTML = `<div><span>Workspace</span><strong>${teamName || "Default squad"}</strong><small>${squadCount}/15 players loaded · ${state.plan.risk_profile} stance · ${state.plan.horizon_length} GW visible${state.plan.chip ? ` · ${CHIPS[state.plan.chip].label} active` : ""}</small></div><button type="button" class="button secondary" id="setup-settings">Adjust settings</button>`;
   $("#setup-settings")?.addEventListener("click", () => navigateTo("settings"));
 }
 
@@ -283,10 +303,85 @@ function renderSquadEditor() {
     });
   });
   renderPendingTransfers();
+  renderChipPanel();
 }
 
-function playerCard(player, captainId, viceId) {
-  const badge = player.fpl_id === captainId ? "C" : player.fpl_id === viceId ? "V" : "";
+function chipGameweekLabel() {
+  const gameweek = publishedGameweeks()[0];
+  return gameweek ? `GW${gameweek}` : "this Gameweek";
+}
+
+function renderChipPanel() {
+  const container = $("#chip-options");
+  if (!container) return;
+  const active = state.plan.chip;
+  const option = (key, label, note, { used = false, changesTransfers = false } = {}) => `<div class="chip-row ${changesTransfers ? "transfer-chip" : ""} ${active === key || (!active && !key) ? "active" : ""} ${used ? "used" : ""}">
+      <label><input type="radio" name="active-chip" value="${key}" ${active === key || (!active && !key) ? "checked" : ""} ${used ? "disabled" : ""}><span><strong>${label}</strong><small>${note}</small></span></label>
+      ${key ? `<button type="button" class="chip-status" data-chip-status="${key}" aria-pressed="${used}" aria-label="${label} used this half-season">${used ? "Used" : "Available"}</button>` : ""}
+    </div>`;
+  container.innerHTML = option("", "No chip", `Score ${chipGameweekLabel()} without a chip.`)
+    + Object.entries(CHIPS).map(([key, chip]) => {
+      const used = state.plan.chip_status[key] === "used";
+      return option(key, chip.label, used ? "Marked used this half-season." : chip.note, { used, changesTransfers: chip.changesTransfers });
+    }).join("");
+  $("#chip-note").textContent = active
+    ? `${CHIPS[active].label} is a what-if for ${chipGameweekLabel()}. The squad rating stays chip-free.`
+    : `Try one available chip for ${chipGameweekLabel()}. Mark chips you have already played as used.`;
+  container.querySelectorAll('input[name="active-chip"]').forEach((input) => input.addEventListener("change", () => setActiveChip(input.value || null)));
+  container.querySelectorAll("[data-chip-status]").forEach((button) => button.addEventListener("click", () => toggleChipStatus(button.dataset.chipStatus)));
+  renderWildcardControls();
+}
+
+async function setActiveChip(chip) {
+  if (chip && state.plan.chip_status[chip] === "used") return;
+  if (state.plan.chip === chip) return;
+  state.plan.chip = chip;
+  persistPlan();
+  renderChipPanel();
+  resetTransfersView(chip
+    ? `${CHIPS[chip].label} is now active for ${chipGameweekLabel()} — re-scan to compare moves with the chip played.`
+    : "Chip cleared — re-scan to compare moves without a chip.");
+  await runLineups();
+}
+
+async function toggleChipStatus(chip) {
+  if (!CHIPS[chip]) return;
+  const nowUsed = state.plan.chip_status[chip] !== "used";
+  state.plan.chip_status[chip] = nowUsed ? "used" : "available";
+  const clearedActive = nowUsed && state.plan.chip === chip;
+  if (clearedActive) state.plan.chip = null;
+  persistPlan();
+  renderChipPanel();
+  if (clearedActive) resetTransfersView(`${CHIPS[chip].label} marked used, so it is no longer active — re-scan to compare moves without it.`);
+  await runLineups();
+}
+
+// The server compares a Wildcard over 2+ Gameweeks and needs the post-Wildcard
+// roll to end inside the visible horizon; keep the inputs inside that contract.
+function wildcardRollLimit() {
+  return Math.max(0, state.plan.horizon_length - 1);
+}
+
+function renderWildcardControls() {
+  const button = $("#run-wildcard");
+  const roll = $("#wc-roll");
+  if (!button || !roll) return;
+  const used = state.plan.chip_status.wildcard === "used";
+  const tooShort = state.plan.horizon_length < 2;
+  const limit = wildcardRollLimit();
+  roll.max = String(limit);
+  roll.value = String(Math.max(0, Math.min(limit, Math.floor(Number(roll.value) || 0))));
+  roll.disabled = tooShort;
+  button.disabled = used || tooShort;
+  $("#wildcard-status").textContent = used
+    ? "Your Wildcard is marked used for this half-season. Mark it available in the Chips panel to compare."
+    : tooShort
+      ? "A Wildcard comparison needs at least two visible Gameweeks. Widen the horizon in Settings."
+      : "";
+}
+
+function playerCard(player, captainId, viceId, captainBadge = "C") {
+  const badge = player.fpl_id === captainId ? captainBadge : player.fpl_id === viceId ? "V" : "";
   return `<article class="player-card ${player.position.toLowerCase()}">
     ${badge ? `<span class="captain-badge">${badge}</span>` : ""}
     <span class="shirt">${player.team_id}</span>
@@ -309,7 +404,14 @@ function pendingTransferLabel(row) {
 
 function renderPendingTransfers() {
   const pending = state.plan.pending_transfers;
-  const markup = pending.length === 0 ? "" : `<div class="pending-heading"><span>Staged transfers (${pending.length})</span><span>Not committed</span></div><div class="pending-list">${pending.map((row, index) => `<span class="pending-chip">${pendingTransferLabel(row)}<button type="button" data-remove-pending="${index}" aria-label="Remove staged transfer ${pendingTransferLabel(row)}">×</button></span>`).join("")}</div><div class="pending-actions"><small>Lineup and outlook already include these moves.</small><button type="button" class="button primary" data-commit-pending ${state.lineups?.plan_summary ? "" : "disabled"}>Commit to squad</button></div>`;
+  const summary = state.lineups?.plan_summary;
+  const commitBlocked = summary?.commit_allowed === false;
+  const actionNote = commitBlocked
+    ? `Free Hit moves apply to GW${summary.squad_reverts_after_gameweek} only and the squad reverts, so there is nothing to commit.`
+    : state.plan.chip === "wildcard"
+      ? "No hits while Wildcard is active. Committing marks your Wildcard used."
+      : "Lineup and outlook already include these moves.";
+  const markup = pending.length === 0 ? "" : `<div class="pending-heading"><span>Staged transfers (${pending.length})</span><span>Not committed</span></div><div class="pending-list">${pending.map((row, index) => `<span class="pending-chip">${pendingTransferLabel(row)}<button type="button" data-remove-pending="${index}" aria-label="Remove staged transfer ${pendingTransferLabel(row)}">×</button></span>`).join("")}</div><div class="pending-actions"><small>${actionNote}</small><button type="button" class="button primary" data-commit-pending ${summary && !commitBlocked ? "" : "disabled"}>Commit to squad</button></div>`;
   $$("#squad-pending-transfers, #transfers-pending-transfers").forEach((container) => {
     container.innerHTML = markup;
     container.querySelectorAll("[data-remove-pending]").forEach((button) => button.addEventListener("click", () => removePendingTransfer(Number(button.dataset.removePending))));
@@ -358,19 +460,28 @@ async function stagePath(path) {
 
 async function commitPendingTransfers() {
   const summary = state.lineups?.plan_summary;
-  if (!summary || state.plan.pending_transfers.length === 0) return;
+  if (!summary || summary.commit_allowed === false || state.plan.pending_transfers.length === 0) return;
+  const playedWildcard = summary.chip === "wildcard";
   state.plan.squad = summary.effective_fpl_ids;
   state.plan.bank_tenths = summary.effective_bank_tenths;
   state.plan.free_transfers = summary.effective_free_transfers;
   state.plan.selling_prices = summary.effective_selling_prices;
   state.plan.pending_transfers = [];
   state.plan.current_setup = null;
+  if (playedWildcard) {
+    // Committing a Wildcard rebuild spends the chip; say so rather than
+    // leaving it silently active.
+    state.plan.chip_status.wildcard = "used";
+    state.plan.chip = null;
+  }
   localStorage.removeItem("touchline-current-setup");
   persistPlan();
   $("#bank").value = (state.plan.bank_tenths / 10).toFixed(1);
   $("#free-transfers").value = String(state.plan.free_transfers);
   renderSquadEditor();
-  resetTransfersView("Transfer committed — re-scan to compare from the committed squad.");
+  resetTransfersView(playedWildcard
+    ? "Wildcard committed and marked used — free transfers were preserved. Re-scan to compare from the new squad."
+    : "Transfer committed — re-scan to compare from the committed squad.");
   await runLineups();
 }
 
@@ -458,16 +569,27 @@ function renderWeekly() {
     net_xpts_vs_holding: 0,
   };
   const planDelta = Number(planSummary.net_xpts_vs_holding || 0);
-  $("#plan-header").innerHTML = `<span class="plan-title">Plan for GW${planSummary.gameweek}</span><div><span>Formation</span><strong>${planSummary.formation}</strong></div><div><span>Captain</span><strong>${planSummary.captain.name}</strong></div><div><span>Staged transfers</span><strong>${planSummary.staged_transfer_count}</strong></div><div class="plan-delta"><span>Net xPts vs holding</span><strong class="${planDelta >= 0 ? "positive" : "negative"}">${planDelta >= 0 ? "+" : ""}${points(planDelta)}</strong></div>`;
+  const chipEffect = Number(planSummary.chip_effect_xpts || 0);
+  const chipCell = planSummary.chip
+    ? `<div class="plan-chip"><span>Chip</span><strong class="chip-badge">${planSummary.chip_label}</strong>${chipEffect ? `<small>+${points(chipEffect)} xPts</small>` : ""}</div>`
+    : "";
+  const hitCell = planSummary.pending_hit_cost ? `<div><span>Hits</span><strong class="negative">−${planSummary.pending_hit_cost}</strong></div>` : "";
+  const revertNote = planSummary.squad_reverts_after_gameweek
+    ? `<p class="plan-note">Free Hit squad for GW${planSummary.squad_reverts_after_gameweek} only; later Gameweeks use your committed squad.</p>`
+    : "";
+  $("#plan-header").innerHTML = `<span class="plan-title">Plan for GW${planSummary.gameweek}</span><div><span>Formation</span><strong>${planSummary.formation}</strong></div><div><span>Captain</span><strong>${planSummary.captain.name}</strong></div>${chipCell}<div><span>Staged transfers</span><strong>${planSummary.staged_transfer_count}</strong></div>${hitCell}<div class="plan-delta"><span>Net xPts vs holding</span><strong class="${planDelta >= 0 ? "positive" : "negative"}">${planDelta >= 0 ? "+" : ""}${points(planDelta)}</strong></div>${revertNote}`;
   renderSensitivityBanner(lineup.role_scenario_sensitivity, lineup.gameweek);
   renderMarginalChanges(lineup);
+  const chip = lineup.chip_effect?.chip;
+  const captainBadge = chip === "triple_captain" ? "TC" : "C";
   const rows = ["GK", "DEF", "MID", "FWD"].map((position) => {
     const players = lineup.starters.filter((player) => player.position === position);
-    return `<div class="pitch-line ${position.toLowerCase()}">${players.map((player) => playerCard(player, lineup.captain.fpl_id, lineup.vice_captain.fpl_id)).join("")}</div>`;
+    return `<div class="pitch-line ${position.toLowerCase()}">${players.map((player) => playerCard(player, lineup.captain.fpl_id, lineup.vice_captain.fpl_id, captainBadge)).join("")}</div>`;
   });
   $("#pitch").classList.remove("skeleton");
   $("#pitch").innerHTML = rows.join("");
-  $("#bench").innerHTML = `<div class="bench-title">Bench order</div>${lineup.bench.map((player, index) => `<div class="bench-player"><span>${index || "GK"}</span><strong>${player.name}</strong><small>${points(player.xpts)} xPts</small></div>`).join("")}`;
+  const benchTitle = chip === "bench_boost" ? "Bench order · Bench Boost: all four score" : "Bench order";
+  $("#bench").innerHTML = `<div class="bench-title">${benchTitle}</div>${lineup.bench.map((player, index) => `<div class="bench-player"><span>${index || "GK"}</span><strong>${player.name}</strong><small>${points(player.xpts)} xPts</small></div>`).join("")}`;
 }
 
 function renderMarginalChanges(lineup) {
@@ -518,7 +640,7 @@ function renderOutlook() {
   $("#outlook-total").classList.remove("skeleton");
   const visibleTotal = horizonLineups.reduce((sum, row) => sum + Number(row.total_xpts || 0), 0);
   $("#outlook-total").innerHTML = `<div><span>Projected horizon score</span><strong>${points(visibleTotal)}</strong><small>captaincy included · ${state.plan.horizon_length}-GW visible slice</small></div>${overallRating ? `<div class="rating-score"><span>${rating.display_label}</span><strong>${Math.round(overallRating.percentile)}</strong><small>release benchmark (full published horizon)</small></div>` : `<div class="rating-score unavailable"><span>${rating?.display_label || "Model Preview"}</span><strong>—</strong><small>benchmark unavailable; raw xPts is still valid</small></div>`}`;
-  if (overallRating) $("#outlook-total").insertAdjacentHTML("beforeend", `<small class="outlook-benchmark-note">percentile benchmark is for the full published horizon.</small>`);
+  if (overallRating) $("#outlook-total").insertAdjacentHTML("beforeend", `<small class="outlook-benchmark-note">percentile benchmark is for the full published horizon${state.lineups.chip_scenario ? "; chip what-if: the rating scores your squad without the chip" : ""}.</small>`);
   const perGameweekRating = new Map(
     rating?.available
       ? rating.model_strength.per_gameweek.map((row) => [row.gameweek, row.percentile])
@@ -531,6 +653,7 @@ function renderOutlook() {
       <span>GW${lineup.gameweek}</span>
       <strong>${points(lineup.total_xpts)}</strong>
       <p>${lineup.formation} · ${lineup.captain.name} (C) · ${fixtureLabel(lineup.captain)}</p>
+      ${lineup.chip_effect ? `<p class="chip-effect"><span class="chip-badge">${lineup.chip_effect.label}</span>${lineup.chip_effect.delta_xpts ? ` +${points(lineup.chip_effect.delta_xpts)} xPts` : ""}</p>` : ""}
       <p class="gw-percentile">${percentile == null ? "Rating withheld" : `${Math.round(percentile)}th percentile`}</p>
       <p class="bench-depth">Bench depth <b>${points(benchTotal)}</b> xPts</p>
     </article>`;
@@ -598,8 +721,12 @@ function renderTransfers() {
   renderTransferPaths();
   const profile = RISK_PROFILES[state.plan.risk_profile] || RISK_PROFILES.balanced;
   const suggestions = state.transfers.suggestions.filter((row) => row.net_xpts_gain >= profile.threshold);
+  const chip = CHIPS[state.transfers.chip];
+  const chipMode = chip
+    ? `<div class="transfer-mode chip">Scored with ${chip.label} played in GW${state.transfers.horizon[0]}. ${chip.changesTransfers ? "Every move is free and saved free transfers are kept." : chip.note}</div>`
+    : "";
   container.className = "transfer-list";
-  container.innerHTML = `<div class="transfer-mode profile">${profile.label} stance: ${profile.note}</div>${suggestions.length === 0 ? `<div class="empty-state">No retained single-move alternatives for this stance. The path comparison above still shows Hold and Roll.</div>` : suggestions.map((row, index) => `<article class="transfer-card">
+  container.innerHTML = `${chipMode}<div class="transfer-mode profile">${profile.label} stance: ${profile.note}</div>${suggestions.length === 0 ? `<div class="empty-state">No retained single-move alternatives for this stance. The path comparison above still shows Hold and Roll.</div>` : suggestions.map((row, index) => `<article class="transfer-card">
     <div class="transfer-move"><span>${index === 0 ? "Best retained move" : `Alternative ${index + 1}`}</span><strong>${row.out.name} <i>→</i> ${row.in.name}</strong><small>${row.out.position} · bank ${money(row.remaining_bank_tenths)}</small><button type="button" class="button secondary" data-apply-out="${row.out.fpl_id}" data-apply-in="${row.in.fpl_id}" data-lineup-changed="${row.lineup_changed ? "true" : "false"}">Apply move</button></div>
     <div><span>Net gain</span><strong class="${row.net_xpts_gain >= 0 ? "positive" : "negative"}">${row.net_xpts_gain >= 0 ? "+" : ""}${points(row.net_xpts_gain)}</strong><small>${row.hit_cost ? `includes −${row.hit_cost} hit` : "no hit"}</small></div>
   </article>`).join("")}`;
@@ -814,9 +941,60 @@ async function init() {
     renderOutlook();
     renderSetupSummary();
   });
+  $("#wc-roll")?.addEventListener("change", renderWildcardControls);
   $("#access-form").addEventListener("submit", submitAccessCode);
   await loadPublicConfig();
   await loadWorkspace();
 }
 
 init();
+
+
+$("#run-wildcard")?.addEventListener("click", async () => {
+  const button = $("#run-wildcard");
+  const output = $("#wildcard-results");
+  button.disabled = true;
+  output.textContent = "Comparing legal squads and transfer paths...";
+  try {
+    const payload = await api("/api/recommend/wildcard", {method: "POST", body: JSON.stringify({
+      ...requestBody(), chip: null, horizon_length: state.plan.horizon_length,
+      roll_after_wildcard: Math.min(wildcardRollLimit(), Math.max(0, Math.floor(Number($("#wc-roll").value) || 0))),
+      terminal_ft_value: Number($("#wc-ft-value").value),
+    })});
+    output.replaceChildren();
+    for (const path of payload.paths) {
+      const card = document.createElement("section");
+      card.className = "wildcard-path";
+      const title = document.createElement("h4");
+      title.textContent = `${path.name}: ${points(path.net_xpts)} net xPts | ${path.terminal_free_transfers} FT at horizon end`;
+      card.append(title);
+      const assumptions = document.createElement("p");
+      assumptions.textContent = `Objective including assumed FT value: ${points(path.objective)}. This is a research scenario.`;
+      card.append(assumptions);
+      if (path.squad_fpl_ids) {
+        const squad = document.createElement("p");
+        squad.textContent = path.squad_fpl_ids.map(id => playerById(id)?.name || `#${id}`).join(", ");
+        card.append(squad);
+      }
+      for (const step of path.steps) {
+        const row = document.createElement("div");
+        row.className = "wildcard-step";
+        const action = document.createElement("strong");
+        const moves = step.transfers.map(m => `${playerById(m.out)?.name || m.out} to ${playerById(m.in)?.name || m.in}`).join("; ");
+        action.textContent = `GW${step.gameweek}: ${step.action}${moves ? " - " + moves : ""}`;
+        const detail = document.createElement("small");
+        detail.textContent = `${points(step.net_xpts)} net xPts | FT ${step.free_transfers_before} to ${step.free_transfers_after} | hit ${step.hit_cost} | bank ${(step.bank_tenths / 10).toFixed(1)}m | captain ${playerById(step.captain_fpl_id)?.name || step.captain_fpl_id}`;
+        row.append(action, detail);
+        card.append(row);
+      }
+      output.append(card);
+    }
+    const note = document.createElement("p");
+    note.textContent = payload.limitations.join(" ");
+    output.append(note);
+  } catch (error) {
+    output.textContent = error.message;
+  } finally {
+    renderWildcardControls();
+  }
+});

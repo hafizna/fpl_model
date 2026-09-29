@@ -356,6 +356,123 @@ def test_transfer_path_stages_the_server_returned_moves(live_server, browser):
         page.close()
 
 
+def _projected_horizon_total(page) -> float:
+    text = page.inner_text("#outlook-total")
+    match = re.search(r"Projected horizon score\s+(\d+\.\d+)", text)
+    assert match is not None, text
+    return float(match.group(1))
+
+
+def test_bench_boost_chip_updates_plan_header_and_outlook_in_place(live_server, browser):
+    page = browser.new_page()
+    try:
+        _seed_local_storage_squad(page)
+        page.goto(live_server, wait_until="networkidle", timeout=15000)
+        page.wait_for_selector("#pitch:not(.skeleton)", timeout=15000)
+        page.click("[data-view=outlook]")
+        page.wait_for_selector("#outlook-total:not(.skeleton)", timeout=15000)
+        before = _projected_horizon_total(page)
+
+        page.check("#chip-options input[value=bench_boost]")
+        page.wait_for_function(
+            "document.getElementById('plan-header').innerText.includes('Bench Boost')",
+            timeout=15000,
+        )
+        header = page.inner_text("#plan-header")
+        # The Lineup view is hidden here, so innerText drops its line breaks.
+        effect = re.search(r"Bench Boost\s*\+(\d+\.\d+) xPts", header)
+        assert effect is not None, header
+        assert float(effect.group(1)) > 0
+        assert _projected_horizon_total(page) == pytest.approx(
+            before + float(effect.group(1)), abs=0.01
+        )
+        assert "Bench Boost" in page.inner_text("#outlook-grid")
+        assert "rating scores your squad without the chip" in page.inner_text("#outlook-total")
+
+        # Marking the chip used clears it and restores the no-chip plan.
+        page.click("[data-chip-status=bench_boost]")
+        page.wait_for_function(
+            "!document.getElementById('plan-header').innerText.includes('Bench Boost')",
+            timeout=15000,
+        )
+        assert _projected_horizon_total(page) == pytest.approx(before, abs=0.01)
+        assert page.is_disabled("#chip-options input[value=bench_boost]")
+        stored = page.evaluate("JSON.parse(localStorage.getItem('touchline-plan'))")
+        assert stored["chip"] is None
+        assert stored["chip_status"]["bench_boost"] == "used"
+
+        page.reload(wait_until="networkidle")
+        page.wait_for_selector("#pitch:not(.skeleton)", timeout=15000)
+        assert page.is_disabled("#chip-options input[value=bench_boost]")
+    finally:
+        page.close()
+
+
+def test_free_hit_moves_are_free_but_cannot_be_committed(live_server, browser):
+    page = browser.new_page()
+    try:
+        _seed_local_storage_squad(page)
+        page.goto(live_server, wait_until="networkidle", timeout=15000)
+        page.wait_for_selector("#pitch:not(.skeleton)", timeout=15000)
+        page.select_option("#free-transfers", "0")
+        page.wait_for_function(
+            "document.getElementById('refresh-lineup').disabled === false", timeout=15000
+        )
+        page.check("#chip-options input[value=free_hit]")
+        page.wait_for_function(
+            "document.getElementById('plan-header').innerText.includes('Free Hit')",
+            timeout=15000,
+        )
+
+        page.click("[data-view=transfers]")
+        page.click("#run-transfers")
+        page.wait_for_selector("#transfer-results [data-apply-out]", timeout=30000)
+        assert "Scored with Free Hit" in page.inner_text("#transfer-results")
+        assert "includes −4 hit" not in page.inner_text("#transfer-results")
+        page.locator("#transfer-results [data-apply-out]").first.click()
+        page.wait_for_selector("#squad-pending-transfers .pending-chip", timeout=15000)
+        page.click("[data-view=weekly]")
+        page.wait_for_function(
+            "document.getElementById('plan-header').innerText.includes('Staged transfers\\n1')",
+            timeout=15000,
+        )
+
+        header = page.inner_text("#plan-header")
+        assert "later Gameweeks use your committed squad" in header
+        assert "Hits" not in header
+        assert page.is_disabled("#squad-pending-transfers [data-commit-pending]")
+        assert "nothing to commit" in page.inner_text("#squad-pending-transfers")
+    finally:
+        page.close()
+
+
+def test_wildcard_controls_stay_inside_the_visible_horizon(live_server, browser):
+    page = browser.new_page()
+    try:
+        _seed_local_storage_squad(page)
+        page.goto(live_server, wait_until="networkidle", timeout=15000)
+        page.wait_for_selector("#pitch:not(.skeleton)", timeout=15000)
+
+        # The fixture publishes three Gameweeks, so the roll must end by GW+2.
+        assert page.get_attribute("#wc-roll", "max") == "2"
+        assert page.input_value("#wc-roll") == "2"
+        assert page.is_enabled("#run-wildcard")
+
+        page.click("[data-view=settings]")
+        page.select_option("#horizon-select", "1")
+        assert page.is_disabled("#run-wildcard")
+        assert page.is_disabled("#wc-roll")
+        assert "at least two visible Gameweeks" in page.text_content("#wildcard-status")
+
+        page.select_option("#horizon-select", "2")
+        assert page.is_enabled("#run-wildcard")
+        assert page.get_attribute("#wc-roll", "max") == "1"
+        # Clamped to 0 at the one-Gameweek horizon; clamping never raises it.
+        assert page.input_value("#wc-roll") == "0"
+    finally:
+        page.close()
+
+
 def test_public_legal_pages_render_reviewed_operator_metadata(gated_live_server, browser):
     base_url, _token = gated_live_server
     page = browser.new_page()

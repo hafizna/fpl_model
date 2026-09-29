@@ -1,4 +1,4 @@
-"""Materialise and validate one complete in-season three-Gameweek release."""
+"""Materialise and validate one complete in-season Gameweek release."""
 
 from __future__ import annotations
 
@@ -22,7 +22,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--calibration-artifact-id", required=True)
     parser.add_argument("--uncertainty-artifact-id", required=True)
     parser.add_argument("--previous-effective-fixtures", type=float, default=5.0)
+    parser.add_argument(
+        "--team-strength-prior-matches",
+        type=float,
+        default=5.0,
+        help="GW2+ team-strength pseudo-count; lower it as the season's own "
+        "team xG/xGC becomes the better estimate.",
+    )
     parser.add_argument("--allow-analytically-complete", action="store_true")
+    parser.add_argument("--horizon-length", type=int, choices=range(1, 6), default=5)
     parser.add_argument("--database", type=Path, default=DEFAULT_DATABASE_PATH)
     parser.add_argument("--output", type=Path)
     return parser.parse_args()
@@ -41,7 +49,9 @@ def main() -> None:
         calibration_artifact_id=args.calibration_artifact_id,
         uncertainty_artifact_id=args.uncertainty_artifact_id,
         previous_effective_fixtures=args.previous_effective_fixtures,
+        team_strength_prior_matches=args.team_strength_prior_matches,
         allow_analytically_complete=args.allow_analytically_complete,
+        horizon_length=args.horizon_length,
         database_path=args.database,
     )
     output = json.dumps(result.report, indent=2, sort_keys=True) + "\n"

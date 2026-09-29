@@ -10,7 +10,10 @@ import pytest
 import fpl_model.webapp.service as webapp_service
 from fpl_model.validation.release_drift import compare_web_releases
 from fpl_model.webapp.service import (
+    ChipPlan,
     CurrentSquadSetup,
+    PendingTransfer,
+    compare_web_wildcard,
     load_web_bootstrap,
     recommend_web_lineups,
     recommend_web_transfers,
@@ -400,3 +403,282 @@ def test_release_drift_can_validate_lineup_and_rating_without_expensive_transfer
     assert result.report["decisions"]["evaluated"] is True
     assert result.report["decisions"]["transfer"]["evaluated"] is False
     assert result.report["thresholds"]["include_transfer_scan"] is False
+
+
+def _release_with_chip_candidates(path: Path) -> tuple[int, ...]:
+    """Transfer candidates plus cheap fillers from four more clubs.
+
+    The Wildcard/Free Hit squad search is a bounded beam; like the real
+    20-club release it needs more clubs than the base fixture to find legal
+    rebuilds under the three-per-club limit.
+    """
+
+    fpl_ids = _release_with_transfer_candidates(path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    next_id = 20
+    for team_id in range(11, 15):
+        for position in ("GK", "DEF", "MID", "FWD"):
+            payload["players"].append(
+                {
+                    "fpl_id": next_id,
+                    "player_code": 10_000 + next_id,
+                    "name": f"Filler {next_id}",
+                    "team_id": team_id,
+                    "team": f"T{team_id}",
+                    "position": position,
+                    "price_tenths": 45,
+                    "status": "a",
+                    "gameweeks": {
+                        str(gameweek): {
+                            "xpts": 0.25,
+                            "appearance_probability": 0.95,
+                            "uncertainty": None,
+                            "quality_flags": [],
+                        }
+                        for gameweek in (2, 3, 4)
+                    },
+                }
+            )
+            next_id += 1
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return fpl_ids
+
+
+def _starting_and_bench_ids(lineup: dict) -> set[int]:
+    return {player["fpl_id"] for player in (*lineup["starters"], *lineup["bench"])}
+
+
+def test_points_chips_score_only_the_first_gameweek_and_never_move_the_rating(tmp_path: Path):
+    release_path = tmp_path / "points_chips.json"
+    fpl_ids = _release_file(release_path)
+    payload = json.loads(release_path.read_text(encoding="utf-8"))
+    payload["release"]["rating_benchmark"] = _ready_rating_artifact()
+    release_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    base = recommend_web_lineups(fpl_ids, release_path=release_path)
+    bench_boost = recommend_web_lineups(
+        fpl_ids, release_path=release_path, chips=ChipPlan(active="bench_boost")
+    )
+    triple_captain = recommend_web_lineups(
+        fpl_ids, release_path=release_path, chips=ChipPlan(active="triple_captain")
+    )
+
+    first = base["lineups"][0]
+    bench_xpts = sum(player["xpts"] for player in first["bench"])
+    captain_xpts = first["captain"]["xpts"]
+    assert bench_xpts > 0
+    assert bench_boost["lineups"][0]["total_xpts"] == pytest.approx(
+        first["total_xpts"] + bench_xpts
+    )
+    assert bench_boost["lineups"][0]["chip_effect"]["delta_xpts"] == pytest.approx(bench_xpts)
+    assert triple_captain["lineups"][0]["total_xpts"] == pytest.approx(
+        first["total_xpts"] + captain_xpts
+    )
+    assert triple_captain["lineups"][0]["chip_effect"]["delta_xpts"] == pytest.approx(
+        captain_xpts
+    )
+    for result, delta in ((bench_boost, bench_xpts), (triple_captain, captain_xpts)):
+        # The chip is played once; later Gameweeks are the no-chip lineups.
+        assert [row["total_xpts"] for row in result["lineups"][1:]] == pytest.approx(
+            [row["total_xpts"] for row in base["lineups"][1:]]
+        )
+        assert all(row["chip_effect"] is None for row in result["lineups"][1:])
+        assert result["chip_scenario"] is True
+        assert result["plan_summary"]["net_xpts_vs_holding"] == pytest.approx(delta)
+        assert result["plan_summary"]["chip_effect_xpts"] == pytest.approx(delta)
+        assert result["baseline_cumulative_xpts"] == pytest.approx(base["cumulative_xpts"])
+        # The benchmark never receives a chip, so the rating ignores it.
+        assert result["squad_rating"]["available"] is True
+        assert result["squad_rating"]["model_strength"] == base["squad_rating"]["model_strength"]
+    assert base["chip_scenario"] is False
+    assert base["lineups"][0]["chip_effect"] is None
+
+    transfers = recommend_web_transfers(
+        fpl_ids, release_path=release_path, chips=ChipPlan(active="triple_captain")
+    )
+    assert transfers["baseline_cumulative_xpts"] == pytest.approx(
+        base["cumulative_xpts"] + captain_xpts
+    )
+    assert transfers["chip"] == "triple_captain"
+
+
+def test_a_chip_marked_used_cannot_be_played():
+    with pytest.raises(ValueError, match="marked used"):
+        ChipPlan(active="bench_boost", used=frozenset({"bench_boost"}))
+    with pytest.raises(ValueError, match="unknown chip"):
+        ChipPlan(active="double_captain")
+    assert ChipPlan(used=frozenset({"wildcard"})).status["wildcard"] == "used"
+
+
+def test_wildcard_makes_staged_moves_free_and_preserves_free_transfers(tmp_path: Path):
+    release_path = tmp_path / "wildcard_chip.json"
+    fpl_ids = _release_with_chip_candidates(release_path)
+    staged = (
+        PendingTransfer(out_fpl_id=1, in_fpl_id=16),
+        PendingTransfer(out_fpl_id=3, in_fpl_id=17),
+        PendingTransfer(out_fpl_id=8, in_fpl_id=18),
+    )
+
+    no_chip = recommend_web_lineups(
+        fpl_ids, free_transfers=1, pending_transfers=staged, release_path=release_path
+    )
+    wildcard = recommend_web_lineups(
+        fpl_ids,
+        free_transfers=1,
+        pending_transfers=staged,
+        chips=ChipPlan(active="wildcard"),
+        release_path=release_path,
+    )
+
+    assert no_chip["plan_summary"]["pending_hit_cost"] == 8.0
+    assert no_chip["plan_summary"]["effective_free_transfers"] == 0
+    summary = wildcard["plan_summary"]
+    assert summary["pending_hit_cost"] == 0.0
+    assert summary["effective_free_transfers"] == 1
+    assert summary["commit_allowed"] is True
+    assert summary["net_xpts_vs_holding"] == pytest.approx(
+        no_chip["plan_summary"]["net_xpts_vs_holding"] + 8.0
+    )
+    assert all({16, 17, 18} <= _starting_and_bench_ids(row) for row in wildcard["lineups"])
+
+    scan = recommend_web_transfers(
+        fpl_ids,
+        free_transfers=0,
+        chips=ChipPlan(active="wildcard"),
+        release_path=release_path,
+    )
+    assert all(row["hit_cost"] == 0 for row in scan["suggestions"])
+    paths = {row["id"]: row for row in scan["paths"]}
+    assert set(paths) == {"hold", "one_move", "chip_squad"}
+    assert paths["chip_squad"]["hit"] == 0.0
+    assert len(paths["chip_squad"]["transfers"]) >= 2
+    assert paths["chip_squad"]["net_xpts"] > paths["one_move"]["net_xpts"]
+    assert scan["recommended_path_id"] == "chip_squad"
+
+    # Staging the returned rebuild reproduces the path's server score.
+    rebuild = tuple(
+        PendingTransfer(out_fpl_id=row["out_fpl_id"], in_fpl_id=row["in_fpl_id"])
+        for row in paths["chip_squad"]["transfers"]
+    )
+    staged_rebuild = recommend_web_lineups(
+        fpl_ids,
+        free_transfers=0,
+        pending_transfers=rebuild,
+        chips=ChipPlan(active="wildcard"),
+        release_path=release_path,
+    )
+    assert staged_rebuild["plan_summary"]["net_xpts_vs_holding"] == pytest.approx(
+        paths["chip_squad"]["delta_xpts_vs_hold"]
+    )
+
+
+def test_free_hit_scores_the_chip_gameweek_then_reverts_to_the_committed_squad(
+    tmp_path: Path,
+):
+    release_path = tmp_path / "free_hit.json"
+    fpl_ids = _release_with_chip_candidates(release_path)
+    free_hit = ChipPlan(active="free_hit")
+    staged = (PendingTransfer(out_fpl_id=8, in_fpl_id=18),)
+
+    base = recommend_web_lineups(fpl_ids, free_transfers=0, release_path=release_path)
+    result = recommend_web_lineups(
+        fpl_ids,
+        free_transfers=0,
+        pending_transfers=staged,
+        chips=free_hit,
+        release_path=release_path,
+    )
+
+    assert 18 in _starting_and_bench_ids(result["lineups"][0])
+    for later in result["lineups"][1:]:
+        assert 18 not in _starting_and_bench_ids(later)
+        assert 8 in _starting_and_bench_ids(later)
+    assert [row["total_xpts"] for row in result["lineups"][1:]] == pytest.approx(
+        [row["total_xpts"] for row in base["lineups"][1:]]
+    )
+    summary = result["plan_summary"]
+    assert summary["pending_hit_cost"] == 0.0
+    assert summary["commit_allowed"] is False
+    assert summary["squad_reverts_after_gameweek"] == 2
+    assert summary["effective_free_transfers"] == 0
+    assert summary["net_xpts_vs_holding"] == pytest.approx(
+        result["lineups"][0]["total_xpts"] - base["lineups"][0]["total_xpts"]
+    )
+    assert summary["net_xpts_vs_holding"] > 0
+    # Free Hit is rated on the squad it reverts to.
+    assert result["squad_rating"]["input"]["squad_fpl_ids"] == sorted(fpl_ids)
+
+    no_chip_scan = recommend_web_transfers(fpl_ids, free_transfers=1, release_path=release_path)
+    free_hit_scan = recommend_web_transfers(
+        fpl_ids, free_transfers=0, chips=free_hit, release_path=release_path
+    )
+    move = {
+        (row["out"]["fpl_id"], row["in"]["fpl_id"]): row["net_xpts_gain"]
+        for row in no_chip_scan["suggestions"]
+    }
+    free_hit_move = {
+        (row["out"]["fpl_id"], row["in"]["fpl_id"]): row["net_xpts_gain"]
+        for row in free_hit_scan["suggestions"]
+    }
+    shared = set(move) & set(free_hit_move)
+    assert shared
+    for key in shared:
+        # Identical projections each Gameweek: one scored week of three.
+        assert free_hit_move[key] == pytest.approx(move[key] / 3)
+    assert {row["id"] for row in free_hit_scan["paths"]} == {"hold", "one_move", "chip_squad"}
+    assert all(row["hit"] == 0.0 for row in free_hit_scan["paths"])
+
+
+def test_staged_moves_are_validated_as_one_confirmed_set(tmp_path: Path):
+    release_path = tmp_path / "batch.json"
+    fpl_ids = _release_with_transfer_candidates(release_path)
+    payload = json.loads(release_path.read_text(encoding="utf-8"))
+    for player in payload["players"]:
+        if player["fpl_id"] == 17:
+            player["price_tenths"] = 55
+        if player["fpl_id"] == 18:
+            player["price_tenths"] = 45
+    release_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    # The first move alone needs £0.5m more than the bank holds; the second
+    # frees it. FPL confirms both together, so the set is affordable.
+    result = recommend_web_lineups(
+        fpl_ids,
+        free_transfers=2,
+        pending_transfers=(
+            PendingTransfer(out_fpl_id=3, in_fpl_id=17),
+            PendingTransfer(out_fpl_id=8, in_fpl_id=18),
+        ),
+        release_path=release_path,
+    )
+    assert result["plan_summary"]["effective_bank_tenths"] == 0
+    assert result["plan_summary"]["pending_hit_cost"] == 0.0
+
+    with pytest.raises(ValueError, match="not affordable"):
+        recommend_web_lineups(
+            fpl_ids,
+            pending_transfers=(PendingTransfer(out_fpl_id=3, in_fpl_id=17),),
+            release_path=release_path,
+        )
+
+
+def test_wildcard_comparison_requires_an_unused_wildcard_and_no_active_chip(tmp_path: Path):
+    release_path = tmp_path / "wildcard_used.json"
+    fpl_ids = _release_file(release_path)
+
+    with pytest.raises(ValueError, match="marked used"):
+        compare_web_wildcard(
+            fpl_ids,
+            horizon_length=3,
+            roll_after_wildcard=1,
+            chips=ChipPlan(used=frozenset({"wildcard"})),
+            release_path=release_path,
+        )
+    with pytest.raises(ValueError, match="clear the active chip"):
+        compare_web_wildcard(
+            fpl_ids,
+            horizon_length=3,
+            roll_after_wildcard=1,
+            chips=ChipPlan(active="bench_boost"),
+            release_path=release_path,
+        )
