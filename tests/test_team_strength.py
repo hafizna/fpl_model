@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 
 from fpl_model.ingest.team_strength import (
+    _current_season_team_xg,
     import_team_strength_history,
     materialize_inseason_team_strength,
     materialize_preseason_team_strength,
@@ -332,3 +333,72 @@ def test_inseason_team_strength_blends_toward_current_and_is_idempotent(tmp_path
     # A team with no current fixture keeps the frozen prior.
     assert rows["LEE"][0] == pytest.approx(frozen["LEE"])
     assert "FROZEN_PRESEASON_TEAM_STRENGTH_PRIOR" in rows["LEE"][2]
+
+
+def _current_team_xg(database_path, *, as_of=datetime(2026, 9, 6, tzinfo=UTC)):
+    with duckdb.connect(str(database_path), read_only=True) as connection:
+        result, _ = _current_season_team_xg(
+            connection,
+            season="2026-27",
+            source_ingestion_run_id="fpl-run",
+            as_of=as_of,
+            as_of_gameweek=3,
+        )
+    return result
+
+
+def test_current_team_xg_ignores_live_runs_captured_after_the_target_deadline(tmp_path):
+    database_path = tmp_path / "fpl.duckdb"
+    _insert_fpl_snapshot(database_path)
+    _seed_inseason_events(database_path)
+    before = _current_team_xg(database_path)
+    assert before[19] == pytest.approx((0.35, 2.6, 2))
+
+    # A GW2 capture taken after the GW3 deadline (e.g. a later stat correction)
+    # must not reach a GW3 projection, even though it is the newest capture.
+    with duckdb.connect(str(database_path)) as connection:
+        connection.execute(
+            "INSERT INTO fpl_event_live_run VALUES "
+            "('live-gw2-late', 'fpl-run', '2026-27', 2, ?, 'x.json', 'sha-late', true, true, 3, "
+            "'completed', current_timestamp)",
+            [datetime(2026, 9, 10, tzinfo=UTC)],
+        )
+        connection.executemany(
+            "INSERT INTO player_gameweek_stat VALUES "
+            "(?, ?, ?, true, 90, 1, 0, 0, 0, 0, 0, 0, 0, 0, ?, 0, 0, 2, false, '[]')",
+            [("live-gw2-late", 9006, 5006, 9.0), ("live-gw2-late", 9119, 5119, 0.4)],
+        )
+
+    assert _current_team_xg(database_path) == before
+
+
+def test_current_team_xg_does_not_reuse_a_double_gameweek_total_per_fixture(tmp_path):
+    database_path = tmp_path / "fpl.duckdb"
+    _insert_fpl_snapshot(database_path)
+    _seed_inseason_events(database_path)
+    # Spurs (19) also play Aston Villa (2) in GW2: a double. The event-live
+    # stats only carry Spurs' GW2 total (0.4 + 0.6), which cannot be split.
+    with duckdb.connect(str(database_path)) as connection:
+        connection.execute(
+            "INSERT INTO fixture_snapshot VALUES ('fpl-run', 903, 2, ?, 19, 2, true, true)",
+            [datetime(2026, 8, 31, 19, 0, tzinfo=UTC)],
+        )
+        connection.executemany(
+            "INSERT INTO player_snapshot (ingestion_run_id, season, fpl_id, player_code, "
+            "first_name, second_name, web_name, team_id, fpl_position, price, fpl_status) "
+            "VALUES ('fpl-run', '2026-27', ?, ?, 'T', 'P', 'P', ?, 'MID', 5.0, 'a')",
+            [(9219, 5219, 19), (9002, 5002, 2)],
+        )
+        connection.executemany(
+            "INSERT INTO player_gameweek_stat VALUES "
+            "(?, ?, ?, true, 90, 1, 0, 0, 0, 0, 0, 0, 0, 0, ?, 0, 0, 2, false, '[]')",
+            [("live-gw2", 9219, 5219, 0.6), ("live-gw2", 9002, 5002, 1.0)],
+        )
+
+    result = _current_team_xg(database_path)
+
+    # Only Spurs' single GW1 fixture is usable; GW2 is not double-counted.
+    assert result[19] == pytest.approx((0.3, 2.5, 1))
+    assert result[1] == pytest.approx((2.5, 0.3, 1))
+    assert 6 not in result
+    assert 2 not in result

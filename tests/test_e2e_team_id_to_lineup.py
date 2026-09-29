@@ -446,6 +446,33 @@ def test_free_hit_moves_are_free_but_cannot_be_committed(live_server, browser):
         page.close()
 
 
+def test_wildcard_controls_stay_inside_the_visible_horizon(live_server, browser):
+    page = browser.new_page()
+    try:
+        _seed_local_storage_squad(page)
+        page.goto(live_server, wait_until="networkidle", timeout=15000)
+        page.wait_for_selector("#pitch:not(.skeleton)", timeout=15000)
+
+        # The fixture publishes three Gameweeks, so the roll must end by GW+2.
+        assert page.get_attribute("#wc-roll", "max") == "2"
+        assert page.input_value("#wc-roll") == "2"
+        assert page.is_enabled("#run-wildcard")
+
+        page.click("[data-view=settings]")
+        page.select_option("#horizon-select", "1")
+        assert page.is_disabled("#run-wildcard")
+        assert page.is_disabled("#wc-roll")
+        assert "at least two visible Gameweeks" in page.text_content("#wildcard-status")
+
+        page.select_option("#horizon-select", "2")
+        assert page.is_enabled("#run-wildcard")
+        assert page.get_attribute("#wc-roll", "max") == "1"
+        # Clamped to 0 at the one-Gameweek horizon; clamping never raises it.
+        assert page.input_value("#wc-roll") == "0"
+    finally:
+        page.close()
+
+
 def test_public_legal_pages_render_reviewed_operator_metadata(gated_live_server, browser):
     base_url, _token = gated_live_server
     page = browser.new_page()

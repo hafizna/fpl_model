@@ -33,8 +33,12 @@ tunable pseudo-count (default five matches, `--team-strength-prior-matches`;
 `SHRUNK_CURRENT_SEASON_TEAM_STRENGTH`). A team with no final current-season
 fixture keeps the frozen prior. Every downstream ratio (attack, defensive
 weakness, bonus multiplier) and the corrected xGC are recomputed from the blended
-values. The pseudo-count is a fixed constant that self-corrects as Gameweeks
-accumulate; recency-weighting the current sample is a future refinement.
+values. Live evidence is read only from captures taken no later than the target
+deadline (the appearance run's capture bound), and a fixture involving a team with
+two fixtures in that Gameweek is excluded, because official event-live xG is a
+per-Gameweek total that cannot be split by match. The pseudo-count is a fixed
+constant that self-corrects as Gameweeks accumulate; recency-weighting the current
+sample is a future refinement.
 
 Both attacking windows receive the same posterior, avoiding a second short-form
 weight on the same current sample. xG remains total xG; there is no additional

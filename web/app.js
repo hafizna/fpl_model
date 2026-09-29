@@ -227,6 +227,7 @@ function renderPlanningControls() {
     renderPlanningControls();
     renderTransfers();
   }));
+  renderWildcardControls();
 }
 
 function renderSetupSummary() {
@@ -355,14 +356,28 @@ async function toggleChipStatus(chip) {
   await runLineups();
 }
 
+// The server compares a Wildcard over 2+ Gameweeks and needs the post-Wildcard
+// roll to end inside the visible horizon; keep the inputs inside that contract.
+function wildcardRollLimit() {
+  return Math.max(0, state.plan.horizon_length - 1);
+}
+
 function renderWildcardControls() {
   const button = $("#run-wildcard");
-  if (!button) return;
+  const roll = $("#wc-roll");
+  if (!button || !roll) return;
   const used = state.plan.chip_status.wildcard === "used";
-  button.disabled = used;
+  const tooShort = state.plan.horizon_length < 2;
+  const limit = wildcardRollLimit();
+  roll.max = String(limit);
+  roll.value = String(Math.max(0, Math.min(limit, Math.floor(Number(roll.value) || 0))));
+  roll.disabled = tooShort;
+  button.disabled = used || tooShort;
   $("#wildcard-status").textContent = used
     ? "Your Wildcard is marked used for this half-season. Mark it available in the Chips panel to compare."
-    : "";
+    : tooShort
+      ? "A Wildcard comparison needs at least two visible Gameweeks. Widen the horizon in Settings."
+      : "";
 }
 
 function playerCard(player, captainId, viceId, captainBadge = "C") {
@@ -926,6 +941,7 @@ async function init() {
     renderOutlook();
     renderSetupSummary();
   });
+  $("#wc-roll")?.addEventListener("change", renderWildcardControls);
   $("#access-form").addEventListener("submit", submitAccessCode);
   await loadPublicConfig();
   await loadWorkspace();
@@ -942,7 +958,7 @@ $("#run-wildcard")?.addEventListener("click", async () => {
   try {
     const payload = await api("/api/recommend/wildcard", {method: "POST", body: JSON.stringify({
       ...requestBody(), chip: null, horizon_length: state.plan.horizon_length,
-      roll_after_wildcard: Number($("#wc-roll").value),
+      roll_after_wildcard: Math.min(wildcardRollLimit(), Math.max(0, Math.floor(Number($("#wc-roll").value) || 0))),
       terminal_ft_value: Number($("#wc-ft-value").value),
     })});
     output.replaceChildren();

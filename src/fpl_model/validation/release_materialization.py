@@ -161,10 +161,11 @@ def materialize_inseason_release(
     # xG for/against (deadline-safe, final Gameweeks only). A team with no final
     # current-season fixture keeps the preseason prior. GW1 has no such evidence.
     if target_gameweek >= 2:
-        # The team-strength blend only reads Gameweeks whose own deadline is
-        # before the target's -- the same no-lookahead boundary the appearance
-        # run uses -- so ``availability.as_of`` is a safe capture-time bound even
-        # though the final live runs may have been captured a few seconds later.
+        # The team-strength blend only reads final Gameweeks whose own deadline
+        # is before the target's, from live runs captured no later than the
+        # target deadline -- the same capture bound the appearance run uses, so
+        # the final live runs captured a few seconds after ``availability.as_of``
+        # still count while later captures cannot leak in.
         strength = materialize_inseason_team_strength(
             source_import_run_id=strength_import.import_run_id,
             target_gameweek=target_gameweek,

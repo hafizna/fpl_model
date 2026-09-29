@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from math import isclose
@@ -460,14 +461,20 @@ def _current_season_team_xg(
 
     Built only from ``fpl_event_live_run`` rows that are FINAL
     (``event_finished AND data_checked``), strictly before ``as_of_gameweek``,
-    and whose own Gameweek deadline is before the target Gameweek's deadline --
-    the no-lookahead boundary the primary backtest already enforces, and the
-    condition that actually guarantees safety here. ``as_of`` is a soft
-    upper bound on capture time: a live run captured slightly after it is still
-    admitted as long as its own Gameweek's deadline precedes both ``as_of`` and
-    the target's, since that means it was a finished, already-deadline-safe
-    Gameweek by the planning cutoff. xG for a team is the sum of that team's
-    players' ``expected_goals`` in the fixture; xG against is the opponent's sum.
+    whose own Gameweek deadline is before both ``as_of`` and the target
+    Gameweek's deadline, and which were **captured no later than the target
+    deadline** -- the same capture bound the in-season appearance run uses.
+    ``as_of`` alone cannot bound capture time because a live refresh captures
+    its final event data seconds after the availability snapshot; the target
+    deadline can, and it keeps a retrospective run from reading a later
+    capture (a postponed fixture played afterwards, or a post-deadline stat
+    correction).
+
+    xG for a team is the sum of that team's players' ``expected_goals``; xG
+    against is the opponent's sum. Official event-live stats are per-Gameweek
+    aggregates, so a fixture involving a team with more than one fixture in
+    that Gameweek (a double) cannot be split by match and is excluded rather
+    than counting the Gameweek total once per fixture.
     """
     final_runs = connection.execute(
         """
@@ -482,6 +489,7 @@ def _current_season_team_xg(
           AND r.gameweek < ? AND r.event_finished AND r.data_checked
           AND own.deadline_time < target.deadline_time
           AND own.deadline_time <= ?
+          AND r.captured_at <= target.deadline_time
         QUALIFY row_number() OVER (
             PARTITION BY r.gameweek ORDER BY r.captured_at DESC, r.live_run_id DESC
         ) = 1
@@ -515,9 +523,19 @@ def _current_season_team_xg(
         """,
         [source_ingestion_run_id, as_of_gameweek],
     ).fetchall()
+    fixture_counts = Counter(
+        (int(team), int(gameweek))
+        for gameweek, home, away in fixtures
+        for team in (home, away)
+    )
     for_totals: dict[int, list[float]] = {}
     against_totals: dict[int, list[float]] = {}
     for gameweek, home, away in fixtures:
+        if (
+            fixture_counts[(int(home), int(gameweek))] > 1
+            or fixture_counts[(int(away), int(gameweek))] > 1
+        ):
+            continue
         home_xg = by_team_gw.get((int(home), int(gameweek)))
         away_xg = by_team_gw.get((int(away), int(gameweek)))
         if home_xg is None or away_xg is None:
