@@ -12,9 +12,31 @@ Install the optional web dependencies and start the application from the reposit
 .venv\Scripts\python.exe scripts\run_web_app.py
 ```
 
-Open <http://127.0.0.1:8000/>. The initial browser state is seeded with the current 15-player test
-squad, then stored only in that browser's local storage. The app never asks for or stores an FPL
-password or session cookie.
+Open <http://127.0.0.1:8000/> for the landing page; the app itself lives at
+<http://127.0.0.1:8000/app>. A first visit to the app asks for a Team ID (or offers a demo squad)
+before anything is scored; the working plan is then stored only in that browser's local storage.
+The app never asks for or stores an FPL password or session cookie.
+
+## Pages and flow
+
+- `/` -- a static landing page (`web/index.html` + `web/landing.js`). Its Team ID forms are plain
+  `GET /app?team=<id>` forms, so they work without JavaScript; `landing.js` only fills in the
+  published horizon from the public `/api/ready` check.
+- `/app` -- the planning app (`web/app.html` + `web/app.js`), organised as the three steps the
+  landing page describes, one tab each: **My Team** (squad rating, best XI and captain on a pitch,
+  and what to change versus the submitted team), **Transfers** (the scored Hold / free transfer /
+  −4 / Roll options, the best single moves, and the Wildcard check), and **Planner** (points,
+  fixtures and confidence for each Gameweek). **Settings** holds the horizon and risk stance. Each
+  step ends with a button to the next one, and the open tab is kept in the URL hash.
+- `?team=<id or FPL link>` and `?demo=1` are read once, then removed from the address bar, so a
+  reload or a shared link does not re-import a squad.
+- The plan records where its squad came from in `squad_source` (`team`, `demo` or `manual` for a
+  squad saved by an older version). A missing value means a first visit, which shows the
+  connect screen instead of silently planning with the placeholder squad.
+- Team names come from FPL and are escaped before they are rendered.
+- Shirt colours on the pitch are keyed by the release's club short name in `styles.css`;
+  unknown clubs fall back to a neutral shirt. Pages stay inside the Vercel CSP (`'self'`
+  scripts and styles only, no inline styles, `data:` images only).
 
 ## End-to-end tests
 
@@ -24,8 +46,9 @@ entering a Team ID, loading the resolved squad, and confirming the rendered pitc
 explanation, outlook, and squad editor. It also covers staging one transfer and checking that the
 connected plan header and pitch update, plus the scored Hold / free-transfer / -4 / Roll paths,
 toggling Bench Boost in place (plan header badge, outlook total, marking the chip used and reloading)
-and a Free Hit move that is free but cannot be committed. It runs a real `uvicorn` server in a background thread against a fixture compact release, with
-`FPLClient.entry_picks` monkeypatched so no request reaches the real FPL API. Needs the `dev` extra
+and a Free Hit move that is free but cannot be committed. It also covers the landing page handing a Team ID to `/app`, the first-visit connect screen,
+the demo squad, and the step-to-step buttons. It runs a real `uvicorn` server in a background thread against a fixture compact release, with
+`FPLClient.entry_picks` and `FPLClient.entry` monkeypatched so no request reaches the real FPL API. Needs the `dev` extra
 installed with a Chromium binary:
 
 ```powershell
@@ -63,14 +86,15 @@ Implemented surfaces:
 
 The browser persists one working plan under `localStorage["touchline-plan"]`:
 `squad`, `bank_tenths`, `free_transfers`, `selling_prices`, `current_setup`,
-`pending_transfers`, `horizon_length`, `risk_profile`, `chip`, and `chip_status` (the last two
-added in Phase 3; older stored plans default to no chip and every chip available). On first load it migrates the earlier
+`pending_transfers`, `horizon_length`, `risk_profile`, `chip`, `chip_status` (added in Phase 3;
+older stored plans default to no chip and every chip available), and `squad_source` (see Pages and
+flow). On first load it migrates the earlier
 `touchline-squad`, `touchline-selling-prices`, `touchline-selling-estimated`,
 `touchline-current-setup`, `touchline-horizon`, and `touchline-risk-profile` keys into that object;
 the legacy keys remain for one release as a safety fallback. Manager state is never written to the
 server.
 
-Transfer recommendations expose an `Apply move` action. This adds an `{out_fpl_id, in_fpl_id}`
+Transfer recommendations expose a `Stage move` action. This adds an `{out_fpl_id, in_fpl_id}`
 record to `pending_transfers`, then sends the whole staged list to both recommendation endpoints.
 The Python service validates and applies those moves to an in-memory working squad copy using the
 same squad rules as the decision layer; the frozen release and rating benchmark are not mutated.
@@ -81,7 +105,7 @@ formation, captain, staged count, and server-computed `net_xpts_vs_holding`, so 
 calculates transfer legality or xPts. Decision receipts hash the complete request, including staged
 moves, and remain reproducible.
 
-The Squad panel and Transfers view share a removable staged-transfer strip. `Commit to squad`
+The "Your team" panel and Transfers view share a removable staged-transfer strip. `Commit to squad`
 folds the server-validated effective state into the browser plan, decrements each free transfer (a
 `4.0` point hit is included in `pending_hit_cost` once the count is exhausted), clears pending
 moves, and clears the submitted-XI comparison because the committed squad has changed. A staged
@@ -137,7 +161,7 @@ does not score GW+1.`
   is rejected with `422`.
 
 Both fields are part of the hashed request, so `decision_receipt_v1` stays reproducible. The
-browser keeps them in `touchline-plan` only, with a Chips block in the Squad panel (a radio group
+browser keeps them in `touchline-plan` only, with a Chips block in the "Your team" panel (a radio group
 for the chip to play, plus an `Available`/`Used` toggle per chip; marking the active chip used
 clears it) and an explanation card in Settings.
 

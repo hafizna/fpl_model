@@ -14,6 +14,13 @@ const CHIPS = {
   triple_captain: { label: "Triple Captain", note: "Your captain scores three times instead of twice." },
 };
 
+const VIEWS = {
+  weekly: "My Team",
+  transfers: "Transfers",
+  outlook: "Planner",
+  settings: "Settings",
+};
+
 function normalizeChipStatus(value) {
   return Object.fromEntries(Object.keys(CHIPS).map((chip) => [chip, value?.[chip] === "used" ? "used" : "available"]));
 }
@@ -27,7 +34,16 @@ function readStoredJson(key, fallback) {
   }
 }
 
+function hasStoredSquad() {
+  try {
+    return localStorage.getItem("touchline-plan") !== null || localStorage.getItem("touchline-squad") !== null;
+  } catch {
+    return false;
+  }
+}
+
 function loadPlan() {
+  const hadStoredSquad = hasStoredSquad();
   const stored = readStoredJson("touchline-plan", null);
   const legacy = {
     squad: readStoredJson("touchline-squad", DEFAULT_SQUAD),
@@ -50,11 +66,29 @@ function loadPlan() {
     risk_profile: source.risk_profile || legacy.risk_profile,
     chip_status: normalizeChipStatus(source.chip_status),
     chip: null,
+    // Where the squad came from: "team" (Team ID), "demo", or "manual" (an
+    // older saved squad). null means a first visit, which shows the connect
+    // screen instead of silently planning with the demo squad.
+    squad_source: ["team", "demo", "manual"].includes(source.squad_source)
+      ? source.squad_source
+      : hadStoredSquad ? "manual" : null,
   };
   // A stored chip survives reload only while it is known and still available.
   if (CHIPS[source.chip] && plan.chip_status[source.chip] !== "used") plan.chip = source.chip;
   localStorage.setItem("touchline-plan", JSON.stringify(plan));
   return plan;
+}
+
+function readEntryParams() {
+  const params = new URLSearchParams(window.location.search);
+  const team = (params.get("team") || "").trim();
+  const demo = params.get("demo") === "1";
+  if (params.has("team") || params.has("demo")) {
+    // The landing-page form hands the Team ID over in the URL once; drop it
+    // so a reload or a shared link does not re-import the squad.
+    window.history.replaceState(null, "", `${window.location.pathname}${window.location.hash}`);
+  }
+  return team ? { team } : demo ? { demo: true } : null;
 }
 
 const state = {
@@ -67,7 +101,9 @@ const state = {
   roleScenarioOverrides: [],
   lineups: null,
   transfers: null,
-  teamProfile: JSON.parse(localStorage.getItem("touchline-team-profile") || "null"),
+  teamProfile: readStoredJson("touchline-team-profile", null),
+  teamNote: "",
+  pendingEntry: readEntryParams(),
   alphaToken: sessionStorage.getItem("touchline-alpha-token"),
   publicConfig: null,
 };
@@ -76,6 +112,20 @@ const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 const money = (tenths) => `£${(tenths / 10).toFixed(1)}`;
 const points = (value) => Number(value || 0).toFixed(2);
+const signed = (value) => `${Number(value || 0) >= 0 ? "+" : ""}${points(value)}`;
+const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
+
+function capitalize(value) {
+  const text = String(value ?? "");
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+function ordinal(value) {
+  const number = Math.round(Number(value));
+  const tens = number % 100;
+  const suffix = tens >= 11 && tens <= 13 ? "th" : ({ 1: "st", 2: "nd", 3: "rd" })[number % 10] || "th";
+  return `${number}${suffix}`;
+}
 
 function persistPlan() {
   localStorage.setItem("touchline-plan", JSON.stringify(state.plan));
@@ -159,7 +209,7 @@ function renderPublicConfig() {
 function renderDecisionReceipts() {
   const bar = $("#decision-receipts");
   const receipts = [
-    ["Weekly + outlook", state.lineups?.decision_receipt],
+    ["Lineup & planner", state.lineups?.decision_receipt],
     ["Transfers", state.transfers?.decision_receipt],
   ].filter((row) => row[1]);
   if (!receipts.length) {
@@ -168,7 +218,7 @@ function renderDecisionReceipts() {
     return;
   }
   bar.hidden = false;
-  bar.innerHTML = `<strong>Decision receipts</strong>${receipts.map(([label, receipt]) => `<button class="button secondary" data-receipt-id="${receipt.decision_id}">${label} · ${receipt.decision_id.slice(-8)}</button>`).join("")}`;
+  bar.innerHTML = `<strong>Decision receipts</strong><small>The exact inputs and outputs behind each recommendation, as JSON.</small>${receipts.map(([label, receipt]) => `<button class="button secondary small" type="button" data-receipt-id="${receipt.decision_id}">${label} · ${receipt.decision_id.slice(-8)} ↓</button>`).join("")}`;
   bar.querySelectorAll("[data-receipt-id]").forEach((button) => button.addEventListener("click", () => {
     const receipt = receipts.find((row) => row[1].decision_id === button.dataset.receiptId)?.[1];
     if (!receipt) return;
@@ -185,10 +235,14 @@ function playerById(id) {
   return state.bootstrap.players.find((player) => player.fpl_id === Number(id));
 }
 
+function teamCode(player) {
+  return player.team || playerById(player.fpl_id)?.team || "";
+}
+
 const RISK_PROFILES = {
-  conservative: { label: "Conservative", note: "Prefer clearer upside and fewer speculative moves.", threshold: 2 },
-  balanced: { label: "Balanced", note: "Keep the model ranking intact and compare the full shortlist.", threshold: 0 },
-  aggressive: { label: "Aggressive", note: "Surface differentials, including lower-confidence upside.", threshold: -2 },
+  conservative: { label: "Conservative", note: "Only moves with a clear projected gain.", threshold: 2 },
+  balanced: { label: "Balanced", note: "Every move the model ranks, best first.", threshold: 0 },
+  aggressive: { label: "Aggressive", note: "Also show speculative differentials.", threshold: -2 },
 };
 
 function publishedGameweeks() {
@@ -201,6 +255,9 @@ function visibleLineups() {
 }
 
 function renderPlanningControls() {
+  // Clamping the horizon needs the published Gameweeks; before the release
+  // loads there are none, and clamping would silently shrink the plan to 1.
+  if (!state.bootstrap) return;
   if (!RISK_PROFILES[state.plan.risk_profile]) state.plan.risk_profile = "balanced";
   const gameweeks = publishedGameweeks();
   const select = $("#horizon-select");
@@ -209,15 +266,15 @@ function renderPlanningControls() {
   select.innerHTML = Array.from({ length: 5 }, (_, index) => {
     const length = index + 1;
     const enabled = length <= available;
-    return `<option value="${length}" ${length === state.plan.horizon_length ? "selected" : ""} ${enabled ? "" : "disabled"}>${length} GW${length === 1 ? "" : "s"}${enabled ? "" : " — not published"}</option>`;
+    return `<option value="${length}" ${length === state.plan.horizon_length ? "selected" : ""} ${enabled ? "" : "disabled"}>${length} Gameweek${length === 1 ? "" : "s"}${enabled ? "" : " — not published yet"}</option>`;
   }).join("");
   if (state.plan.horizon_length > available) state.plan.horizon_length = available || 1;
   select.value = String(state.plan.horizon_length);
   const first = gameweeks[0];
   const last = gameweeks[Math.min(state.plan.horizon_length, gameweeks.length) - 1];
   $("#horizon-note").textContent = gameweeks.length
-    ? `Published now: GW${first}–GW${gameweeks.at(-1)}. Showing ${state.plan.horizon_length} GW${state.plan.horizon_length === 1 ? "" : "s"} (GW${first}–GW${last}).`
-    : "No published Gameweek horizon is available yet.";
+    ? `Published: GW${first}–GW${gameweeks.at(-1)}. You are planning GW${first}–GW${last}.`
+    : "No Gameweeks are published yet.";
   $("#horizon-availability").textContent = gameweeks.length ? `${gameweeks.length} GW published` : "";
   const profiles = $("#risk-profiles");
   profiles.innerHTML = Object.entries(RISK_PROFILES).map(([key, profile]) => `<button type="button" class="risk-profile ${state.plan.risk_profile === key ? "selected" : ""}" data-risk-profile="${key}"><strong>${profile.label}</strong><small>${profile.note}</small></button>`).join("");
@@ -230,23 +287,45 @@ function renderPlanningControls() {
   renderWildcardControls();
 }
 
-function renderSetupSummary() {
-  const container = $("#setup-summary");
-  if (!container) return;
-  const teamName = state.teamProfile?.name;
-  const squadCount = state.plan.squad.filter((id) => playerById(id)).length;
-  container.innerHTML = `<div><span>Workspace</span><strong>${teamName || "Default squad"}</strong><small>${squadCount}/15 players loaded · ${state.plan.risk_profile} stance · ${state.plan.horizon_length} GW visible${state.plan.chip ? ` · ${CHIPS[state.plan.chip].label} active` : ""}</small></div><button type="button" class="button secondary" id="setup-settings">Adjust settings</button>`;
-  $("#setup-settings")?.addEventListener("click", () => navigateTo("settings"));
+function teamDisplayName() {
+  if (state.teamProfile?.name) return state.teamProfile.name;
+  if (state.teamProfile?.id) return `FPL team ${state.teamProfile.id}`;
+  return state.plan.squad_source === "demo" ? "Demo squad" : "Your squad";
+}
+
+function renderTeamHeader() {
+  const name = teamDisplayName();
+  const first = publishedGameweeks()[0];
+  $("#team-title").textContent = name;
+  const subtitle = $("#team-subtitle");
+  if (state.plan.squad_source === "demo" && !state.teamProfile) {
+    subtitle.innerHTML = 'You\'re exploring a demo squad. <button type="button" class="text-button" id="focus-team-id">Load your own team</button>';
+    $("#focus-team-id").addEventListener("click", () => {
+      $("#team-id").scrollIntoView({ behavior: "smooth", block: "center" });
+      $("#team-id").focus({ preventScroll: true });
+    });
+  } else {
+    subtitle.textContent = `Your best XI, captain and bench order${first ? ` for GW${first}` : ""}, and what to change before the deadline.`;
+  }
+  const summary = $("#team-summary");
+  if (state.teamProfile) {
+    summary.hidden = false;
+    summary.innerHTML = `<strong>${escapeHtml(name)}</strong><small>Team ID ${escapeHtml(state.teamProfile.id || "—")}${state.teamNote ? ` · ${escapeHtml(state.teamNote)}` : ""}</small>`;
+  } else {
+    summary.hidden = true;
+    summary.innerHTML = "";
+  }
 }
 
 function renderRelease() {
   const release = state.bootstrap.release;
-  $("#release-label").textContent = release.label;
-  $("#release-meta").textContent = `${release.model_version} · ${new Date(release.planning_as_of).toLocaleString()}`;
+  const healthLabels = { production: "Production", shadow: "Model preview", research_only: "Research only" };
+  $("#release-label").textContent = healthLabels[String(release.health || "").toLowerCase()] || release.label;
+  $("#release-meta").textContent = `${release.model_version} · built ${new Date(release.planning_as_of).toLocaleString()}`;
   const gws = release.model_runs.map((row) => row.gameweek);
-  $("#horizon-label").textContent = `GW${gws[0]}–GW${gws.at(-1)}`;
+  $("#horizon-label").textContent = gws.length > 1 ? `GW${gws[0]}–GW${gws.at(-1)}` : `GW${gws[0]}`;
   renderPlanningControls();
-  renderSetupSummary();
+  renderTeamHeader();
 
   const coverage = release.coverage;
   $("#release-coverage").textContent = coverage
@@ -258,7 +337,7 @@ function renderRelease() {
     const finalCount = freshness.gameweeks.filter((row) => row.fpl_finality?.is_final).length;
     const summary = `${finalCount}/${freshness.gameweeks.length} GW final`;
     $("#release-freshness").textContent = freshness.passes ? summary : `${summary} · ${freshness.problems.length} freshness issue(s)`;
-    $("#release-freshness").style.color = freshness.passes ? "" : "var(--red)";
+    $("#release-freshness").classList.toggle("negative", !freshness.passes);
   } else {
     $("#release-freshness").textContent = "";
   }
@@ -267,10 +346,12 @@ function renderRelease() {
 function renderSquadEditor() {
   const selectedPlayers = state.plan.squad.map(playerById).filter(Boolean);
   const cost = selectedPlayers.reduce((sum, player) => sum + player.price_tenths, 0);
-  $("#squad-cost").textContent = `${money(cost)} squad`;
-  $("#team-id-note").textContent = state.plan.selling_price_is_estimated
-    ? "Loaded from your public Team ID. Selling prices are ESTIMATED from current market price, not FPL's own profit-sharing sale rule — check the FPL app for your exact sell value before making a real transfer."
-    : "Loads your public squad by Team ID only — never a password or session cookie. Estimated selling prices (current market price, not FPL's own profit-sharing rule) are used until you adjust them below.";
+  $("#squad-cost").textContent = `${money(cost)} squad value`;
+  if (!state.teamNote) {
+    $("#team-id-note").textContent = state.plan.selling_price_is_estimated
+      ? "Selling prices are estimated from current prices, not FPL's profit-sharing rule. Check the FPL app for your exact sell values before a real transfer."
+      : "We read your public squad only — never a password or login.";
+  }
   const positionOrder = ["GK", "DEF", "MID", "FWD"];
   $("#squad-editor").classList.remove("skeleton");
   $("#squad-editor").innerHTML = positionOrder.map((position) => {
@@ -281,7 +362,7 @@ function renderSquadEditor() {
         .sort((a, b) => b.price_tenths - a.price_tenths || a.name.localeCompare(b.name))
         .map((candidate) => `<option value="${candidate.fpl_id}" ${candidate.fpl_id === player.fpl_id ? "selected" : ""}>${candidate.name} · ${candidate.team} · ${money(candidate.price_tenths)}</option>`)
         .join("");
-      return `<div class="squad-player"><span class="team-chip">${player.team}</span><select data-player-id="${player.fpl_id}" aria-label="Replace ${player.name}">${options}</select><strong>${money(player.price_tenths)}</strong></div>`;
+      return `<div class="squad-player"><span class="kit team-chip" data-kit="${player.team}" title="${player.team}"></span><select data-player-id="${player.fpl_id}" aria-label="Replace ${player.name}">${options}</select><strong>${money(player.price_tenths)}</strong></div>`;
     }).join("")}</div>`;
   }).join("");
 
@@ -315,18 +396,18 @@ function renderChipPanel() {
   const container = $("#chip-options");
   if (!container) return;
   const active = state.plan.chip;
-  const option = (key, label, note, { used = false, changesTransfers = false } = {}) => `<div class="chip-row ${changesTransfers ? "transfer-chip" : ""} ${active === key || (!active && !key) ? "active" : ""} ${used ? "used" : ""}">
-      <label><input type="radio" name="active-chip" value="${key}" ${active === key || (!active && !key) ? "checked" : ""} ${used ? "disabled" : ""}><span><strong>${label}</strong><small>${note}</small></span></label>
+  const option = (key, label, note, { used = false } = {}) => `<div class="chip-row ${active === key || (!active && !key) ? "active" : ""} ${used ? "used" : ""}">
+      <label><input type="radio" name="active-chip" value="${key}" ${active === key || (!active && !key) ? "checked" : ""} ${used ? "disabled" : ""}><span><strong>${label}</strong>${active === key && key ? `<small>${note}</small>` : ""}</span></label>
       ${key ? `<button type="button" class="chip-status" data-chip-status="${key}" aria-pressed="${used}" aria-label="${label} used this half-season">${used ? "Used" : "Available"}</button>` : ""}
     </div>`;
-  container.innerHTML = option("", "No chip", `Score ${chipGameweekLabel()} without a chip.`)
+  container.innerHTML = option("", "No chip", "")
     + Object.entries(CHIPS).map(([key, chip]) => {
       const used = state.plan.chip_status[key] === "used";
-      return option(key, chip.label, used ? "Marked used this half-season." : chip.note, { used, changesTransfers: chip.changesTransfers });
+      return option(key, chip.label, used ? "Already played this half-season." : chip.note, { used });
     }).join("");
   $("#chip-note").textContent = active
-    ? `${CHIPS[active].label} is a what-if for ${chipGameweekLabel()}. The squad rating stays chip-free.`
-    : `Try one available chip for ${chipGameweekLabel()}. Mark chips you have already played as used.`;
+    ? `${CHIPS[active].label} is a what-if for ${chipGameweekLabel()}. Your squad rating stays chip-free.`
+    : `Try a chip for ${chipGameweekLabel()}. Tap “Available” to mark a chip you've already played.`;
   container.querySelectorAll('input[name="active-chip"]').forEach((input) => input.addEventListener("change", () => setActiveChip(input.value || null)));
   container.querySelectorAll("[data-chip-status]").forEach((button) => button.addEventListener("click", () => toggleChipStatus(button.dataset.chipStatus)));
   renderWildcardControls();
@@ -339,8 +420,8 @@ async function setActiveChip(chip) {
   persistPlan();
   renderChipPanel();
   resetTransfersView(chip
-    ? `${CHIPS[chip].label} is now active for ${chipGameweekLabel()} — re-scan to compare moves with the chip played.`
-    : "Chip cleared — re-scan to compare moves without a chip.");
+    ? `${CHIPS[chip].label} is now active for ${chipGameweekLabel()} — scan again to compare moves with the chip played.`
+    : "Chip cleared — scan again to compare moves without a chip.");
   await runLineups();
 }
 
@@ -352,7 +433,7 @@ async function toggleChipStatus(chip) {
   if (clearedActive) state.plan.chip = null;
   persistPlan();
   renderChipPanel();
-  if (clearedActive) resetTransfersView(`${CHIPS[chip].label} marked used, so it is no longer active — re-scan to compare moves without it.`);
+  if (clearedActive) resetTransfersView(`${CHIPS[chip].label} marked used, so it is no longer active — scan again to compare moves without it.`);
   await runLineups();
 }
 
@@ -380,13 +461,22 @@ function renderWildcardControls() {
       : "";
 }
 
+function fixtureLabel(player) {
+  const fixtures = player.fixtures || [];
+  if (fixtures.length === 0) return "no fixture";
+  return fixtures.map((row) => `${row.opponent} (${row.is_home ? "H" : "A"})`).join(", ");
+}
+
 function playerCard(player, captainId, viceId, captainBadge = "C") {
   const badge = player.fpl_id === captainId ? captainBadge : player.fpl_id === viceId ? "V" : "";
-  return `<article class="player-card ${player.position.toLowerCase()}">
-    ${badge ? `<span class="captain-badge">${badge}</span>` : ""}
-    <span class="shirt">${player.team_id}</span>
-    <strong>${player.name}</strong>
-    <span>${player.position} · ${points(player.xpts)} xPts</span>
+  const badgeClass = badge === "TC" ? "triple" : badge === "V" ? "vice" : "";
+  const team = teamCode(player);
+  const fixture = fixtureLabel(player);
+  return `<article class="pitch-player player-card ${player.position.toLowerCase()}" title="${escapeHtml(`${player.name} · ${team} · ${fixture} · ${points(player.xpts)} xPts`)}">
+    ${badge ? `<span class="captain-badge ${badgeClass}">${badge}</span>` : ""}
+    <span class="kit" data-kit="${team}"></span>
+    <strong class="name">${player.name}</strong>
+    <span class="meta"><span>${fixture}</span><b>${Number(player.xpts || 0).toFixed(1)}</b></span>
   </article>`;
 }
 
@@ -410,8 +500,8 @@ function renderPendingTransfers() {
     ? `Free Hit moves apply to GW${summary.squad_reverts_after_gameweek} only and the squad reverts, so there is nothing to commit.`
     : state.plan.chip === "wildcard"
       ? "No hits while Wildcard is active. Committing marks your Wildcard used."
-      : "Lineup and outlook already include these moves.";
-  const markup = pending.length === 0 ? "" : `<div class="pending-heading"><span>Staged transfers (${pending.length})</span><span>Not committed</span></div><div class="pending-list">${pending.map((row, index) => `<span class="pending-chip">${pendingTransferLabel(row)}<button type="button" data-remove-pending="${index}" aria-label="Remove staged transfer ${pendingTransferLabel(row)}">×</button></span>`).join("")}</div><div class="pending-actions"><small>${actionNote}</small><button type="button" class="button primary" data-commit-pending ${summary && !commitBlocked ? "" : "disabled"}>Commit to squad</button></div>`;
+      : "Your lineup and planner already include these moves.";
+  const markup = pending.length === 0 ? "" : `<div class="pending-heading"><span>Staged transfers (${pending.length})</span><span>Not made in FPL yet</span></div><div class="pending-list">${pending.map((row, index) => `<span class="pending-chip">${pendingTransferLabel(row)}<button type="button" data-remove-pending="${index}" aria-label="Remove staged transfer ${pendingTransferLabel(row)}">×</button></span>`).join("")}</div><div class="pending-actions"><small>${actionNote}</small><button type="button" class="button primary small" data-commit-pending ${summary && !commitBlocked ? "" : "disabled"}>Commit to squad</button></div>`;
   $$("#squad-pending-transfers, #transfers-pending-transfers").forEach((container) => {
     container.innerHTML = markup;
     container.querySelectorAll("[data-remove-pending]").forEach((button) => button.addEventListener("click", () => removePendingTransfer(Number(button.dataset.removePending))));
@@ -424,7 +514,7 @@ async function removePendingTransfer(index) {
   state.plan.pending_transfers.splice(index, 1);
   persistPlan();
   renderPendingTransfers();
-  resetTransfersView("Staged move removed — re-scan to compare from the updated plan.");
+  resetTransfersView("Staged move removed — scan again to compare from the updated plan.");
   await runLineups();
 }
 
@@ -445,7 +535,7 @@ async function stageTransfer(row) {
   if (!row?.out?.fpl_id || !row?.in?.fpl_id) return;
   await stageTransfers(
     [row],
-    `${row.out.name} is staged for ${row.in.name} — lineup and outlook are recalculating.`,
+    `${row.out.name} → ${row.in.name} is staged. Your lineup and planner now include it.`,
   );
 }
 
@@ -454,7 +544,7 @@ async function stagePath(path) {
   const moveNames = path.transfers.map((row) => `${row.out_name} → ${row.in_name}`).join(" · ");
   await stageTransfers(
     path.transfers,
-    `${moveNames} staged from the ${path.label.toLowerCase()} path — lineup and outlook are recalculating.`,
+    `${moveNames} staged from “${path.label}”. Your lineup and planner now include it.`,
   );
 }
 
@@ -480,19 +570,23 @@ async function commitPendingTransfers() {
   $("#free-transfers").value = String(state.plan.free_transfers);
   renderSquadEditor();
   resetTransfersView(playedWildcard
-    ? "Wildcard committed and marked used — free transfers were preserved. Re-scan to compare from the new squad."
-    : "Transfer committed — re-scan to compare from the committed squad.");
+    ? "Wildcard committed and marked used — free transfers were kept. Scan again to compare from the new squad."
+    : "Transfer committed — scan again to compare from your updated squad.");
   await runLineups();
 }
 
-function resetTransfersView(message = "Squad or scenario changed — run the scan again to compare against the reviewed scenario.") {
+function transfersEmptyState(message) {
+  return `<div><strong>${message}</strong>Compare holding, a free transfer, a −4 hit and rolling, then the best single moves.</div><button type="button" class="button primary" id="rescan-transfers">Find my best transfers</button>`;
+}
+
+function resetTransfersView(message = "Your squad or scenario changed — scan again to compare from the current plan.") {
   state.transfers = null;
   renderDecisionReceipts();
   renderPendingTransfers();
   $("#transfer-paths").innerHTML = "";
   const container = $("#transfer-results");
   container.className = "transfer-list empty-state";
-  container.innerHTML = `<div>${message}</div><button type="button" class="button secondary" id="rescan-transfers">Re-scan transfers</button>`;
+  container.innerHTML = transfersEmptyState(message);
   $("#rescan-transfers")?.addEventListener("click", runTransfers);
 }
 
@@ -521,7 +615,7 @@ function renderSensitivityBanner(sensitivity, gameweek) {
     const names = state.roleScenarioOverrides
       .map((row) => playerById(row.fpl_id)?.name || `#${row.fpl_id}`)
       .join(", ");
-    banner.innerHTML = `<strong>Reviewed scenario active.</strong> Assuming ${names} blanks. This does not change the underlying release -- it is a what-if, recomputed for this view only. <button type="button" id="clear-scenario" class="button secondary">Back to base release</button>`;
+    banner.innerHTML = `<strong>What-if active:</strong> assuming ${names} does not play. The projections themselves are unchanged — this view is recalculated for you only. <button type="button" id="clear-scenario" class="button secondary small">Back to the normal projections</button>`;
     $("#clear-scenario").addEventListener("click", clearRoleScenarioOverrides);
     return;
   }
@@ -536,12 +630,12 @@ function renderSensitivityBanner(sensitivity, gameweek) {
   const buttons = flagged
     .map(
       (row) =>
-        `<button type="button" class="button secondary review-scenario" data-fpl-id="${row.fpl_id}" data-gameweek="${gameweek}">Review: if ${row.player_name} blanks</button>`
+        `<button type="button" class="button secondary small review-scenario" data-fpl-id="${row.fpl_id}" data-gameweek="${gameweek}">What if ${row.player_name} doesn't play?</button>`
     )
     .join(" ");
   banner.hidden = false;
   banner.className = "sensitivity-banner";
-  banner.innerHTML = `<strong>Sensitive recommendation.</strong> This lineup depends on ${players || "a rotation-risk player"}'s involvement -- if they blank, the starting XI or captain would change. ${buttons}`;
+  banner.innerHTML = `<strong>Fragile pick.</strong> This lineup depends on ${players || "a rotation-risk player"} playing — if they don't, your best XI or captain would change. ${buttons}`;
   $$(".review-scenario").forEach((button) =>
     button.addEventListener("click", () =>
       applyBlankScenario(Number(button.dataset.fplId), Number(button.dataset.gameweek))
@@ -552,15 +646,14 @@ function renderSensitivityBanner(sensitivity, gameweek) {
 function renderWeekly() {
   if (!state.lineups) return;
   const lineup = state.lineups.lineups[0];
-  const weeklyPercentile = state.lineups.squad_rating?.available
-    ? state.lineups.squad_rating.model_strength.per_gameweek.find((row) => row.gameweek === lineup.gameweek)?.percentile
-    : null;
+  const rating = state.lineups.squad_rating;
+  const overall = rating?.available ? rating.model_strength.overall_3gw : null;
+  const chipLine = lineup.chip_effect ? `Includes ${lineup.chip_effect.label} ${signed(lineup.chip_effect.delta_xpts)}` : "Best XI with captain";
   $("#weekly-summary").classList.remove("skeleton");
   $("#weekly-summary").innerHTML = `
-    <div><span>GW${lineup.gameweek} xPts${weeklyPercentile == null ? "" : ` · ${Math.round(weeklyPercentile)}th pct`}</span><strong>${points(lineup.total_xpts)}</strong></div>
-    <div><span>Formation</span><strong>${lineup.formation}</strong></div>
-    <div><span>Captain</span><strong>${lineup.captain.name}</strong></div>
-    <div><span>Autosub EV</span><strong>${points(lineup.expected_autosub_value)}</strong></div>`;
+    <div class="stat primary"><span>GW${lineup.gameweek} projected points</span><strong>${points(lineup.total_xpts)}</strong><small>${chipLine}</small></div>
+    <div class="stat"><span>Squad rating</span><strong class="rating-value">${overall ? `${ordinal(overall.percentile)} percentile` : "—"}</strong><small>${overall ? `vs legal squads on your budget · ${rating.display_label}` : "Rating withheld for this release"}</small></div>
+    <div class="stat"><span>Captain</span><strong>${lineup.captain.name}</strong><small>Vice: ${lineup.vice_captain.name}</small></div>`;
   const planSummary = state.lineups.plan_summary || {
     gameweek: lineup.gameweek,
     formation: lineup.formation,
@@ -577,59 +670,65 @@ function renderWeekly() {
   const revertNote = planSummary.squad_reverts_after_gameweek
     ? `<p class="plan-note">Free Hit squad for GW${planSummary.squad_reverts_after_gameweek} only; later Gameweeks use your committed squad.</p>`
     : "";
-  $("#plan-header").innerHTML = `<span class="plan-title">Plan for GW${planSummary.gameweek}</span><div><span>Formation</span><strong>${planSummary.formation}</strong></div><div><span>Captain</span><strong>${planSummary.captain.name}</strong></div>${chipCell}<div><span>Staged transfers</span><strong>${planSummary.staged_transfer_count}</strong></div>${hitCell}<div class="plan-delta"><span>Net xPts vs holding</span><strong class="${planDelta >= 0 ? "positive" : "negative"}">${planDelta >= 0 ? "+" : ""}${points(planDelta)}</strong></div>${revertNote}`;
+  const planIsIdle = !planSummary.staged_transfer_count && !planSummary.chip && !planSummary.pending_hit_cost;
+  $("#plan-header").innerHTML = planIsIdle ? "" : `<span class="plan-title">Plan for GW${planSummary.gameweek}</span><div><span>Staged transfers</span><strong>${planSummary.staged_transfer_count}</strong></div>${chipCell}${hitCell}<div class="plan-delta"><span>Net xPts vs holding</span><strong class="${planDelta >= 0 ? "positive" : "negative"}">${planDelta >= 0 ? "+" : ""}${points(planDelta)}</strong></div>${revertNote}`;
   renderSensitivityBanner(lineup.role_scenario_sensitivity, lineup.gameweek);
   renderMarginalChanges(lineup);
   const chip = lineup.chip_effect?.chip;
   const captainBadge = chip === "triple_captain" ? "TC" : "C";
+  $("#lineup-title").textContent = `Best XI for GW${lineup.gameweek} · ${lineup.formation}`;
   const rows = ["GK", "DEF", "MID", "FWD"].map((position) => {
     const players = lineup.starters.filter((player) => player.position === position);
     return `<div class="pitch-line ${position.toLowerCase()}">${players.map((player) => playerCard(player, lineup.captain.fpl_id, lineup.vice_captain.fpl_id, captainBadge)).join("")}</div>`;
   });
   $("#pitch").classList.remove("skeleton");
   $("#pitch").innerHTML = rows.join("");
-  const benchTitle = chip === "bench_boost" ? "Bench order · Bench Boost: all four score" : "Bench order";
-  $("#bench").innerHTML = `<div class="bench-title">${benchTitle}</div>${lineup.bench.map((player, index) => `<div class="bench-player"><span>${index || "GK"}</span><strong>${player.name}</strong><small>${points(player.xpts)} xPts</small></div>`).join("")}`;
+  const benchTitle = chip === "bench_boost"
+    ? "Bench<small>Bench Boost: all four score</small>"
+    : `Bench<small>In substitution order · autosub value ${signed(lineup.expected_autosub_value)}</small>`;
+  $("#bench").innerHTML = `<div class="bench-title">${benchTitle}</div>${lineup.bench.map((player, index) => `<div class="bench-player"><span class="kit" data-kit="${teamCode(player)}"></span><strong>${player.name}</strong><small><span class="bench-order">${index ? `${index}.` : "GK"}</span> ${points(player.xpts)} xPts</small></div>`).join("")}`;
 }
 
 function renderMarginalChanges(lineup) {
   const container = $("#marginal-changes");
   const comparison = lineup.current_setup_comparison;
+  if (!comparison && !state.plan.current_setup && !state.teamProfile) {
+    // A demo or hand-built squad has no submitted XI to compare with.
+    container.className = "marginal-changes";
+    container.hidden = true;
+    container.innerHTML = "";
+    return;
+  }
+  container.hidden = false;
   if (!comparison) {
     container.className = "marginal-changes unavailable";
     const stagedNote = state.plan.current_setup && effectivePendingCount() > 0
-      ? "Your submitted XI comparison stays anchored to the committed squad; staged moves are shown separately above."
-      : "The model needs your submitted XI, captain, vice-captain, and bench order — a squad list alone is not enough.";
-    container.innerHTML = `<div><span>No-chip changes vs your current setup</span><strong>${state.plan.current_setup && effectivePendingCount() > 0 ? "Committed setup retained" : "Load your Team ID to compare"}</strong></div><p>${stagedNote}</p>`;
+      ? "The comparison with your submitted team stays on your committed squad; staged moves are shown in the plan bar above."
+      : "Your loaded picks are for a different Gameweek than the projections, so there's no submitted XI to compare with yet.";
+    container.innerHTML = `<div><span class="label">No-chip changes vs your current setup</span><strong>${state.plan.current_setup && effectivePendingCount() > 0 ? "Committed setup kept" : "Not compared yet"}</strong></div><p>${stagedNote}</p>`;
     return;
   }
 
   const marginal = Number(comparison.marginal_xpts || 0);
   const changeRows = [];
   if (comparison.started.length > 0) {
-    changeRows.push(`<li><strong>XI</strong><span>Start ${comparison.started.map((row) => row.name).join(", ")}; bench ${comparison.benched.map((row) => row.name).join(", ")}.</span><small>Best legal formation raises starting-XI score by ${comparison.starting_xpts_gain >= 0 ? "+" : ""}${points(comparison.starting_xpts_gain)} xPts.</small></li>`);
+    changeRows.push(`<li><strong>XI</strong><span>Start ${comparison.started.map((row) => row.name).join(", ")}; bench ${comparison.benched.map((row) => row.name).join(", ")}.</span><small>The best legal formation adds ${signed(comparison.starting_xpts_gain)} xPts to your starting XI.</small></li>`);
   }
   if (comparison.captain_change) {
-    changeRows.push(`<li><strong>Captain</strong><span>${comparison.captain_change.from.name} → ${comparison.captain_change.to.name}</span><small>The higher projected captain adds ${comparison.captain_xpts_gain >= 0 ? "+" : ""}${points(comparison.captain_xpts_gain)} xPts.</small></li>`);
+    changeRows.push(`<li><strong>Captain</strong><span>${comparison.captain_change.from.name} → ${comparison.captain_change.to.name}</span><small>The higher-projected captain adds ${signed(comparison.captain_xpts_gain)} xPts.</small></li>`);
   }
   if (comparison.vice_captain_change) {
-    changeRows.push(`<li><strong>Vice</strong><span>${comparison.vice_captain_change.from.name} → ${comparison.vice_captain_change.to.name}</span><small>Next-highest projected starter is the fallback if the captain does not play.</small></li>`);
+    changeRows.push(`<li><strong>Vice</strong><span>${comparison.vice_captain_change.from.name} → ${comparison.vice_captain_change.to.name}</span><small>Your next-best starter covers if the captain doesn't play.</small></li>`);
   }
   if (comparison.bench_order_changed) {
-    changeRows.push(`<li><strong>Bench</strong><span>${lineup.bench.map((row) => row.name).join(" → ")}</span><small>Goalkeeper first; outfield substitutes are ordered by projected points for autosubs.</small></li>`);
+    changeRows.push(`<li><strong>Bench</strong><span>${lineup.bench.map((row) => row.name).join(" → ")}</span><small>Goalkeeper first, then outfield subs by projected points for autosubs.</small></li>`);
   }
   if (changeRows.length === 0) {
-    changeRows.push("<li><strong>No changes</strong><span>Your submitted XI, captain, vice-captain, and bench order already match the model.</span></li>");
+    changeRows.push("<li><strong>All set</strong><span>Your submitted XI, captain, vice-captain and bench order already match the best pick.</span></li>");
   }
 
   container.className = "marginal-changes available";
-  container.innerHTML = `<div class="marginal-heading"><div><span>No-chip changes vs your current setup</span><strong>${points(comparison.current_total_xpts)} → ${points(comparison.recommended_total_xpts)} xPts</strong></div><b class="${marginal >= 0 ? "positive" : "negative"}">${marginal >= 0 ? "+" : ""}${points(marginal)} xPts</b></div><ul>${changeRows.join("")}</ul>`;
-}
-
-function fixtureLabel(player) {
-  const fixtures = player.fixtures || [];
-  if (fixtures.length === 0) return "no fixture";
-  return fixtures.map((row) => `${row.is_home ? "" : "@"}${row.opponent}`).join(", ");
+  container.innerHTML = `<div class="marginal-heading"><div><h2>What to change before the deadline</h2><span>No-chip changes vs your current setup · ${points(comparison.current_total_xpts)} → ${points(comparison.recommended_total_xpts)} xPts</span></div><b class="${marginal >= 0 ? "positive" : "negative"}">${signed(marginal)} xPts</b></div><ul>${changeRows.join("")}</ul>`;
 }
 
 function renderOutlook() {
@@ -637,10 +736,12 @@ function renderOutlook() {
   const horizonLineups = visibleLineups();
   const rating = state.lineups.squad_rating;
   const overallRating = rating?.available ? rating.model_strength.overall_3gw : null;
+  const first = horizonLineups[0]?.gameweek;
+  const last = horizonLineups.at(-1)?.gameweek;
   $("#outlook-total").classList.remove("skeleton");
   const visibleTotal = horizonLineups.reduce((sum, row) => sum + Number(row.total_xpts || 0), 0);
-  $("#outlook-total").innerHTML = `<div><span>Projected horizon score</span><strong>${points(visibleTotal)}</strong><small>captaincy included · ${state.plan.horizon_length}-GW visible slice</small></div>${overallRating ? `<div class="rating-score"><span>${rating.display_label}</span><strong>${Math.round(overallRating.percentile)}</strong><small>release benchmark (full published horizon)</small></div>` : `<div class="rating-score unavailable"><span>${rating?.display_label || "Model Preview"}</span><strong>—</strong><small>benchmark unavailable; raw xPts is still valid</small></div>`}`;
-  if (overallRating) $("#outlook-total").insertAdjacentHTML("beforeend", `<small class="outlook-benchmark-note">percentile benchmark is for the full published horizon${state.lineups.chip_scenario ? "; chip what-if: the rating scores your squad without the chip" : ""}.</small>`);
+  $("#outlook-total").innerHTML = `<div><span>Projected horizon score</span><strong>${points(visibleTotal)}</strong><small>GW${first}${last !== first ? `–GW${last}` : ""} · best XI and captain each week</small></div>${overallRating ? `<div class="rating-score"><span>${rating.display_label} rating</span><strong>${ordinal(overallRating.percentile)}</strong><small>percentile over the full published horizon</small></div>` : `<div class="rating-score unavailable"><span>${rating?.display_label || "Model Preview"} rating</span><strong>—</strong><small>No benchmark yet; the points are still valid</small></div>`}`;
+  if (overallRating && state.lineups.chip_scenario) $("#outlook-total").insertAdjacentHTML("beforeend", `<small class="outlook-benchmark-note">Chip what-if: the rating scores your squad without the chip.</small>`);
   const perGameweekRating = new Map(
     rating?.available
       ? rating.model_strength.per_gameweek.map((row) => [row.gameweek, row.percentile])
@@ -652,10 +753,10 @@ function renderOutlook() {
     return `<article class="gw-card">
       <span>GW${lineup.gameweek}</span>
       <strong>${points(lineup.total_xpts)}</strong>
-      <p>${lineup.formation} · ${lineup.captain.name} (C) · ${fixtureLabel(lineup.captain)}</p>
+      <p>${lineup.formation} · ${lineup.captain.name} (C)${lineup.captain.fixtures?.length ? ` vs ${fixtureLabel(lineup.captain)}` : ""}</p>
       ${lineup.chip_effect ? `<p class="chip-effect"><span class="chip-badge">${lineup.chip_effect.label}</span>${lineup.chip_effect.delta_xpts ? ` +${points(lineup.chip_effect.delta_xpts)} xPts` : ""}</p>` : ""}
-      <p class="gw-percentile">${percentile == null ? "Rating withheld" : `${Math.round(percentile)}th percentile`}</p>
-      <p class="bench-depth">Bench depth <b>${points(benchTotal)}</b> xPts</p>
+      <p class="gw-percentile">${percentile == null ? "Rating withheld" : `${ordinal(percentile)} percentile`}</p>
+      <p class="bench-depth">Bench <b>${points(benchTotal)}</b> xPts</p>
     </article>`;
   }).join("");
 
@@ -666,9 +767,9 @@ function renderOutlook() {
     detail.innerHTML = `<strong>Why there is no rating yet</strong><p>${rating?.explanation || "No benchmark contract was returned."}</p>`;
   } else {
     const uncertainty = rating.projection_uncertainty.cumulative_rss;
-    const releaseGate = rating.release_gate.production_approved ? "Production approved" : `${rating.release_gate.health} release`;
+    const releaseGate = rating.release_gate.production_approved ? "Production approved." : `${rating.release_gate.health === "shadow" ? "Model preview" : rating.release_gate.health} release — not yet approved for production.`;
     detail.className = "rating-detail available";
-    detail.innerHTML = `<div><span>Model strength</span><strong>${Math.round(overallRating.percentile)}th percentile</strong></div><div><span>Data confidence</span><strong>${rating.data_confidence.state}</strong></div><div><span>Projection uncertainty</span><strong>${uncertainty == null ? "—" : `±${points(uncertainty)}`}</strong></div><div><span>Squad rules</span><strong>${rating.squad_rule_health.state}</strong></div><p>${releaseGate}. ${rating.explanation}</p>`;
+    detail.innerHTML = `<div><span>Squad strength</span><strong>${ordinal(overallRating.percentile)} percentile</strong></div><div><span>Data confidence</span><strong>${capitalize(rating.data_confidence.state)}</strong></div><div><span>Projection uncertainty</span><strong>${uncertainty == null ? "—" : `±${points(uncertainty)}`}</strong></div><div><span>Squad rules</span><strong>${capitalize(rating.squad_rule_health.state)}</strong></div><p>${releaseGate} ${rating.explanation}</p>`;
   }
 
   const totals = new Map();
@@ -677,8 +778,9 @@ function renderOutlook() {
   horizonLineups.forEach((lineup) => {
     [...lineup.starters, ...lineup.bench].forEach((player) => {
       totals.set(player.fpl_id, (totals.get(player.fpl_id) || 0) + Number(player.xpts || 0));
-      const existing = fixturesByPlayer.get(player.fpl_id) || [];
-      fixturesByPlayer.set(player.fpl_id, [...existing, `GW${lineup.gameweek} ${fixtureLabel(player)}`]);
+      const byGameweek = fixturesByPlayer.get(player.fpl_id) || new Map();
+      byGameweek.set(lineup.gameweek, player.fixtures || []);
+      fixturesByPlayer.set(player.fpl_id, byGameweek);
       if (player.uncertainty != null) {
         const values = uncertaintyByPlayer.get(player.fpl_id) || [];
         uncertaintyByPlayer.set(player.fpl_id, [...values, player.uncertainty]);
@@ -686,12 +788,19 @@ function renderOutlook() {
     });
   });
   const rows = state.plan.squad.map(playerById).filter(Boolean).sort((a, b) => (totals.get(b.fpl_id) || 0) - (totals.get(a.fpl_id) || 0));
-  $("#player-outlook").innerHTML = `<div class="table-head"><span>Player</span><span>Fixtures</span><span>Confidence</span><span>${state.plan.horizon_length}-GW xPts</span></div>${rows.map((player) => {
+  const tickerGameweeks = horizonLineups.map((lineup) => lineup.gameweek);
+  const ticker = (player) => `<div class="fixture-ticker">${tickerGameweeks.map((gameweek) => {
+    const fixtures = fixturesByPlayer.get(player.fpl_id)?.get(gameweek) || [];
+    if (fixtures.length === 0) return `<span class="blank" title="GW${gameweek}: no fixture">—</span>`;
+    const label = fixtures.map((row) => `${row.opponent} ${row.is_home ? "H" : "A"}`).join(" + ");
+    return `<span class="${fixtures.every((row) => row.is_home) ? "home" : ""}" title="GW${gameweek}: ${label}">${label}</span>`;
+  }).join("")}</div>`;
+  $("#player-outlook").innerHTML = `<div class="table-head"><span>Player</span><div class="fixture-ticker">${tickerGameweeks.map((gameweek) => `<span>GW${gameweek}</span>`).join("")}</div><span>Uncertainty</span><span>${state.plan.horizon_length}-GW xPts</span></div>${rows.map((player) => {
     const uncertaintyValues = uncertaintyByPlayer.get(player.fpl_id);
     const confidence = uncertaintyValues && uncertaintyValues.length
       ? `±${points(uncertaintyValues.reduce((a, b) => a + b, 0) / uncertaintyValues.length)}`
       : "—";
-    return `<div class="table-row outlook-row"><strong>${player.name}<small>${player.team}</small></strong><span class="small">${(fixturesByPlayer.get(player.fpl_id) || []).join(" · ")}</span><span>${confidence}</span><span>${points(totals.get(player.fpl_id))}</span></div>`;
+    return `<div class="table-row outlook-row"><strong>${player.name}<small>${player.team} · ${player.position}</small></strong>${ticker(player)}<span>${confidence}</span><span>${points(totals.get(player.fpl_id))}</span></div>`;
   }).join("")}`;
 }
 
@@ -699,16 +808,21 @@ function renderTransferPaths() {
   const container = $("#transfer-paths");
   const paths = state.transfers?.paths || [];
   const recommendedPathId = state.transfers?.recommended_path_id;
-  container.innerHTML = paths.map((path) => {
+  if (paths.length === 0) {
+    container.innerHTML = "";
+    return;
+  }
+  const gameweek = state.transfers?.horizon?.[0];
+  container.innerHTML = `<h2 class="section-label">Your options${gameweek ? ` for GW${gameweek}` : ""}</h2><div class="path-list">${paths.map((path) => {
     const moves = path.transfers.map((row) => `${row.out_name} <i>→</i> ${row.in_name}`).join(" · ");
     const detail = moves || path.note || "No transfer this Gameweek.";
     const isRecommended = path.id === recommendedPathId;
     return `<article class="transfer-path ${isRecommended ? "recommended" : ""}" data-path-id="${path.id}">
-      <div><span>${isRecommended ? "Recommended path" : "Path"}</span><strong>${path.label}</strong><small>${detail}</small></div>
-      <div><span>Net xPts</span><strong>${points(path.net_xpts)}</strong><small class="${path.delta_xpts_vs_hold >= 0 ? "positive" : "negative"}">${path.delta_xpts_vs_hold >= 0 ? "+" : ""}${points(path.delta_xpts_vs_hold)} vs hold${path.hit ? ` · includes −${path.hit} hit` : ""}</small></div>
-      ${path.transfers.length ? `<button type="button" class="button ${isRecommended ? "primary" : "secondary"}" data-stage-path="${path.id}">Stage this</button>` : ""}
+      <div><span>${isRecommended ? "Recommended" : "Option"}</span><strong>${path.label}</strong><small>${detail}</small></div>
+      <div><span>Net xPts</span><strong>${points(path.net_xpts)}</strong><small class="${path.delta_xpts_vs_hold >= 0 ? "positive" : "negative"}">${signed(path.delta_xpts_vs_hold)} vs hold${path.hit ? ` · includes −${path.hit} hit` : ""}</small></div>
+      ${path.transfers.length ? `<button type="button" class="button ${isRecommended ? "primary" : "secondary"} small" data-stage-path="${path.id}">Stage this</button>` : ""}
     </article>`;
-  }).join("");
+  }).join("")}</div>`;
   container.querySelectorAll("[data-stage-path]").forEach((button) => button.addEventListener("click", () => {
     stagePath(paths.find((path) => path.id === button.dataset.stagePath));
   }));
@@ -726,14 +840,16 @@ function renderTransfers() {
     ? `<div class="transfer-mode chip">Scored with ${chip.label} played in GW${state.transfers.horizon[0]}. ${chip.changesTransfers ? "Every move is free and saved free transfers are kept." : chip.note}</div>`
     : "";
   container.className = "transfer-list";
-  container.innerHTML = `${chipMode}<div class="transfer-mode profile">${profile.label} stance: ${profile.note}</div>${suggestions.length === 0 ? `<div class="empty-state">No retained single-move alternatives for this stance. The path comparison above still shows Hold and Roll.</div>` : suggestions.map((row, index) => `<article class="transfer-card">
-    <div class="transfer-move"><span>${index === 0 ? "Best retained move" : `Alternative ${index + 1}`}</span><strong>${row.out.name} <i>→</i> ${row.in.name}</strong><small>${row.out.position} · bank ${money(row.remaining_bank_tenths)}</small><button type="button" class="button secondary" data-apply-out="${row.out.fpl_id}" data-apply-in="${row.in.fpl_id}" data-lineup-changed="${row.lineup_changed ? "true" : "false"}">Apply move</button></div>
-    <div><span>Net gain</span><strong class="${row.net_xpts_gain >= 0 ? "positive" : "negative"}">${row.net_xpts_gain >= 0 ? "+" : ""}${points(row.net_xpts_gain)}</strong><small>${row.hit_cost ? `includes −${row.hit_cost} hit` : "no hit"}</small></div>
+  container.innerHTML = `<h2 class="section-label">Best single moves</h2>${chipMode}<div class="transfer-mode profile">${profile.label} stance: ${profile.note} <button type="button" class="text-button" data-goto="settings">Change</button></div>${suggestions.length === 0 ? `<div class="empty-state">No single moves pass the ${profile.label.toLowerCase()} stance. The options above still compare holding and rolling.</div>` : suggestions.map((row, index) => `<article class="transfer-card">
+    <div class="transfer-move"><span>${index === 0 ? "Best move" : `Alternative ${index}`}</span><strong>${row.out.name} <i>→</i> ${row.in.name}</strong><small>${row.out.position} · ${money(row.remaining_bank_tenths)} left in the bank</small></div>
+    <div><span>Net gain</span><strong class="${row.net_xpts_gain >= 0 ? "positive" : "negative"}">${signed(row.net_xpts_gain)}</strong><small>${row.hit_cost ? `includes −${row.hit_cost} hit` : "no hit"}</small></div>
+    <button type="button" class="button ${index === 0 ? "primary" : "secondary"} small" data-apply-out="${row.out.fpl_id}" data-apply-in="${row.in.fpl_id}" data-lineup-changed="${row.lineup_changed ? "true" : "false"}">Stage move</button>
   </article>`).join("")}`;
   container.querySelectorAll("[data-apply-out]").forEach((button) => button.addEventListener("click", () => {
     const row = state.transfers.suggestions.find((candidate) => candidate.out.fpl_id === Number(button.dataset.applyOut) && candidate.in.fpl_id === Number(button.dataset.applyIn));
     stageTransfer(row);
   }));
+  bindGotoButtons(container);
 }
 
 function parseEntryReference(raw) {
@@ -746,16 +862,15 @@ function parseEntryReference(raw) {
   return { entryId: Number(match[1] || match[0]), gameweek: Number.isInteger(gameweek) && gameweek >= 1 && gameweek <= 38 ? gameweek : null };
 }
 
-async function loadFromTeamId() {
-  const input = $("#team-id");
+async function loadFromTeamId({ input = $("#team-id"), button = $("#load-team-id") } = {}) {
   const reference = parseEntryReference(input.value);
   const entryId = reference?.entryId;
-  const button = $("#load-team-id");
   if (!Number.isInteger(entryId) || entryId <= 0) {
-    showError("Enter a valid numeric FPL Team ID or paste a public fantasy.premierleague.com/entry/<id> URL. Team-name search is not exposed by FPL's public API.");
-    return;
+    showError("Enter a valid FPL Team ID (numbers only) or paste your fantasy.premierleague.com/entry/… link. FPL does not allow searching by team name.");
+    return false;
   }
   showError("");
+  const label = button.textContent;
   button.disabled = true;
   button.textContent = "Loading…";
   try {
@@ -776,25 +891,52 @@ async function loadFromTeamId() {
     } : null;
     state.plan.pending_transfers = [];
     state.plan.bank_tenths = resolved.bank_tenths;
+    state.plan.squad_source = "team";
     state.teamProfile = resolved.entry || { id: entryId, name: null };
+    state.teamNote = setupMatchesHorizon
+      ? `GW${resolved.gameweek} picks loaded`
+      : `GW${resolved.gameweek} picks loaded; projections start at GW${horizonStart}`;
     localStorage.setItem("touchline-team-profile", JSON.stringify(state.teamProfile));
     persistPlan();
     $("#bank").value = (state.plan.bank_tenths / 10).toFixed(1);
-    const teamSummary = $("#team-summary");
-    teamSummary.hidden = false;
-    teamSummary.innerHTML = `<strong>${state.teamProfile.name || `FPL Team ${entryId}`}</strong><small>Team ID ${entryId} · public picks loaded for GW${resolved.gameweek}${setupMatchesHorizon ? "" : ` · lineup comparison starts at GW${horizonStart}`}</small>`;
-    renderSetupSummary();
+    $("#team-id").value = "";
+    renderTeamHeader();
     renderSquadEditor();
     $("#team-id-note").textContent = setupMatchesHorizon
-      ? "Public squad loaded. Selling prices are estimated from current market prices."
-      : `Public squad loaded from GW${resolved.gameweek}. The release starts at GW${horizonStart}, so the squad is available for planning but no submitted-XI comparison is shown yet.`;
+      ? "Selling prices are estimated from current prices. Adjust the bank if your FPL app shows a different value."
+      : `Your squad is from GW${resolved.gameweek} but the projections start at GW${horizonStart}, so there's no comparison with your submitted XI yet.`;
+    renderConnectState();
+    navigateTo("weekly");
+    resetTransfersView("New squad loaded — find the best transfers for it.");
     await runLineups();
+    return true;
   } catch (error) {
     showError(error.message);
+    return false;
   } finally {
     button.disabled = false;
-    button.textContent = "Load squad";
+    button.textContent = label;
   }
+}
+
+async function useDemoSquad() {
+  state.plan.squad_source = "demo";
+  persistPlan();
+  renderTeamHeader();
+  renderConnectState();
+  navigateTo("weekly");
+  await runLineups();
+}
+
+function needsTeam() {
+  return state.plan.squad_source === null && !state.teamProfile;
+}
+
+function renderConnectState() {
+  const required = needsTeam();
+  document.body.classList.toggle("needs-team", required);
+  $("#connect-view").hidden = !required;
+  if (required) window.setTimeout(() => $("#connect-team-id").focus(), 0);
 }
 
 async function runLineups() {
@@ -827,22 +969,39 @@ async function runTransfers() {
     showError(error.message);
   } finally {
     button.disabled = false;
-    button.textContent = "Scan all single transfers";
+    button.textContent = "Find my best transfers";
   }
 }
 
-function navigateTo(viewName) {
-  const titles = { setup: "Workspace setup", weekly: "Lineup recommendation", outlook: "Planning outlook", transfers: "Transfer suggestions", settings: "Risk & horizon settings" };
-  $$(".nav-item").forEach((item) => item.classList.toggle("active", item.dataset.view === viewName));
-  $$(".view").forEach((view) => view.classList.toggle("active", view.id === `${viewName}-view`));
-  $("#page-title").textContent = titles[viewName] || "FPL Decision Lab";
+function navigateTo(viewName, { updateHash = true } = {}) {
+  const view = VIEWS[viewName] ? viewName : "weekly";
+  $$(".nav-item").forEach((item) => {
+    const active = item.dataset.view === view;
+    item.classList.toggle("active", active);
+    if (active) item.setAttribute("aria-current", "page");
+    else item.removeAttribute("aria-current");
+  });
+  $$(".view").forEach((section) => section.classList.toggle("active", section.id === `${view}-view`));
+  document.title = `${VIEWS[view]} — Touchline`;
+  if (updateHash) {
+    const hash = view === "weekly" ? "" : `#${view}`;
+    if (window.location.hash !== hash) window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}${hash}`);
+  }
   renderPlanningControls();
-  renderSetupSummary();
+}
+
+function bindGotoButtons(root = document) {
+  root.querySelectorAll("[data-goto]").forEach((button) => button.addEventListener("click", () => {
+    navigateTo(button.dataset.goto);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    if (button.dataset.autorun === "transfers" && !state.transfers) runTransfers();
+  }));
 }
 
 function bindNavigation() {
   $$(".nav-item").forEach((button) => button.addEventListener("click", () => navigateTo(button.dataset.view)));
-  $("#setup-next")?.addEventListener("click", () => navigateTo("weekly"));
+  bindGotoButtons();
+  window.addEventListener("hashchange", () => navigateTo(window.location.hash.slice(1), { updateHash: false }));
 }
 
 async function loadWorkspace() {
@@ -856,7 +1015,7 @@ async function loadWorkspace() {
       state.plan.pending_transfers = [];
       clearCurrentSetup();
       persistPlan();
-      showError("A previously loaded squad no longer matches the current release; showing the default squad.");
+      if (state.plan.squad_source !== null) showError("Your saved squad no longer matches the current projections, so the demo squad is shown. Load your Team ID again to update it.");
     }
     const firstGameweek = state.bootstrap.release.model_runs[0].gameweek;
     const setupShapeIsValid = state.plan.current_setup
@@ -875,13 +1034,22 @@ async function loadWorkspace() {
     $("#free-transfers").value = String(state.plan.free_transfers);
     renderRelease();
     renderSquadEditor();
-    if (state.teamProfile) {
-      const teamSummary = $("#team-summary");
-      teamSummary.hidden = false;
-      teamSummary.innerHTML = `<strong>${state.teamProfile.name || "Saved FPL team"}</strong><small>Team ID ${state.teamProfile.id || "—"}</small>`;
+    navigateTo(window.location.hash.slice(1), { updateHash: false });
+
+    // A Team ID or demo request handed over from the landing page.
+    const entry = state.pendingEntry;
+    state.pendingEntry = null;
+    if (entry?.team) {
+      $("#connect-team-id").value = entry.team;
+      $("#team-id").value = entry.team;
+      if (await loadFromTeamId()) return;
+    } else if (entry?.demo) {
+      state.plan.squad_source = "demo";
+      persistPlan();
+      renderTeamHeader();
     }
-    renderSetupSummary();
-    await runLineups();
+    renderConnectState();
+    if (!needsTeam()) await runLineups();
   } catch (error) {
     if (error.code !== "alpha_access_required") showError(error.message);
   }
@@ -904,92 +1072,60 @@ async function submitAccessCode(event) {
     return;
   }
   const button = $("#access-submit");
+  const label = button.textContent;
   button.disabled = true;
-  button.textContent = "Checkingâ€¦";
+  button.textContent = "Checking…";
   state.alphaToken = code;
   sessionStorage.setItem("touchline-alpha-token", code);
   try {
     await loadWorkspace();
   } finally {
     button.disabled = false;
-    button.textContent = "Open workspace";
+    button.textContent = label;
   }
 }
 
-async function init() {
-  bindNavigation();
-  $("#refresh-lineup").addEventListener("click", runLineups);
-  $("#run-transfers").addEventListener("click", runTransfers);
-  $("#load-team-id").addEventListener("click", loadFromTeamId);
-  $("#team-id").addEventListener("keydown", (event) => { if (event.key === "Enter") loadFromTeamId(); });
-  $("#bank").addEventListener("change", () => {
-    state.plan.bank_tenths = Math.round(Number($("#bank").value || 0) * 10);
-    persistPlan();
-    resetTransfersView("Bank changed — re-scan to compare from the updated plan.");
-    runLineups();
-  });
-  $("#free-transfers").addEventListener("change", () => {
-    state.plan.free_transfers = Number($("#free-transfers").value);
-    persistPlan();
-    resetTransfersView("Free-transfer count changed — re-scan to compare from the updated plan.");
-    runLineups();
-  });
-  $("#horizon-select")?.addEventListener("change", (event) => {
-    state.plan.horizon_length = Number(event.target.value);
-    persistPlan();
-    renderPlanningControls();
-    renderOutlook();
-    renderSetupSummary();
-  });
-  $("#wc-roll")?.addEventListener("change", renderWildcardControls);
-  $("#access-form").addEventListener("submit", submitAccessCode);
-  await loadPublicConfig();
-  await loadWorkspace();
-}
-
-init();
-
-
-$("#run-wildcard")?.addEventListener("click", async () => {
+async function runWildcardComparison() {
   const button = $("#run-wildcard");
   const output = $("#wildcard-results");
   button.disabled = true;
-  output.textContent = "Comparing legal squads and transfer paths...";
+  output.textContent = "Comparing legal squads and transfer paths…";
   try {
-    const payload = await api("/api/recommend/wildcard", {method: "POST", body: JSON.stringify({
+    const payload = await api("/api/recommend/wildcard", { method: "POST", body: JSON.stringify({
       ...requestBody(), chip: null, horizon_length: state.plan.horizon_length,
       roll_after_wildcard: Math.min(wildcardRollLimit(), Math.max(0, Math.floor(Number($("#wc-roll").value) || 0))),
       terminal_ft_value: Number($("#wc-ft-value").value),
-    })});
+    }) });
     output.replaceChildren();
     for (const path of payload.paths) {
       const card = document.createElement("section");
       card.className = "wildcard-path";
       const title = document.createElement("h4");
-      title.textContent = `${path.name}: ${points(path.net_xpts)} net xPts | ${path.terminal_free_transfers} FT at horizon end`;
+      title.textContent = `${path.name}: ${points(path.net_xpts)} net xPts · ${path.terminal_free_transfers} free transfer${path.terminal_free_transfers === 1 ? "" : "s"} left at the end`;
       card.append(title);
       const assumptions = document.createElement("p");
-      assumptions.textContent = `Objective including assumed FT value: ${points(path.objective)}. This is a research scenario.`;
+      assumptions.textContent = `Score including the value you gave saved free transfers: ${points(path.objective)}.`;
       card.append(assumptions);
       if (path.squad_fpl_ids) {
         const squad = document.createElement("p");
-        squad.textContent = path.squad_fpl_ids.map(id => playerById(id)?.name || `#${id}`).join(", ");
+        squad.textContent = `Squad: ${path.squad_fpl_ids.map((id) => playerById(id)?.name || `#${id}`).join(", ")}`;
         card.append(squad);
       }
       for (const step of path.steps) {
         const row = document.createElement("div");
         row.className = "wildcard-step";
         const action = document.createElement("strong");
-        const moves = step.transfers.map(m => `${playerById(m.out)?.name || m.out} to ${playerById(m.in)?.name || m.in}`).join("; ");
-        action.textContent = `GW${step.gameweek}: ${step.action}${moves ? " - " + moves : ""}`;
+        const moves = step.transfers.map((move) => `${playerById(move.out)?.name || move.out} → ${playerById(move.in)?.name || move.in}`).join("; ");
+        action.textContent = `GW${step.gameweek}: ${step.action}${moves ? ` — ${moves}` : ""}`;
         const detail = document.createElement("small");
-        detail.textContent = `${points(step.net_xpts)} net xPts | FT ${step.free_transfers_before} to ${step.free_transfers_after} | hit ${step.hit_cost} | bank ${(step.bank_tenths / 10).toFixed(1)}m | captain ${playerById(step.captain_fpl_id)?.name || step.captain_fpl_id}`;
+        detail.textContent = `${points(step.net_xpts)} net xPts · free transfers ${step.free_transfers_before} → ${step.free_transfers_after} · hit ${step.hit_cost} · bank ${money(step.bank_tenths)} · captain ${playerById(step.captain_fpl_id)?.name || step.captain_fpl_id}`;
         row.append(action, detail);
         card.append(row);
       }
       output.append(card);
     }
     const note = document.createElement("p");
+    note.className = "note";
     note.textContent = payload.limitations.join(" ");
     output.append(note);
   } catch (error) {
@@ -997,4 +1133,42 @@ $("#run-wildcard")?.addEventListener("click", async () => {
   } finally {
     renderWildcardControls();
   }
-});
+}
+
+async function init() {
+  bindNavigation();
+  $("#refresh-lineup").addEventListener("click", runLineups);
+  $("#run-transfers").addEventListener("click", runTransfers);
+  $("#run-wildcard").addEventListener("click", runWildcardComparison);
+  $("#load-team-id").addEventListener("click", () => loadFromTeamId());
+  $("#team-id").addEventListener("keydown", (event) => { if (event.key === "Enter") loadFromTeamId(); });
+  $("#connect-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    loadFromTeamId({ input: $("#connect-team-id"), button: $("#connect-submit") });
+  });
+  $("#connect-demo").addEventListener("click", useDemoSquad);
+  $("#bank").addEventListener("change", () => {
+    state.plan.bank_tenths = Math.round(Number($("#bank").value || 0) * 10);
+    persistPlan();
+    resetTransfersView("Bank changed — scan again to compare from the updated plan.");
+    runLineups();
+  });
+  $("#free-transfers").addEventListener("change", () => {
+    state.plan.free_transfers = Number($("#free-transfers").value);
+    persistPlan();
+    resetTransfersView("Free transfers changed — scan again to compare from the updated plan.");
+    runLineups();
+  });
+  $("#horizon-select").addEventListener("change", (event) => {
+    state.plan.horizon_length = Number(event.target.value);
+    persistPlan();
+    renderPlanningControls();
+    renderOutlook();
+  });
+  $("#wc-roll").addEventListener("change", renderWildcardControls);
+  $("#access-form").addEventListener("submit", submitAccessCode);
+  await loadPublicConfig();
+  await loadWorkspace();
+}
+
+init();

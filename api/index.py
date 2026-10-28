@@ -645,6 +645,11 @@ def index() -> FileResponse:
     return FileResponse(WEB_ROOT / "index.html")
 
 
+@app.get("/app")
+def web_app() -> FileResponse:
+    return FileResponse(WEB_ROOT / "app.html")
+
+
 @app.get("/privacy")
 def privacy() -> FileResponse:
     return FileResponse(WEB_ROOT / "privacy.html")
@@ -657,6 +662,6 @@ def terms() -> FileResponse:
 
 @app.get("/{asset_name}")
 def static_asset(asset_name: str) -> FileResponse:
-    if asset_name not in {"app.js", "legal.js", "styles.css"}:
+    if asset_name not in {"app.js", "landing.js", "legal.js", "styles.css"}:
         raise HTTPException(status_code=404)
     return FileResponse(WEB_ROOT / asset_name)

@@ -29,6 +29,8 @@ from fpl_model.ingest.fpl import FPLClient
 from fpl_model.webapp.alpha_access import hash_access_token
 from tests.test_webapp_service import _ready_rating_artifact, _release_file
 
+TEAM_NAME = "Mesra <b>XI</b>"
+
 
 def _free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
@@ -88,6 +90,10 @@ def live_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("FPL_WEB_RELEASE_PATH", str(release_path))
     monkeypatch.setenv("FPL_DATABASE_PATH", str(tmp_path / "missing.duckdb"))
     monkeypatch.setattr(FPLClient, "entry_picks", lambda self, entry_id, gw: _picks_payload())
+    # A team name with markup proves the page escapes FPL-supplied text.
+    monkeypatch.setattr(
+        FPLClient, "entry", lambda self, entry_id: {"id": entry_id, "name": TEAM_NAME}
+    )
     _bootstrap.cache_clear()
 
     port = _free_port()
@@ -156,7 +162,7 @@ def test_closed_alpha_prompt_unlocks_the_workspace_for_one_browser_session(
     page = browser.new_page()
     try:
         _seed_local_storage_squad(page)
-        page.goto(base_url, wait_until="networkidle", timeout=15000)
+        page.goto(f"{base_url}/app", wait_until="networkidle", timeout=15000)
         page.wait_for_selector("#access-gate", state="visible", timeout=5000)
 
         assert page.locator("#pitch").get_attribute("class") == "pitch skeleton"
@@ -176,7 +182,7 @@ def test_team_id_loads_a_squad_and_renders_a_weekly_lineup(live_server, browser)
     page = browser.new_page()
     try:
         _seed_local_storage_squad(page)
-        page.goto(live_server, wait_until="networkidle", timeout=15000)
+        page.goto(f"{live_server}/app", wait_until="networkidle", timeout=15000)
         page.wait_for_selector("#pitch:not(.skeleton)", timeout=15000)
 
         page.fill("#team-id", "123456")
@@ -198,8 +204,8 @@ def test_team_id_loads_a_squad_and_renders_a_weekly_lineup(live_server, browser)
         assert page.locator("#pitch .captain-badge", has_text="V").count() == 1
 
         summary_text = page.inner_text("#weekly-summary")
-        assert "GW2 xPts" in summary_text
-        assert "pct" in summary_text
+        assert "GW2 projected points" in summary_text
+        assert "percentile" in summary_text
         marginal_text = page.inner_text("#marginal-changes")
         assert "changes vs your current setup" in marginal_text.lower()
         assert "+10.00 xPts" in marginal_text
@@ -221,7 +227,7 @@ def test_team_id_squad_flows_into_the_outlook_and_transfers_menus(live_server, b
     page = browser.new_page()
     try:
         _seed_local_storage_squad(page)
-        page.goto(live_server, wait_until="networkidle", timeout=15000)
+        page.goto(f"{live_server}/app", wait_until="networkidle", timeout=15000)
         page.wait_for_selector("#pitch:not(.skeleton)", timeout=15000)
         page.fill("#team-id", "123456")
         page.click("#load-team-id")
@@ -249,7 +255,7 @@ def test_an_invalid_team_id_surfaces_a_visible_error_not_a_silent_failure(live_s
     page = browser.new_page()
     try:
         _seed_local_storage_squad(page)
-        page.goto(live_server, wait_until="networkidle", timeout=15000)
+        page.goto(f"{live_server}/app", wait_until="networkidle", timeout=15000)
         page.wait_for_selector("#pitch:not(.skeleton)", timeout=15000)
 
         page.fill("#team-id", "0")
@@ -267,7 +273,7 @@ def test_transfer_scan_renders_scored_hold_free_hit_and_roll_paths(live_server, 
     page = browser.new_page()
     try:
         _seed_local_storage_squad(page)
-        page.goto(live_server, wait_until="networkidle", timeout=15000)
+        page.goto(f"{live_server}/app", wait_until="networkidle", timeout=15000)
         page.wait_for_selector("#pitch:not(.skeleton)", timeout=15000)
         page.click("[data-view=transfers]")
 
@@ -300,7 +306,7 @@ def test_apply_transfer_stages_move_and_updates_plan_header(live_server, browser
     page = browser.new_page()
     try:
         _seed_local_storage_squad(page)
-        page.goto(live_server, wait_until="networkidle", timeout=15000)
+        page.goto(f"{live_server}/app", wait_until="networkidle", timeout=15000)
         page.wait_for_selector("#pitch:not(.skeleton)", timeout=15000)
         page.click("[data-view=transfers]")
         page.click("#run-transfers")
@@ -337,7 +343,7 @@ def test_transfer_path_stages_the_server_returned_moves(live_server, browser):
     page = browser.new_page()
     try:
         _seed_local_storage_squad(page)
-        page.goto(live_server, wait_until="networkidle", timeout=15000)
+        page.goto(f"{live_server}/app", wait_until="networkidle", timeout=15000)
         page.wait_for_selector("#pitch:not(.skeleton)", timeout=15000)
         page.click("[data-view=transfers]")
         page.click("#run-transfers")
@@ -367,7 +373,7 @@ def test_bench_boost_chip_updates_plan_header_and_outlook_in_place(live_server, 
     page = browser.new_page()
     try:
         _seed_local_storage_squad(page)
-        page.goto(live_server, wait_until="networkidle", timeout=15000)
+        page.goto(f"{live_server}/app", wait_until="networkidle", timeout=15000)
         page.wait_for_selector("#pitch:not(.skeleton)", timeout=15000)
         page.click("[data-view=outlook]")
         page.wait_for_selector("#outlook-total:not(.skeleton)", timeout=15000)
@@ -401,8 +407,9 @@ def test_bench_boost_chip_updates_plan_header_and_outlook_in_place(live_server, 
         assert stored["chip"] is None
         assert stored["chip_status"]["bench_boost"] == "used"
 
+        # The open view is kept in the URL hash, so a reload returns to the planner.
         page.reload(wait_until="networkidle")
-        page.wait_for_selector("#pitch:not(.skeleton)", timeout=15000)
+        page.wait_for_selector("#outlook-total:not(.skeleton)", timeout=15000)
         assert page.is_disabled("#chip-options input[value=bench_boost]")
     finally:
         page.close()
@@ -412,7 +419,7 @@ def test_free_hit_moves_are_free_but_cannot_be_committed(live_server, browser):
     page = browser.new_page()
     try:
         _seed_local_storage_squad(page)
-        page.goto(live_server, wait_until="networkidle", timeout=15000)
+        page.goto(f"{live_server}/app", wait_until="networkidle", timeout=15000)
         page.wait_for_selector("#pitch:not(.skeleton)", timeout=15000)
         page.select_option("#free-transfers", "0")
         page.wait_for_function(
@@ -450,7 +457,7 @@ def test_wildcard_controls_stay_inside_the_visible_horizon(live_server, browser)
     page = browser.new_page()
     try:
         _seed_local_storage_squad(page)
-        page.goto(live_server, wait_until="networkidle", timeout=15000)
+        page.goto(f"{live_server}/app", wait_until="networkidle", timeout=15000)
         page.wait_for_selector("#pitch:not(.skeleton)", timeout=15000)
 
         # The fixture publishes three Gameweeks, so the roll must end by GW+2.
@@ -488,5 +495,93 @@ def test_public_legal_pages_render_reviewed_operator_metadata(gated_live_server,
         page.wait_for_selector("#legal-status.ready", timeout=5000)
         assert "Ketentuan Closed Alpha" in page.inner_text("h1")
         assert "Touchline Test Operator" in page.inner_text(".legal-meta")
+    finally:
+        page.close()
+
+
+def test_landing_page_hands_a_team_id_to_the_app(live_server, browser):
+    page = browser.new_page()
+    try:
+        page.goto(live_server, wait_until="networkidle", timeout=15000)
+        assert "Know your best move" in page.inner_text("h1")
+        # The release line is filled from /api/ready and names the horizon.
+        page.wait_for_selector("[data-release-status]:not([hidden])", timeout=5000)
+        assert "GW2–GW4" in page.inner_text("[data-release-status]")
+
+        page.fill("#hero-team-id", "123456")
+        page.click(".hero .entry-form button[type=submit]")
+        page.wait_for_url(re.compile(r"/app$"), timeout=15000)
+        page.wait_for_selector("#pitch .player-card", timeout=15000)
+
+        # The Team ID is consumed once and dropped from the address bar.
+        assert "team=" not in page.url
+        assert page.locator("#pitch .player-card").count() == 11
+        assert page.is_hidden("#connect-view")
+        assert page.inner_text("#team-title") == TEAM_NAME
+        assert TEAM_NAME in page.inner_text("#team-summary")
+        assert page.locator("#team-summary b").count() == 0
+        assert "changes vs your current setup" in page.inner_text("#marginal-changes").lower()
+        stored = page.evaluate("JSON.parse(localStorage.getItem('touchline-plan'))")
+        assert stored["squad_source"] == "team"
+    finally:
+        page.close()
+
+
+def test_first_visit_asks_for_a_team_before_planning(live_server, browser):
+    page = browser.new_page()
+    try:
+        page.goto(f"{live_server}/app", wait_until="networkidle", timeout=15000)
+        page.wait_for_selector("#connect-view", state="visible", timeout=5000)
+        assert page.is_hidden("#weekly-view")
+        # Nothing is scored for the placeholder squad until the manager chooses.
+        assert page.locator("#pitch .player-card").count() == 0
+
+        page.fill("#connect-team-id", "123456")
+        page.click("#connect-submit")
+        page.wait_for_selector("#pitch .player-card", timeout=15000)
+        assert page.is_hidden("#connect-view")
+        assert page.is_visible("#weekly-view")
+        assert page.inner_text("#connect-submit") == "Load my team"
+    finally:
+        page.close()
+
+
+def test_demo_request_skips_the_connect_screen(live_server, browser):
+    page = browser.new_page()
+    try:
+        # The fixture release does not contain the production demo squad, so
+        # seed a valid one; the demo flag alone must skip the connect screen.
+        page.add_init_script(
+            "localStorage.setItem('touchline-plan', JSON.stringify({squad: "
+            + str(list(range(1, 16)))
+            + "}))"
+        )
+        page.goto(f"{live_server}/app?demo=1", wait_until="networkidle", timeout=15000)
+        page.wait_for_selector("#pitch .player-card", timeout=15000)
+        assert page.is_hidden("#connect-view")
+        assert "demo=" not in page.url
+        assert page.inner_text("#team-title") == "Demo squad"
+        # No submitted team exists, so there is no comparison card to show.
+        assert page.is_hidden("#marginal-changes")
+    finally:
+        page.close()
+
+
+def test_next_step_button_opens_transfers_and_runs_the_scan(live_server, browser):
+    page = browser.new_page()
+    try:
+        _seed_local_storage_squad(page)
+        page.goto(f"{live_server}/app", wait_until="networkidle", timeout=15000)
+        page.wait_for_selector("#pitch:not(.skeleton)", timeout=15000)
+        # Holding with no chip leaves nothing to summarise in the plan bar.
+        assert page.inner_text("#plan-header").strip() == ""
+
+        page.click("#weekly-view [data-goto=transfers]")
+        page.wait_for_selector("#transfer-paths [data-path-id=hold]", timeout=30000)
+        assert page.is_visible("#transfers-view")
+        assert page.url.endswith("#transfers")
+
+        page.reload(wait_until="networkidle")
+        page.wait_for_selector("#transfers-view.active", timeout=15000)
     finally:
         page.close()

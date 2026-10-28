@@ -648,3 +648,28 @@ def test_transfer_scan_can_be_disabled_by_operator(
 
     assert response.status_code == 503
     assert "disabled by the operator" in response.json()["detail"]
+
+
+def test_landing_page_and_app_are_served_as_separate_pages():
+    landing = client.get("/")
+    app_page = client.get("/app")
+
+    assert landing.status_code == 200
+    assert app_page.status_code == 200
+    # The landing page hands a Team ID to the app with a plain GET form.
+    assert 'action="/app"' in landing.text
+    assert 'name="team"' in landing.text
+    assert 'src="/landing.js"' in landing.text
+    assert 'id="pitch"' not in landing.text
+    assert 'id="pitch"' in app_page.text
+    assert 'src="/app.js"' in app_page.text
+
+
+@pytest.mark.parametrize("asset", ["app.js", "landing.js", "legal.js", "styles.css"])
+def test_only_known_web_assets_are_served(asset: str):
+    assert client.get(f"/{asset}").status_code == 200
+
+
+def test_unknown_web_assets_are_not_served():
+    assert client.get("/release.json").status_code == 404
+    assert client.get("/app.html").status_code == 404
