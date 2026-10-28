@@ -585,3 +585,31 @@ def test_next_step_button_opens_transfers_and_runs_the_scan(live_server, browser
         page.wait_for_selector("#transfers-view.active", timeout=15000)
     finally:
         page.close()
+
+
+def test_selling_prices_saved_for_an_older_release_are_reset(live_server, browser):
+    page = browser.new_page()
+    try:
+        # A plan saved before a release refresh, with a selling price above
+        # today's market price -- the server rejects it, so it must not stick.
+        page.add_init_script(
+            "if (!sessionStorage.getItem('seeded')) {"
+            " sessionStorage.setItem('seeded', '1');"
+            " localStorage.setItem('touchline-plan', JSON.stringify({squad: "
+            + str(list(range(1, 16)))
+            + ", selling_prices: {'1': 999}, squad_source: 'team'})); }"
+        )
+        page.goto(f"{live_server}/app", wait_until="networkidle", timeout=15000)
+        page.wait_for_selector("#pitch .player-card", timeout=15000)
+
+        stored = page.evaluate("JSON.parse(localStorage.getItem('touchline-plan'))")
+        assert stored["selling_prices"] == {}
+        assert stored["release_id"]
+        assert "selling prices were reset" in page.inner_text("#error-banner")
+
+        # Once the plan is tied to this release, a reload keeps it quiet.
+        page.reload(wait_until="networkidle")
+        page.wait_for_selector("#pitch .player-card", timeout=15000)
+        assert page.is_hidden("#error-banner")
+    finally:
+        page.close()

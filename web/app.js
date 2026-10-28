@@ -69,6 +69,8 @@ function loadPlan() {
     // Where the squad came from: "team" (Team ID), "demo", or "manual" (an
     // older saved squad). null means a first visit, which shows the connect
     // screen instead of silently planning with the demo squad.
+    // The release the saved selling prices were checked against; see loadWorkspace.
+    release_id: typeof source.release_id === "string" ? source.release_id : null,
     squad_source: ["team", "demo", "manual"].includes(source.squad_source)
       ? source.squad_source
       : hadStoredSquad ? "manual" : null,
@@ -1017,6 +1019,19 @@ async function loadWorkspace() {
       persistPlan();
       if (state.plan.squad_source !== null) showError("Your saved squad no longer matches the current projections, so the demo squad is shown. Load your Team ID again to update it.");
     }
+    // Selling prices saved in this browser were estimated from an earlier
+    // release's market prices. After a refresh a price can fall below the saved
+    // value, which the server rightly rejects, so drop them and fall back to
+    // the current prices instead of breaking every request.
+    const releaseId = state.bootstrap.release.release_id;
+    let notice = "";
+    if (state.plan.release_id !== releaseId && Object.keys(state.plan.selling_prices || {}).length) {
+      state.plan.selling_prices = {};
+      state.plan.selling_price_is_estimated = true;
+      if (state.plan.squad_source !== null) notice = "Projections were updated, so your saved selling prices were reset to current prices. Load your Team ID again to refresh them.";
+    }
+    state.plan.release_id = releaseId;
+    persistPlan();
     const firstGameweek = state.bootstrap.release.model_runs[0].gameweek;
     const setupShapeIsValid = state.plan.current_setup
       && Array.isArray(state.plan.current_setup.starter_fpl_ids)
@@ -1050,6 +1065,8 @@ async function loadWorkspace() {
     }
     renderConnectState();
     if (!needsTeam()) await runLineups();
+    // runLineups clears the banner when it starts, so show the notice after it.
+    if (notice && $("#error-banner").hidden) showError(notice);
   } catch (error) {
     if (error.code !== "alpha_access_required") showError(error.message);
   }
