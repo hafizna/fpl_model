@@ -53,8 +53,8 @@ def _explicit_horizon(
     connection: duckdb.DuckDBPyConnection,
     model_run_ids: tuple[str, ...],
 ) -> ResearchHorizon:
-    if len(model_run_ids) != 3 or len(set(model_run_ids)) != 3:
-        raise ValueError("a web release requires exactly three unique model_run_ids")
+    if not 1 <= len(model_run_ids) <= 5 or len(set(model_run_ids)) != len(model_run_ids):
+        raise ValueError("a web release requires one to five unique model_run_ids")
     placeholders = ",".join("?" for _ in model_run_ids)
     rows = connection.execute(
         f"""
@@ -66,11 +66,11 @@ def _explicit_horizon(
         """,
         list(model_run_ids),
     ).fetchall()
-    if len(rows) != 3:
+    if len(rows) != len(model_run_ids):
         raise ValueError("every requested model run must exist and be completed")
     gameweeks = tuple(int(row[0]) for row in rows)
-    if gameweeks != tuple(range(gameweeks[0], gameweeks[0] + 3)):
-        raise ValueError("model runs must cover three consecutive Gameweeks")
+    if gameweeks != tuple(range(gameweeks[0], gameweeks[0] + len(model_run_ids))):
+        raise ValueError("model runs must cover consecutive Gameweeks")
     lineage = {(str(row[2]), str(row[3]), row[4].isoformat()) for row in rows}
     if len(lineage) != 1:
         raise ValueError("model runs do not share one snapshot, version, and planning as_of")
@@ -159,7 +159,7 @@ def build_web_release(
                 )
 
         # Coverage: how many of this snapshot's registered players have a
-        # complete three-Gameweek projection in this release's catalog, out
+        # complete horizon projection in this release's catalog, out
         # of every player the official snapshot knows about at all --
         # distinct from excluded_partial_coverage above (a player IN the
         # catalog missing one Gameweek), which counts players never in the

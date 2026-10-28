@@ -3,162 +3,193 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="description" content="Explainable FPL squad, lineup, and transfer scenarios." />
-    <title>Touchline — FPL Decision Lab</title>
+    <meta name="description" content="Touchline rates your FPL squad, picks your best XI and captain, and scores every transfer before the deadline. Free closed alpha — just your Team ID." />
+    <title>Touchline — FPL team rating, best XI and transfer planner</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230a8550'/%3E%3Cpath d='M9 10h14v3.5h-5V24h-4V13.5H9z' fill='white'/%3E%3C/svg%3E" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
-  <body>
-    <section id="access-gate" class="access-gate" role="dialog" aria-modal="true" aria-labelledby="access-title" hidden>
-      <form id="access-form" class="access-card">
-        <div class="brand-mark">T</div>
-        <div class="eyebrow">Controlled alpha</div>
-        <h2 id="access-title">Enter your tester access code</h2>
-        <p>Your code unlocks this browser tab only. It is never placed in the URL or application logs.</p>
-        <label for="access-code">Access code</label>
-        <input id="access-code" type="password" minlength="16" maxlength="256" autocomplete="current-password" required />
-        <button id="access-submit" class="button primary" type="submit">Open workspace</button>
-        <p id="access-message" class="access-message" aria-live="polite"></p>
-        <p class="access-legal">Review the closed-alpha <a href="/terms" target="_blank" rel="noopener">terms</a> and <a href="/privacy" target="_blank" rel="noopener">privacy notice</a> before continuing.</p>
-      </form>
-    </section>
-    <div class="app-shell">
-      <aside class="sidebar">
-        <a class="brand" href="#weekly" aria-label="Touchline home">
-          <span class="brand-mark">T</span>
-          <span><strong>Touchline</strong><small>Decision Lab</small></span>
-        </a>
-
-        <nav class="primary-nav" aria-label="Primary navigation">
-          <button class="nav-item" data-view="setup"><span>01</span><b>Setup</b><small>Import &amp; plan</small></button>
-          <button class="nav-item active" data-view="weekly"><span>02</span><b>Lineup</b><small>Pick XI &amp; captain</small></button>
-          <button class="nav-item" data-view="outlook"><span>03</span><b>Outlook</b><small>See the horizon</small></button>
-          <button class="nav-item" data-view="transfers"><span>04</span><b>Transfers</b><small>Compare moves</small></button>
-          <button class="nav-item" data-view="settings"><span>05</span><b>Settings</b><small>Risk &amp; horizon</small></button>
+  <body class="landing">
+    <header class="site-header">
+      <div class="container">
+        <a class="brand" href="/" aria-label="Touchline home"><span class="brand-mark">T</span><span class="brand-name">Touchline</span></a>
+        <nav class="site-nav" aria-label="Sections">
+          <a href="#how-it-works">How it works</a>
+          <a href="#features">Features</a>
+          <a href="#faq">FAQ</a>
         </nav>
+        <a class="button primary header-cta" href="/app">Open the app</a>
+      </div>
+    </header>
 
-        <div class="release-card">
-          <div class="eyebrow">Projection release</div>
-          <div class="release-row"><span class="status-dot"></span><strong id="release-label">Loading</strong></div>
-          <p id="release-meta">Connecting to the local model…</p>
-          <p id="release-coverage"></p>
-          <p id="release-freshness"></p>
-        </div>
-        <footer class="legal-links">
-          <a href="/privacy">Privacy</a><a href="/terms">Terms</a><a id="support-link" href="#" hidden>Support</a>
-          <small id="operator-label"></small>
-        </footer>
-      </aside>
-
-      <main>
-        <header class="topbar">
+    <main>
+      <section class="hero">
+        <div class="container hero-grid">
           <div>
-            <div class="eyebrow">2026/27 workspace</div>
-            <h1 id="page-title">Weekly squad scenario</h1>
-          </div>
-          <div class="deadline-block">
-            <span>Planning horizon</span>
-            <strong id="horizon-label">—</strong>
-            <small id="horizon-availability"></small>
-          </div>
-        </header>
-
-        <div id="error-banner" class="error-banner" hidden></div>
-        <section id="decision-receipts" class="decision-receipts" hidden aria-live="polite"></section>
-
-        <section class="workspace">
-          <div class="content-column">
-            <section id="setup-view" class="view">
-              <div class="section-heading">
-                <div><div class="eyebrow">Start here</div><h2>Build your decision workspace</h2></div>
-                <button id="setup-next" class="button primary" type="button">Review lineup →</button>
-              </div>
-              <div class="journey-card">
-                <div class="journey-step active"><span>1</span><div><strong>Import your squad</strong><small>Use a Team ID or public FPL URL in the panel.</small></div></div>
-                <div class="journey-step"><span>2</span><div><strong>Set the planning lens</strong><small>Choose a visible horizon and decision stance.</small></div></div>
-                <div class="journey-step"><span>3</span><div><strong>Review, then act</strong><small>Lineup first; transfer suggestions stay in context.</small></div></div>
-              </div>
-              <div id="setup-summary" class="setup-summary"></div>
-              <div class="model-note"><strong>One workspace, one source of truth</strong><p>Every menu uses the same squad, bank, free transfers, and frozen projection release. The current release has three published Gameweeks; longer horizons will appear automatically when released.</p></div>
-            </section>
-
-            <section id="weekly-view" class="view active">
-              <div class="section-heading">
-                <div><div class="eyebrow">Model selection</div><h2>Best legal XI</h2></div>
-                <button id="refresh-lineup" class="button secondary">Recalculate</button>
-              </div>
-              <div id="plan-header" class="plan-header" aria-live="polite"></div>
-              <div id="weekly-summary" class="metric-strip skeleton"></div>
-              <div id="sensitivity-banner" hidden></div>
-              <div id="marginal-changes" class="marginal-changes"></div>
-              <div id="pitch" class="pitch skeleton" aria-live="polite"></div>
-              <div id="bench" class="bench-row"></div>
-              <div class="model-note">
-                <strong>How this is picked</strong>
-                <p>Every legal XI is enumerated. Captaincy, bench order, appearance probability, and expected autosub value come from the frozen projection release.</p>
-              </div>
-            </section>
-
-            <section id="outlook-view" class="view">
-              <div class="section-heading">
-                <div><div class="eyebrow">Core planning</div><h2>Three-Gameweek outlook</h2></div>
-              </div>
-              <div id="outlook-total" class="hero-score skeleton"></div>
-              <div id="outlook-rating-detail" class="rating-detail skeleton"></div>
-              <div id="outlook-grid" class="outlook-grid"></div>
-              <div id="player-outlook" class="table-card"></div>
-            </section>
-
-            <section id="transfers-view" class="view">
-              <div class="section-heading">
-                <div><div class="eyebrow">Net xPts</div><h2>Transfer recommendations</h2></div>
-                <button id="run-transfers" class="button primary">Scan all single transfers</button>
-              </div>
-              <div class="transfer-intro">
-                Compare the scored Hold, transfer, hit, and Roll paths before staging a move. Affordability uses the selling prices below plus bank; Roll does not score the next Gameweek.
-              </div>
-              <div id="transfers-pending-transfers" class="pending-transfers" aria-live="polite"></div>
-              <div id="transfer-paths" class="transfer-paths" aria-live="polite"></div>
-              <div id="transfer-results" class="transfer-list empty-state">Run the scan to compare the current squad with every legal, affordable same-position move.</div>
-            </section>
-
-            <section id="settings-view" class="view">
-              <div class="section-heading"><div><div class="eyebrow">Decision controls</div><h2>Risk &amp; horizon</h2></div></div>
-              <div class="settings-grid">
-                <div class="settings-card"><div class="eyebrow">Decision stance</div><h3>How much swing is comfortable?</h3><p>Changes how suggestions are grouped in this browser. It does not retrain the frozen projection model.</p><div id="risk-profiles" class="risk-profiles"></div></div>
-                <div class="settings-card"><div class="eyebrow">Timeline</div><h3>Gameweeks ahead</h3><p>Select how much of the published horizon to keep in view. Future options unlock when the release contains them.</p><label class="control-label" for="horizon-select">Visible horizon</label><select id="horizon-select" class="settings-select"></select><div id="horizon-note" class="control-note"></div></div>
-              </div>
-            </section>
+            <span class="pill">Free closed alpha · Team ID only · No password</span>
+            <h1>Know your best move before every deadline.</h1>
+            <p class="hero-lede">Touchline rates your FPL squad, picks your strongest XI and captain, and tells you whether a transfer — or a hit — is actually worth it over the next few Gameweeks.</p>
+            <form class="entry-form" action="/app" method="get">
+              <label class="visually-hidden" for="hero-team-id">FPL Team ID or link</label>
+              <input id="hero-team-id" class="input" name="team" type="text" inputmode="numeric" autocomplete="off" placeholder="Your FPL Team ID, e.g. 1234567" required />
+              <button class="button primary large" type="submit">Rate my team</button>
+            </form>
+            <div class="entry-help">
+              <details>
+                <summary>Where do I find my Team ID?</summary>
+                <p>On the FPL website, open the <strong>Points</strong> tab. Your Team ID is the number after <code>/entry/</code> in the address bar, e.g. <code>fantasy.premierleague.com/entry/1234567/event/4</code>. You can paste the whole link.</p>
+              </details>
+              <span>No team to hand? <a href="/app?demo=1">Try a demo squad</a></span>
+            </div>
+            <ul class="facts">
+              <li>Every legal XI checked — not a guess at your formation.</li>
+              <li>Transfers scored with your real bank, free transfers and hits.</li>
+              <li>Clear about uncertainty: the projections are a model preview, not a promise.</li>
+            </ul>
+            <p class="release-status" data-release-status hidden></p>
           </div>
 
-          <aside class="squad-panel">
-            <div class="section-heading compact">
-              <div><div class="eyebrow">Private state</div><h2>My squad</h2></div>
-              <span id="squad-cost" class="cost-pill">—</span>
+          <figure class="preview-card" aria-label="Illustration of the My Team page">
+            <div class="preview-head"><strong>Best XI · 4-4-2</strong><span>Example</span></div>
+            <div class="pitch" aria-hidden="true">
+              <div class="pitch-line"><div class="pitch-player"><span class="kit" data-kit="ARS"></span><span class="name">GK</span></div></div>
+              <div class="pitch-line">
+                <div class="pitch-player"><span class="kit" data-kit="LIV"></span><span class="name">DEF</span></div>
+                <div class="pitch-player"><span class="kit" data-kit="NEW"></span><span class="name">DEF</span></div>
+                <div class="pitch-player"><span class="kit" data-kit="ARS"></span><span class="name">DEF</span></div>
+                <div class="pitch-player"><span class="kit" data-kit="CHE"></span><span class="name">DEF</span></div>
+              </div>
+              <div class="pitch-line">
+                <div class="pitch-player"><span class="kit" data-kit="MCI"></span><span class="name">MID</span></div>
+                <div class="pitch-player"><span class="captain-badge">C</span><span class="kit" data-kit="LIV"></span><span class="name">MID</span></div>
+                <div class="pitch-player"><span class="kit" data-kit="BRE"></span><span class="name">MID</span></div>
+                <div class="pitch-player"><span class="kit" data-kit="MUN"></span><span class="name">MID</span></div>
+              </div>
+              <div class="pitch-line">
+                <div class="pitch-player"><span class="kit" data-kit="MCI"></span><span class="name">FWD</span></div>
+                <div class="pitch-player"><span class="kit" data-kit="SUN"></span><span class="name">FWD</span></div>
+              </div>
             </div>
-            <div class="team-id-row">
-              <label for="team-id">FPL Team ID or public URL
-                <span><input id="team-id" type="text" inputmode="numeric" autocomplete="off" placeholder="1234567 or fantasy.premierleague.com/entry/1234567" /></span>
-              </label>
-              <button id="load-team-id" class="button secondary" type="button">Load squad</button>
+            <div class="preview-stats">
+              <div><span>Projected points</span><strong>58.4</strong></div>
+              <div><span>Squad rating</span><strong>86th pct</strong></div>
+              <div><span>Best transfer</span><strong class="positive">+3.1</strong></div>
             </div>
-            <div id="team-summary" class="team-summary" hidden></div>
-            <p id="team-id-note" class="private-note">Loads your public squad by Team ID only — never a password or session cookie. Estimated selling prices (current market price, not FPL's own profit-sharing rule) are used until you adjust them below.</p>
-            <div class="state-inputs">
-              <label>Bank <span><input id="bank" type="number" min="0" step="0.1" value="0.0" />m</span></label>
-              <label>Free transfers
-                <select id="free-transfers">
-                  <option value="0">0</option><option value="1" selected>1</option><option value="2">2</option>
-                  <option value="3">3</option><option value="4">4</option><option value="5">5</option>
-                </select>
-              </label>
+            <figcaption class="preview-caption">Illustration only — your numbers come from the current projection release.</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section id="how-it-works" class="section white">
+        <div class="container">
+          <div class="section-head">
+            <h2>Three steps to a better Gameweek</h2>
+            <p>The same flow every week: check your team, decide on a transfer, then look ahead.</p>
+          </div>
+          <div class="steps">
+            <article class="step">
+              <span class="step-num">01</span>
+              <h3>Rate your team</h3>
+              <p>Load your squad by Team ID. Touchline picks your best XI, captain and bench order, shows what to change from the team you submitted, and rates your squad against legal squads with the same budget.</p>
+            </article>
+            <article class="step">
+              <span class="step-num">02</span>
+              <h3>Make the right transfer</h3>
+              <p>See holding, using a free transfer, taking a −4 hit and rolling side by side — each scored over the same Gameweeks with your real bank and selling prices. Stage a move and your lineup updates instantly.</p>
+            </article>
+            <article class="step">
+              <span class="step-num">03</span>
+              <h3>Plan the next weeks</h3>
+              <p>Look up to five Gameweeks ahead: points per week, fixtures and confidence for every player. Try a chip as a what-if and check a Wildcard against holding.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="features" class="section">
+        <div class="container">
+          <div class="section-head">
+            <h2>Built to answer the deadline questions</h2>
+            <p>No dashboards to decode. Each page tells you what to do and why.</p>
+          </div>
+          <div class="features">
+            <article class="feature">
+              <h3>Best XI and captain</h3>
+              <p>Every legal formation from your 15 players, with captain, vice-captain and bench order — plus the extra points those changes add over the team you submitted.</p>
+            </article>
+            <article class="feature">
+              <h3>Transfer paths, not just a list</h3>
+              <p>Hold, one free transfer, a −4 hit or roll: one comparison, scored over your planning horizon, with the recommended path highlighted.</p>
+            </article>
+            <article class="feature">
+              <h3>Chips as what-ifs</h3>
+              <ul>
+                <li>Bench Boost and Triple Captain show their extra points.</li>
+                <li>Free Hit and Wildcard make your staged moves free.</li>
+                <li>Mark chips you've already played so they're never suggested.</li>
+              </ul>
+            </article>
+            <article class="feature">
+              <h3>Honest about risk</h3>
+              <p>If a recommendation hinges on one rotation-risk player, Touchline says so and lets you check the what-if. Every recommendation can be downloaded as a decision receipt.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="faq" class="section white">
+        <div class="container">
+          <div class="section-head"><h2>Questions</h2></div>
+          <div class="faq">
+            <details>
+              <summary>Is Touchline free?</summary>
+              <p>Yes. It's a closed alpha with no payments or subscriptions. Some deployments ask for a tester access code.</p>
+            </details>
+            <details>
+              <summary>Do you need my FPL password?</summary>
+              <p>Never. Touchline only reads the public squad behind your Team ID — the same data anyone can see on the FPL website. Your squad is saved in your own browser.</p>
+            </details>
+            <details>
+              <summary>Where do the projections come from?</summary>
+              <p>From a projection model that is frozen into a release before it reaches the app, so the same squad always gets the same answer. Until a release is approved for production it is labelled “Model preview”.</p>
+            </details>
+            <details>
+              <summary>Are the recommendations guaranteed?</summary>
+              <p>No. Football is unpredictable and projections can be wrong. Touchline shows its uncertainty and flags fragile decisions, but the decision is always yours.</p>
+            </details>
+            <details>
+              <summary>Which Gameweeks are covered?</summary>
+              <p>Whatever the current release publishes — up to five Gameweeks ahead. Longer horizons appear automatically when they are released.</p>
+            </details>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="container">
+          <div class="cta-band">
+            <div>
+              <h2>Ready for the next deadline?</h2>
+              <p>Enter your Team ID and see your best XI in seconds.</p>
             </div>
-            <div id="squad-pending-transfers" class="pending-transfers" aria-live="polite"></div>
-            <div id="squad-editor" class="squad-editor skeleton"></div>
-            <p class="private-note">Saved in this browser only. No FPL password or session cookie is stored.</p>
-          </aside>
-        </section>
-      </main>
-    </div>
-    <script src="/app.js" defer></script>
+            <div>
+              <form class="entry-form" action="/app" method="get">
+                <label class="visually-hidden" for="cta-team-id">FPL Team ID or link</label>
+                <input id="cta-team-id" class="input" name="team" type="text" inputmode="numeric" autocomplete="off" placeholder="Your FPL Team ID" required />
+                <button class="button primary large" type="submit">Rate my team</button>
+              </form>
+              <div class="entry-help"><span>Or <a href="/app?demo=1">explore with a demo squad</a></span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container">
+        <p>Touchline is an independent research project. It is not affiliated with the Premier League or Fantasy Premier League.</p>
+        <nav aria-label="Footer"><a href="/app">Open the app</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a></nav>
+      </div>
+    </footer>
+    <script src="/landing.js" defer></script>
   </body>
 </html>

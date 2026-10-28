@@ -560,6 +560,13 @@ CREATE TABLE IF NOT EXISTS current_season_player_rate_run (
     CHECK (status = 'completed')
 );
 
+CREATE TABLE IF NOT EXISTS baseline_current_rate_lineage (
+    model_run_id VARCHAR PRIMARY KEY,
+    rate_run_id VARCHAR NOT NULL,
+    previous_rate_run_id VARCHAR NOT NULL,
+    final_live_run_ids VARCHAR NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS current_season_player_rate (
     rate_run_id VARCHAR NOT NULL
         REFERENCES current_season_player_rate_run(rate_run_id),

@@ -23,8 +23,41 @@ from fpl_model.model.appearance import (
 from fpl_model.storage import DEFAULT_DATABASE_PATH, initialize_database
 
 POLICY_VERSION = "benchwarmers_preseason_appearance_v1"
-INSEASON_POLICY_VERSION = "benchwarmers_inseason_appearance_v1"
+# v2: (a) an all-zero previous-season workbook row is treated as no prior (not as
+# an observed non-starter), and (b) a player who changed clubs since the current
+# season opened does not carry the old club's start history -- both cases fall
+# through to a neutral squad-player prior shrunk against the current-season
+# sample with a light pseudo-count (NEUTRAL_PRIOR_EFFECTIVE_FIXTURES), so a
+# 3/3-start sample reads "probable starter" (~0.80) rather than a naked 1.0 and a
+# brand-new signing is not assumed nailed on the strength of another club's role.
+INSEASON_POLICY_VERSION = "benchwarmers_inseason_appearance_v2_transfer_aware_r2"
 DEFAULT_PREVIOUS_EFFECTIVE_FIXTURES = 5.0
+# Effective fixtures of the neutral prior used only when there is no usable
+# previous-season history at all -- lighter than a real previous season, since
+# the current sample is the only genuine evidence and the prior is generic.
+# At K=2 a 3/3-start sample reads ~0.80 and a single cameo reads ~0.42.
+NEUTRAL_PRIOR_EFFECTIVE_FIXTURES = 2.0
+# A club-changer keeps the old club's start history discounted only until he has
+# banked more than this many starts AT the new club. Two lets a genuine summer
+# signing who has started every game so far speak for himself, while a
+# deadline-day arrival with 0-1 starts stays on the neutral prior.
+NEW_CLUB_START_EVIDENCE = 2
+# A generic "squad player" appearance profile: an even chance of starting, a
+# modest cameo chance, and typical minutes. Deliberately un-opinionated -- it
+# exists to stop a tiny current sample from reading as a certainty, not to
+# encode a real belief about any specific player. The xpts fields mirror
+# project_conditional_appearance's own derivation (appearance / sixty / their
+# sum) so a blended result stays internally coherent.
+_NEUTRAL_PRIOR_PROJECTION = AppearanceProjection(
+    start_probability=0.5,
+    substitute_appearance_probability=0.2,
+    appearance_probability=0.7,
+    sixty_minute_probability=0.45,
+    expected_minutes=0.5 * DEFAULT_START_MINUTES + 0.2 * DEFAULT_SUBSTITUTE_MINUTES,
+    appearance_xpts=0.7,
+    sixty_minute_xpts=0.45,
+    total_xpts=0.7 + 0.45,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -487,6 +520,32 @@ def materialize_inseason_appearance(
             ).fetchall()
         }
 
+        # Players who changed clubs since the current-season window opened. Their
+        # previous-season start history is at a DIFFERENT club and says nothing
+        # about their role at the new one -- a nailed starter elsewhere can be a
+        # rotation piece at a deep squad (a new City signing behind an already
+        # rotating forward line, say). The window opens on 1 June of the current
+        # season's starting year; the FPL bootstrap's own team_join_date is the
+        # source. Such a player's previous-season prior is dropped so the
+        # current-season sample stands on the neutral prior instead.
+        window_open = f"{current_season.split('-')[0]}-06-01"
+        recent_transfers = {
+            int(row[0])
+            for row in connection.execute(
+                """
+                SELECT ps.player_code
+                FROM player_status_snapshot AS pss
+                JOIN player_snapshot AS ps
+                  ON ps.ingestion_run_id = pss.ingestion_run_id AND ps.fpl_id = pss.fpl_id
+                WHERE pss.ingestion_run_id = ?
+                  AND pss.team_join_date IS NOT NULL
+                  AND pss.team_join_date >= ?
+                  AND ps.player_code IS NOT NULL
+                """,
+                [source_ingestion_run_id, window_open],
+            ).fetchall()
+        }
+
         placeholders = ", ".join("?" for _ in live_run_ids)
         live_rows = connection.execute(
             f"""
@@ -541,6 +600,31 @@ def materialize_inseason_appearance(
                 flags.add(f"APPEARANCE_SCENARIO_OVERRIDE_ID={override_id}")
             else:
                 old_history = previous_history.get(int(player_code)) if player_code else None
+                # A workbook row of all zeros (89/568 rows: promoted, new-signing, or
+                # returning players with no previous-PL minutes) is the ABSENCE of a
+                # prior, not evidence of a non-starter. Blending a hard 0.0 prior in
+                # at 62.5% weight buried every such player who has actually started
+                # this season -- e.g. a player starting 3/3 GW came out at start
+                # probability 0.38. Treat a zero-selection row as no history so the
+                # current-season sample stands alone (CURRENT_SEASON_APPEARANCE_ONLY).
+                if old_history is not None and old_history.squad_selections == 0:
+                    flags.add("EMPTY_PREVIOUS_SEASON_APPEARANCE_HISTORY")
+                    old_history = None
+                elif (
+                    old_history is not None
+                    and int(player_code) in recent_transfers
+                    and sum(1 for _, starts in samples if starts) <= NEW_CLUB_START_EVIDENCE
+                ):
+                    # Previous-season starts were at the old club -- not evidence
+                    # of the role at the new one -- and the player has not yet
+                    # banked enough starts AT the new club to speak for himself.
+                    # Fall through to the neutral prior on the current sample.
+                    # Once he has more than NEW_CLUB_START_EVIDENCE new-club
+                    # starts, the normal current/previous blend resumes (a
+                    # settled summer signing is not treated as a rotation risk
+                    # forever).
+                    flags.add("CHANGED_CLUBS_SINCE_SEASON_START")
+                    old_history = None
                 old_projection = (
                     project_benchwarmers_appearance(
                         old_history,
@@ -604,10 +688,29 @@ def materialize_inseason_appearance(
                     )
                     flags.add("SHRUNK_CURRENT_SEASON_APPEARANCE")
                 elif current_projection is not None:
-                    projection = current_projection
-                    start_minutes = current_start_minutes
-                    substitute_minutes = current_substitute_minutes
+                    # No usable previous-season prior. Shrink the current sample
+                    # toward a neutral squad-player profile with a light
+                    # pseudo-count so e.g. a 3/3-start sample reads "probable
+                    # starter" (~0.75) rather than a naked 1.0.
+                    current_weight = len(samples) / (
+                        len(samples) + NEUTRAL_PRIOR_EFFECTIVE_FIXTURES
+                    )
+                    previous_weight = 1.0 - current_weight
+                    projection = _blend_appearance(
+                        _NEUTRAL_PRIOR_PROJECTION,
+                        current_projection,
+                        current_weight=current_weight,
+                    )
+                    start_minutes = (
+                        previous_weight * DEFAULT_START_MINUTES
+                        + current_weight * current_start_minutes
+                    )
+                    substitute_minutes = (
+                        previous_weight * DEFAULT_SUBSTITUTE_MINUTES
+                        + current_weight * current_substitute_minutes
+                    )
                     flags.add("CURRENT_SEASON_APPEARANCE_ONLY")
+                    flags.add("SHRUNK_TO_NEUTRAL_APPEARANCE_PRIOR")
                 elif old_projection is not None:
                     projection = old_projection
                     previous_weight = 1.0

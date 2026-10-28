@@ -27,6 +27,7 @@ from fpl_model.model.baseline import (
     BaselineComponentProjections,
     compose_baseline_projection,
 )
+from fpl_model.model.current_season_rates import materialize_current_season_rates
 from fpl_model.model.defence import (
     project_benchwarmers_defensive_rates,
     weight_defensive_rates,
@@ -44,7 +45,7 @@ from fpl_model.model.secondary import (
 from fpl_model.storage import DEFAULT_DATABASE_PATH, initialize_database
 
 POLICY_VERSION = "coherent_benchwarmers_preseason_baseline_v7"
-INSEASON_POLICY_VERSION = "coherent_benchwarmers_inseason_baseline_v1"
+INSEASON_POLICY_VERSION = "coherent_benchwarmers_inseason_baseline_v2"
 HORIZON_POLICY_VERSION = "frozen_preseason_fixture_horizon_v1"
 REGULATION_MINUTES = 90.0
 AVERAGE_BPS_PER_START = 14.862318964622457
@@ -259,16 +260,17 @@ def _choose_input_runs(
         raise ValueError("no compatible appearance projection run found")
     selected_appearance_run, history_import_run, as_of, deadline = appearance
 
-    rate_parameters: list[object] = []
-    rate_filter = ""
+    rate_parameters: list[object] = [as_of, as_of]
+    rate_filter = "WHERE h.source_committed_at <= ? AND h.imported_at <= ?"
     if player_rate_run_id is not None:
-        rate_filter = "WHERE rate_run_id = ?"
+        rate_filter += " AND r.rate_run_id = ?"
         rate_parameters.append(player_rate_run_id)
     rate = connection.execute(
         f"""
-        SELECT rate_run_id FROM player_rate_history_run
+        SELECT r.rate_run_id FROM player_rate_history_run r
+        JOIN player_fixture_history_import_run h ON h.import_run_id = r.source_import_run_id
         {rate_filter}
-        ORDER BY created_at DESC, rate_run_id DESC LIMIT 1
+        ORDER BY r.created_at DESC, r.rate_run_id DESC LIMIT 1
         """,
         rate_parameters,
     ).fetchone()
@@ -536,6 +538,31 @@ def _materialize_frozen_fixture_projection(
                         [context_run],
                     ).fetchall()
                 }
+        current_rate_run = None
+        current_rates = {}
+        final_live_ids = []
+        if policy_version == INSEASON_POLICY_VERSION:
+            # The official event lineage carries the current season, independent
+            # of the historical prior's season.
+            season_row = connection.execute(
+                "SELECT season FROM fpl_event_live_run WHERE source_ingestion_run_id = ? ORDER BY captured_at DESC LIMIT 1",
+                [source_ingestion_run],
+            ).fetchone()
+            if season_row is not None:
+                updated = materialize_current_season_rates(
+                    source_ingestion_run_id=source_ingestion_run, season=str(season_row[0]),
+                    as_of_gameweek=input_gameweek, as_of=as_of,
+                    previous_rate_run_id=rate_run, database_path=database_path,
+                )
+                current_rate_run = updated.rate_run_id
+                current_rates = {int(row[0]): row[1:] for row in connection.execute(
+                    "SELECT player_code, current_season_minutes, shrunk_expected_goals_per_90, shrunk_expected_assists_per_90, shrunk_defensive_contribution_per_90, shrunk_saves_per_90, prior_source FROM current_season_player_rate WHERE rate_run_id = ?",
+                    [current_rate_run],
+                ).fetchall()}
+                final_live_ids = [str(row[0]) for row in connection.execute(
+                    "SELECT live_run_id FROM fpl_event_live_run WHERE source_ingestion_run_id = ? AND season = ? AND gameweek < ? AND event_finished AND data_checked AND captured_at <= ? QUALIFY row_number() OVER (PARTITION BY gameweek ORDER BY captured_at DESC, live_run_id DESC) = 1 ORDER BY gameweek",
+                    [source_ingestion_run, str(season_row[0]), input_gameweek, as_of],
+                ).fetchall()]
         target_deadline = deadline
         if target_gameweek != input_gameweek:
             deadline_row = connection.execute(
@@ -555,7 +582,7 @@ def _materialize_frozen_fixture_projection(
                 raise ValueError("frozen input as_of is after the target fixture deadline")
         identity_text = f"{appearance_run}|{rate_run}|{strength_run}|{policy_version}"
         if policy_version == INSEASON_POLICY_VERSION:
-            identity_text += f"|context={context_run or 'none'}"
+            identity_text += f"|context={context_run or 'none'}|current_rates={current_rate_run or 'none'}"
         if target_gameweek != input_gameweek:
             identity_text += (
                 f"|fixture_gameweek={target_gameweek}|frozen_input_gameweek={input_gameweek}"
@@ -830,6 +857,29 @@ def _materialize_frozen_fixture_projection(
                 short_defcon,
                 rate_flags,
             ) = rate
+            current = current_rates.get(player_code)
+            if current is not None and current[0] > 0:
+                observed_minutes, xg90, xa90, dc90, saves90, prior_source = current
+                weight = observed_minutes / (observed_minutes + PRIOR_REFERENCE_MINUTES)
+                if prior_source == "no_previous_season_history" or "EMPIRICAL_PLAYER_RATE_PRIOR" in flags:
+                    # New signings shrink toward the existing position/price prior.
+                    # Never feed their raw one-match rate straight to the optimizer.
+                    xg90 = weight * xg90 + (1 - weight) * long_xg / long_minutes * 90
+                    xa90 = weight * xa90 + (1 - weight) * long_xa / long_minutes * 90
+                    dc_prior = long_defcon / long_defcon_minutes * 90 if long_defcon_minutes else 0
+                    dc90 = weight * dc90 + (1 - weight) * dc_prior
+                    flags.add("CURRENT_RATES_SHRUNK_TO_COHORT_PRIOR")
+                # Both windows now represent one posterior, avoiding double weighting.
+                long_minutes = short_minutes = 90.0
+                long_xg = short_xg = xg90
+                long_xa = short_xa = xa90
+                long_defcon_minutes = short_defcon_minutes = 90.0
+                long_defcon = short_defcon = dc90
+                prior_saves90 = season_saves / season_minutes * 90 if season_minutes else 0
+                if season_minutes > 0:
+                    season_saves = (weight * saves90 + (1 - weight) * prior_saves90) * season_minutes / 90
+                flags.discard("FROZEN_PREVIOUS_SEASON_PLAYER_RATES")
+                flags.update(("SHRUNK_CURRENT_SEASON_PLAYER_RATES", "FROZEN_PREVIOUS_SEASON_DISCIPLINE_BONUS", f"CURRENT_RATE_RUN={current_rate_run}"))
             flags.update(json.loads(rate_flags))
             if prior_position != position:
                 flags.add(f"POSITION_CHANGED_{prior_position}_TO_{position}")
@@ -1040,6 +1090,9 @@ def _materialize_frozen_fixture_projection(
                     source_ingestion_run,
                 ],
             )
+            if current_rate_run is not None:
+                connection.execute("INSERT INTO baseline_current_rate_lineage VALUES (?, ?, ?, ?)",
+                                   [model_run_id, current_rate_run, rate_run, json.dumps(final_live_ids)])
             if context_run is not None:
                 connection.execute(
                     "INSERT INTO baseline_context_lineage VALUES (?, ?)",
@@ -1146,9 +1199,11 @@ def materialize_inseason_baseline(
 def materialize_frozen_projection_horizon(
     *,
     anchor_model_run_id: str,
+    horizon_length: int = 3,
     database_path: str | Path = DEFAULT_DATABASE_PATH,
 ) -> ProjectionHorizonResult:
-    """Score the anchor GW and next two fixture GWs from one frozen input set."""
+    """Score the anchor GW and the next ``horizon_length - 1`` fixture GWs from one
+    frozen input set (default three; one to five, ending no later than GW38)."""
     initialize_database(database_path)
     with duckdb.connect(str(database_path), read_only=True) as connection:
         anchor = connection.execute(
@@ -1184,8 +1239,8 @@ def materialize_frozen_projection_horizon(
     ):
         raise ValueError("anchor must use the current baseline policy version")
     anchor_gameweek = int(anchor_gameweek)
-    if anchor_gameweek > 36:
-        raise ValueError("three-Gameweek horizon cannot start after GW36")
+    if not 1 <= horizon_length <= 5 or anchor_gameweek + horizon_length - 1 > 38:
+        raise ValueError("horizon must contain one to five Gameweeks and end by GW38")
 
     runs = tuple(
         _materialize_frozen_fixture_projection(
@@ -1198,7 +1253,7 @@ def materialize_frozen_projection_horizon(
             policy_version=str(anchor_policy_version),
             database_path=database_path,
         )
-        for gameweek in range(anchor_gameweek, anchor_gameweek + 3)
+        for gameweek in range(anchor_gameweek, anchor_gameweek + horizon_length)
     )
     if runs[0].model_run_id != anchor_model_run_id:
         raise ValueError("anchor model run does not match the current baseline identity")
@@ -1206,7 +1261,7 @@ def materialize_frozen_projection_horizon(
         anchor_model_run_id=anchor_model_run_id,
         horizon_policy_version=HORIZON_POLICY_VERSION,
         start_gameweek=anchor_gameweek,
-        end_gameweek=anchor_gameweek + 2,
+        end_gameweek=anchor_gameweek + horizon_length - 1,
         model_run_ids=tuple(run.model_run_id for run in runs),
         runs=runs,
     )

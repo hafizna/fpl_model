@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from itertools import combinations
 from math import isfinite, sqrt
 
 from fpl_model.decision.squad import SquadPlayer, ValidatedSquad
@@ -75,9 +74,9 @@ def recommend_lineup(
 ) -> LineupRecommendation:
     """Return the maximum-mean-xPts legal XI and deterministic bench/captain order.
 
-    All 1,365 possible 11-player subsets are cheap to enumerate. This is
-    preferable to introducing a solver before transfer and chip decisions
-    create a genuinely larger search space.
+    For each legal formation, the highest-scoring players at each position
+    maximize its additive XI score. Enumerating these formations is exact and
+    preserves canonical squad-position tie breaking without 1,365 subsets.
     """
     projection_rows = tuple(projections)
     projection_by_id = {projection.fpl_id: projection for projection in projection_rows}
@@ -95,15 +94,25 @@ def recommend_lineup(
 
     best_starters: tuple[SquadPlayer, ...] | None = None
     best_score = float("-inf")
-    for candidate in combinations(squad.players, 11):
-        if not is_legal_starting_xi(candidate):
-            continue
-        score = sum(projection_by_id[player.fpl_id].expected_points for player in candidate)
-        # combinations() follows canonical squad_position order. Keeping the
-        # first equal-scoring candidate provides a stable, documented tie-break.
-        if score > best_score:
-            best_score = score
-            best_starters = candidate
+    ranked = {position: sorted(
+        (p for p in squad.players if p.position == position),
+        key=lambda p: (-projection_by_id[p.fpl_id].expected_points, p.squad_position),
+    ) for position in ("GK", "DEF", "MID", "FWD")}
+    best_order = None
+    for defenders in range(3, 6):
+        for forwards in range(1, 4):
+            midfielders = 10 - defenders - forwards
+            if not 2 <= midfielders <= 5:
+                continue
+            selected = (ranked["GK"][:1] + ranked["DEF"][:defenders]
+                        + ranked["MID"][:midfielders] + ranked["FWD"][:forwards])
+            candidate = tuple(sorted(selected, key=lambda p: p.squad_position))
+            if len(candidate) != 11:
+                continue
+            score = sum(projection_by_id[p.fpl_id].expected_points for p in candidate)
+            order = tuple(p.squad_position for p in candidate)
+            if score > best_score or (score == best_score and (best_order is None or order < best_order)):
+                best_score, best_starters, best_order = score, candidate, order
 
     if best_starters is None:
         raise ValueError("squad has no legal starting XI")

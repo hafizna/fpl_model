@@ -333,3 +333,24 @@ def test_planned_transfers_can_choose_a_better_initial_core_then_switch():
     assert planned.recommended.total_transfer_cost == 0.0
     assert planned.recommended.cumulative_xpts > frozen.recommended.cumulative_xpts
 
+
+
+def test_one_gameweek_horizon_with_future_transfer_planning_returns_the_frozen_squad():
+    # The CLI enables future-transfer planning by default; a one-Gameweek
+    # release has no later Gameweek to plan into and must not fail.
+    pools = _pools()[:1]
+    frozen = optimize_initial_squad(pools, beam_width=500, candidates_per_position_per_lens=20)
+    planned = optimize_initial_squad(
+        pools,
+        beam_width=500,
+        candidates_per_position_per_lens=20,
+        plan_future_transfers=True,
+    )
+
+    assert planned.planned_transfers is False
+    assert planned.planned_transfer_shortlist == 0
+    assert [row.gameweek for row in planned.recommended.gameweeks] == [1]
+    assert planned.recommended.squad == frozen.recommended.squad
+    assert planned.recommended.cumulative_xpts == pytest.approx(
+        frozen.recommended.cumulative_xpts
+    )

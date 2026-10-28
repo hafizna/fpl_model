@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Your FPL squad rated, your best XI and captain picked, and every transfer scored before the deadline." />
+    <title>My Team — Touchline</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230a8550'/%3E%3Cpath d='M9 10h14v3.5h-5V24h-4V13.5H9z' fill='white'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="app">
+    <section id="access-gate" class="access-gate" role="dialog" aria-modal="true" aria-labelledby="access-title" hidden>
+      <form id="access-form" class="access-card">
+        <span class="brand-mark">T</span>
+        <h2 id="access-title">Enter your tester access code</h2>
+        <p>Touchline is in a closed alpha. Your code unlocks this browser tab only and never appears in the URL or our logs.</p>
+        <label for="access-code">Access code</label>
+        <input id="access-code" class="input" type="password" minlength="16" maxlength="256" autocomplete="current-password" required />
+        <button id="access-submit" class="button primary" type="submit">Open Touchline</button>
+        <p id="access-message" class="access-message" aria-live="polite"></p>
+        <p class="access-legal">By continuing you accept the closed-alpha <a href="/terms" target="_blank" rel="noopener">terms</a> and <a href="/privacy" target="_blank" rel="noopener">privacy notice</a>.</p>
+      </form>
+    </section>
+
+    <header class="app-header">
+      <div class="app-bar">
+        <a class="brand" href="/" aria-label="Touchline home"><span class="brand-mark">T</span><span class="brand-name">Touchline</span></a>
+        <nav class="app-tabs" aria-label="Main">
+          <button class="nav-item active" type="button" data-view="weekly">My Team</button>
+          <button class="nav-item" type="button" data-view="transfers">Transfers</button>
+          <button class="nav-item" type="button" data-view="outlook">Planner</button>
+          <button class="nav-item" type="button" data-view="settings">Settings</button>
+        </nav>
+        <div class="gw-pill">
+          <span>Projections</span>
+          <strong id="horizon-label">—</strong>
+          <small id="horizon-availability"></small>
+        </div>
+      </div>
+    </header>
+
+    <main class="app-main">
+      <div id="error-banner" class="error-banner" role="alert" hidden></div>
+
+      <section id="connect-view" class="connect-view" hidden>
+        <div class="connect-card">
+          <span class="pill">Step 1 of 3 · Connect your team</span>
+          <h1>Let's rate your FPL team</h1>
+          <p>Enter your FPL Team ID or paste your team's link. We only read your public squad — never your password.</p>
+          <form id="connect-form" class="entry-form">
+            <label class="visually-hidden" for="connect-team-id">FPL Team ID or link</label>
+            <input id="connect-team-id" class="input" type="text" inputmode="numeric" autocomplete="off" placeholder="Team ID, e.g. 1234567" required />
+            <button id="connect-submit" class="button primary large" type="submit">Load my team</button>
+          </form>
+          <div class="entry-help">
+            <details>
+              <summary>Where do I find my Team ID?</summary>
+              <p>On the FPL website, open the <strong>Points</strong> tab. Your Team ID is the number after <code>/entry/</code> in the address bar, e.g. <code>fantasy.premierleague.com/entry/1234567/event/4</code>. You can paste the whole link.</p>
+            </details>
+          </div>
+          <div class="connect-alt">
+            <span>No team to hand?</span>
+            <button id="connect-demo" class="button secondary" type="button">Explore with a demo squad</button>
+          </div>
+        </div>
+      </section>
+
+      <div class="workspace">
+        <div class="content-column">
+          <section id="weekly-view" class="view active" aria-labelledby="team-title">
+            <div class="page-head">
+              <div>
+                <p class="kicker">Step 1 · Rate your team</p>
+                <h1 id="team-title">Your team</h1>
+                <p id="team-subtitle" class="page-sub">Your best XI, captain and bench order for the next deadline.</p>
+              </div>
+              <button id="refresh-lineup" class="button ghost small" type="button">Recalculate</button>
+            </div>
+            <div id="weekly-summary" class="stat-row skeleton"></div>
+            <div id="plan-header" class="plan-header" aria-live="polite"></div>
+            <div id="sensitivity-banner" hidden></div>
+            <div id="marginal-changes" class="marginal-changes"></div>
+            <section class="card lineup-card" aria-labelledby="lineup-title">
+              <div class="card-head">
+                <h2 id="lineup-title">Best XI</h2>
+                <small id="lineup-caption">Shirt, name, next opponent and projected points</small>
+              </div>
+              <div id="pitch" class="pitch skeleton" aria-live="polite"></div>
+              <div id="bench" class="bench-row"></div>
+            </section>
+            <div class="next-step">
+              <div><span>Step 2</span><strong>Find a transfer that gains points</strong><small>Compare holding, a free transfer, a −4 hit and rolling.</small></div>
+              <button class="button primary" type="button" data-goto="transfers" data-autorun="transfers">Find my best transfers →</button>
+            </div>
+            <details class="explainer">
+              <summary>How Touchline picks your XI</summary>
+              <p>Every legal formation from your 15 players is checked. Captain, vice-captain, bench order, each player's chance of playing and the expected value of automatic substitutions all come from a frozen projection release, so the same squad always gets the same answer.</p>
+            </details>
+          </section>
+
+          <section id="transfers-view" class="view" aria-labelledby="transfers-title">
+            <div class="page-head">
+              <div>
+                <p class="kicker">Step 2 · Make the right transfer</p>
+                <h1 id="transfers-title">Transfers</h1>
+                <p class="page-sub">Every legal, affordable move is scored over the same Gameweeks as your lineup, using your bank and selling prices.</p>
+              </div>
+              <button id="run-transfers" class="button primary" type="button">Find my best transfers</button>
+            </div>
+            <div id="transfers-pending-transfers" class="pending-transfers" aria-live="polite"></div>
+            <div id="transfer-paths" class="transfer-paths" aria-live="polite"></div>
+            <div id="transfer-results" class="transfer-list empty-state"><div><strong>See which move is worth it</strong>Press “Find my best transfers” to compare holding, a free transfer, a −4 hit and rolling, then the best single moves.</div></div>
+            <section class="card wildcard-card" aria-labelledby="wildcard-title">
+              <div class="card-head"><h2 id="wildcard-title">Wildcard check</h2><small>Research scenario</small></div>
+              <div class="card-body">
+                <p>Compare your current squad with a Wildcard built for your visible horizon, against holding and using free transfers.</p>
+                <div class="wildcard-controls">
+                  <label for="wc-roll">Gameweeks to roll after the Wildcard
+                    <input id="wc-roll" class="input" type="number" min="0" max="4" value="3" />
+                  </label>
+                  <label for="wc-ft-value">Points per saved free transfer at the end
+                    <input id="wc-ft-value" class="input" type="number" min="0" max="10" step="0.5" value="0" />
+                  </label>
+                </div>
+                <p class="note">Start at 0, then try other values to see if the decision changes. The value of keeping your Wildcard for later is not included.</p>
+                <button id="run-wildcard" class="button secondary" type="button">Compare Wildcard vs holding</button>
+                <p id="wildcard-status" class="control-note" aria-live="polite"></p>
+                <div id="wildcard-results" aria-live="polite"></div>
+              </div>
+            </section>
+            <div class="next-step">
+              <div><span>Step 3</span><strong>Plan the next Gameweeks</strong><small>Points per Gameweek, fixtures, confidence and chips.</small></div>
+              <button class="button primary" type="button" data-goto="outlook">Open the planner →</button>
+            </div>
+          </section>
+
+          <section id="outlook-view" class="view" aria-labelledby="planner-title">
+            <div class="page-head">
+              <div>
+                <p class="kicker">Step 3 · Plan ahead</p>
+                <h1 id="planner-title">Planner</h1>
+                <p class="page-sub">Projected points, fixtures and confidence for each Gameweek in your horizon. Staged transfers and chips are included.</p>
+              </div>
+            </div>
+            <div id="outlook-total" class="hero-score skeleton"></div>
+            <div id="outlook-grid" class="outlook-grid"></div>
+            <div id="outlook-rating-detail" class="rating-detail skeleton"></div>
+            <h2 class="section-label">Your players over the horizon</h2>
+            <div id="player-outlook" class="table-card"></div>
+            <div class="next-step">
+              <div><span>Fine-tune</span><strong>Change the horizon or your risk stance</strong><small>Look 1 to 5 Gameweeks ahead, whatever the release publishes.</small></div>
+              <button class="button primary" type="button" data-goto="settings">Open settings →</button>
+            </div>
+          </section>
+
+          <section id="settings-view" class="view" aria-labelledby="settings-title">
+            <div class="page-head">
+              <div>
+                <p class="kicker">Settings</p>
+                <h1 id="settings-title">Horizon &amp; risk</h1>
+                <p class="page-sub">These change what you see in this browser. They never retrain or edit the projections.</p>
+              </div>
+            </div>
+            <div class="settings-grid">
+              <div class="settings-card"><h3>Gameweeks ahead</h3><p>How many published Gameweeks to plan over. Longer horizons unlock when the release contains them.</p><label class="control-label" for="horizon-select">Planning horizon</label><select id="horizon-select" class="input"></select><div id="horizon-note" class="control-note"></div></div>
+              <div class="settings-card"><h3>Risk stance</h3><p>Filters which single transfers are suggested. It never changes the projections themselves.</p><div id="risk-profiles" class="risk-profiles"></div></div>
+              <div class="settings-card wide"><h3>How chips are scored</h3><p>Pick a chip in the “Your team” panel to try it in the first published Gameweek, and mark chips you have already played this half-season as used. A chip is always a what-if: your squad rating stays chip-free.</p><ul class="chip-explainer"><li><strong>Bench Boost</strong> adds all four bench players' projected points.</li><li><strong>Triple Captain</strong> counts your captain's projected points three times.</li><li><strong>Wildcard</strong> makes staged moves free, keeps your saved free transfers, and keeps the new squad.</li><li><strong>Free Hit</strong> makes staged moves free for one Gameweek; later Gameweeks use your committed squad.</li></ul><p>Touchline scores the chip you choose. It does not tell you which week to play it.</p></div>
+            </div>
+          </section>
+
+          <section id="decision-receipts" class="decision-receipts" hidden aria-live="polite"></section>
+        </div>
+
+        <aside class="side-panel" aria-label="Your team">
+          <section class="panel-block">
+            <div class="panel-title">Your team <span id="squad-cost" class="cost-pill">—</span></div>
+            <div id="team-summary" class="team-summary" hidden></div>
+            <div class="team-id-row">
+              <label for="team-id">FPL Team ID or link</label>
+              <div class="input-row">
+                <input id="team-id" class="input" type="text" inputmode="numeric" autocomplete="off" placeholder="e.g. 1234567" />
+                <button id="load-team-id" class="button secondary" type="button">Load squad</button>
+              </div>
+            </div>
+            <p id="team-id-note" class="note">We read your public squad only — never a password or login.</p>
+          </section>
+
+          <section class="panel-block">
+            <div class="panel-title">Bank &amp; transfers</div>
+            <div class="state-inputs">
+              <label for="bank">In the bank
+                <span class="money-input"><input id="bank" class="input" type="number" min="0" step="0.1" value="0.0" /></span>
+              </label>
+              <label for="free-transfers">Free transfers
+                <select id="free-transfers" class="input">
+                  <option value="0">0</option><option value="1" selected>1</option><option value="2">2</option>
+                  <option value="3">3</option><option value="4">4</option><option value="5">5</option>
+                </select>
+              </label>
+            </div>
+          </section>
+
+          <div id="squad-pending-transfers" class="pending-transfers" aria-live="polite"></div>
+
+          <fieldset class="panel-block chip-panel" aria-describedby="chip-note">
+            <legend class="panel-title">Chips</legend>
+            <div id="chip-options" class="chip-options"></div>
+            <p id="chip-note" class="note" aria-live="polite"></p>
+          </fieldset>
+
+          <details class="panel-block squad-details">
+            <summary>Edit squad manually</summary>
+            <p class="note">Swap any player for a like-for-like alternative. Staged transfers are cleared when you edit the squad here.</p>
+            <div id="squad-editor" class="squad-editor skeleton"></div>
+          </details>
+
+          <section class="release-card" aria-label="Projection release">
+            <div class="panel-title">Projection release</div>
+            <div class="release-row"><span class="status-dot"></span><strong id="release-label">Loading</strong></div>
+            <p id="release-meta">Connecting to the model…</p>
+            <p id="release-coverage"></p>
+            <p id="release-freshness"></p>
+          </section>
+          <p class="note">Your squad is saved in this browser only.</p>
+        </aside>
+      </div>
+    </main>
+
+    <footer class="app-footer">
+      <a href="/">About Touchline</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a id="support-link" href="#" hidden>Support</a>
+      <small id="operator-label"></small>
+    </footer>
+    <script src="/app.js" defer></script>
+  </body>
+</html>

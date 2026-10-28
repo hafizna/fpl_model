@@ -125,8 +125,14 @@ def test_inseason_appearance_blends_final_history_and_preserves_lineage(tmp_path
     assert prior[0] <= 0.5
     assert prior[1] <= 45.0
     assert "SHRUNK_CURRENT_SEASON_APPEARANCE" in json.loads(prior[2])
-    assert current_only[:3] == pytest.approx((0.0, 1.0, 20.0))
+    # fpl_id=2 has no usable previous-season history and exactly one current
+    # sample (a 20-minute cameo). v2 shrinks that toward a neutral squad-player
+    # prior (K=2 effective fixtures) rather than reading one cameo as "100% a
+    # substitute, never starts": current_weight = 1/(1+2), so start ~0.33 and
+    # substitute ~0.47 instead of the old (0.0, 1.0, 20.0).
+    assert current_only[:3] == pytest.approx((1 / 3, 7 / 15, 28.866666666666667))
     assert "CURRENT_SEASON_APPEARANCE_ONLY" in json.loads(current_only[3])
+    assert "SHRUNK_TO_NEUTRAL_APPEARANCE_PRIOR" in json.loads(current_only[3])
 
 
 def test_inseason_appearance_accepts_finished_fixture_provisional_run(tmp_path):

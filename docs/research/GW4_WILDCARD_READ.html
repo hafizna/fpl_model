@@ -1,0 +1,303 @@
+<title>GW4 Wildcard Read</title>
+<meta name="description" content="What the tuned v2 model says about the current squad, the three paths from GW4, and where the model and the manager's judgement now agree and still diverge.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --ground: #F7F5F0;
+    --surface: #FFFFFF;
+    --ink: #1A1712;
+    --ink-soft: #4A453C;
+    --muted: #6E685C;
+    --hair: #DAD5C9;
+    --hair-soft: #E7E3D8;
+    --accent: #0E6E42;
+    --accent-ink: #0B5533;
+    --warn: #A55E00;
+    --warn-soft: #F2E7D5;
+    --keep: #5B7A99;
+    --shadow: 0 1px 2px rgba(26,23,18,.04), 0 8px 28px -14px rgba(26,23,18,.12);
+  }
+  :root:not([data-theme="light"]) {
+    @media (prefers-color-scheme: dark) {
+      --ground:#14120F; --surface:#1C1A16; --ink:#ECE8DF; --ink-soft:#B8B2A4; --muted:#8A8375;
+      --hair:#322E27; --hair-soft:#2C2925; --accent:#4FBF88; --accent-ink:#7BD3A6;
+      --warn:#D69039; --warn-soft:#2E2820; --keep:#85A3C0;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 12px 32px -16px rgba(0,0,0,.6);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:#14120F; --surface:#1C1A16; --ink:#ECE8DF; --ink-soft:#B8B2A4; --muted:#8A8375;
+    --hair:#322E27; --hair-soft:#2C2925; --accent:#4FBF88; --accent-ink:#7BD3A6;
+    --warn:#D69039; --warn-soft:#2E2820; --keep:#85A3C0;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 12px 32px -16px rgba(0,0,0,.6);
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; background: var(--ground); color: var(--ink);
+    font-family: "Source Serif 4", Georgia, serif; font-size: 17px; line-height: 1.6;
+    font-optical-sizing: auto;
+  }
+  @media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+  .wrap { max-width: 780px; margin: 0 auto; padding: clamp(24px,5vw,64px) clamp(18px,5vw,44px) 88px; }
+
+  .eyebrow {
+    font-family: "IBM Plex Mono", monospace; font-size: 11.5px; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--accent-ink); margin: 0 0 16px;
+  }
+  h1 {
+    font-family: "Fraunces", Georgia, serif; font-weight: 500;
+    font-size: clamp(2rem, 5.5vw, 3rem); line-height: 1.05; letter-spacing: -.015em;
+    text-wrap: balance; margin: 0 0 16px;
+  }
+  .standfirst {
+    font-size: clamp(1.02rem, 2.3vw, 1.2rem); line-height: 1.48; color: var(--ink-soft);
+    margin: 0 0 24px; text-wrap: pretty;
+  }
+  .meta {
+    font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--muted);
+    border-top: 1px solid var(--hair); border-bottom: 1px solid var(--hair);
+    padding: 11px 0; margin: 0 0 40px; display: flex; flex-wrap: wrap; gap: 5px 20px;
+  }
+  .meta b { color: var(--ink-soft); font-weight: 500; }
+
+  h2 {
+    font-family: "Fraunces", Georgia, serif; font-weight: 500;
+    font-size: clamp(1.4rem, 3.4vw, 1.8rem); line-height: 1.15; letter-spacing: -.01em;
+    text-wrap: balance; margin: 52px 0 8px; scroll-margin-top: 28px;
+  }
+  h2 .n {
+    font-family: "IBM Plex Mono", monospace; font-size: .68em; color: var(--accent);
+    font-weight: 400; margin-right: .55em; vertical-align: .15em;
+  }
+  h3 { font-family: "Fraunces", Georgia, serif; font-weight: 600; font-size: 1.08rem; margin: 28px 0 4px; }
+  .dek { color: var(--muted); font-style: italic; margin: 0 0 18px; }
+  p { margin: 0 0 16px; }
+  a { color: var(--accent-ink); text-underline-offset: 2px; }
+  strong { font-weight: 600; }
+  code, .mono {
+    font-family: "IBM Plex Mono", monospace; font-size: .82em; background: var(--hair-soft);
+    padding: .1em .38em; border-radius: 3px; word-break: break-word;
+  }
+  ul, ol { margin: 0 0 16px; padding-left: 1.25em; }
+  li { margin: 0 0 7px; }
+  li::marker { color: var(--accent); }
+
+  .verdict {
+    border: 1px solid var(--hair); border-left: 4px solid var(--accent);
+    background: var(--surface); border-radius: 5px; padding: 18px 22px; margin: 8px 0 8px;
+    box-shadow: var(--shadow);
+  }
+  .verdict .tag {
+    font-family: "IBM Plex Mono", monospace; font-size: 10.5px; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--accent-ink); display: block; margin-bottom: 8px;
+  }
+  .verdict p { margin: 0 0 10px; font-size: 1.04rem; }
+  .verdict p:last-child { margin-bottom: 0; }
+  .verdict strong { font-family: "Fraunces", serif; }
+
+  .paths { display: grid; gap: 12px; margin: 22px 0; }
+  @media (min-width: 620px) { .paths { grid-template-columns: repeat(3, 1fr); } }
+  .path {
+    border: 1px solid var(--hair); border-radius: 5px; background: var(--surface);
+    padding: 16px 16px 14px; box-shadow: var(--shadow); display: flex; flex-direction: column;
+  }
+  .path.pick { border-color: var(--accent); border-width: 1.5px; }
+  .path h4 {
+    margin: 0 0 4px; font-family: "Fraunces", serif; font-size: 1rem; font-weight: 600;
+    display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+  }
+  .path .badge {
+    font-family: "IBM Plex Mono", monospace; font-size: 9px; letter-spacing: .08em;
+    background: var(--accent); color: var(--surface); padding: 2px 5px; border-radius: 3px;
+  }
+  .path .big {
+    font-family: "IBM Plex Mono", monospace; font-size: 1.7rem; font-weight: 500;
+    font-variant-numeric: tabular-nums; margin: 6px 0 2px; letter-spacing: -.02em;
+  }
+  .path .sub { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--muted); margin: 0 0 8px; }
+  .path .delta { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--accent-ink); margin-top: auto; }
+  .path .delta.zero { color: var(--muted); }
+
+  .tablewrap { overflow-x: auto; margin: 20px 0; border: 1px solid var(--hair); border-radius: 5px; box-shadow: var(--shadow); }
+  table { border-collapse: collapse; width: 100%; font-family: "IBM Plex Mono", monospace; font-size: 12.5px; background: var(--surface); }
+  caption {
+    caption-side: top; text-align: left; padding: 13px 15px 9px;
+    font-family: "Fraunces", serif; font-size: .98rem; font-weight: 600; color: var(--ink);
+  }
+  th, td { padding: 8px 13px; text-align: left; border-bottom: 1px solid var(--hair-soft); white-space: nowrap; }
+  thead th {
+    font-size: 10px; letter-spacing: .05em; text-transform: uppercase; color: var(--muted);
+    font-weight: 500; border-bottom: 1px solid var(--hair);
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .row-drop td:first-child { color: var(--warn); }
+  .row-keep td:first-child { color: var(--keep); }
+  .lo { color: var(--warn); }
+  .hi { color: var(--accent-ink); }
+  .pick-row td { background: color-mix(in srgb, var(--accent) 9%, var(--surface)); }
+  tfoot td { font-size: 10.5px; color: var(--muted); border-top: 1px solid var(--hair); white-space: normal; }
+
+  .caveat {
+    margin: 20px 0; border: 1px solid var(--hair); border-left: 3px solid var(--warn);
+    background: var(--warn-soft); border-radius: 4px; padding: 14px 18px; font-size: .93rem; line-height: 1.5;
+  }
+  .caveat .tag {
+    font-family: "IBM Plex Mono", monospace; font-size: 10px; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--warn); display: block; margin-bottom: 5px;
+  }
+  .caveat p:last-child { margin-bottom: 0; }
+
+  .fix { border: 1px solid var(--hair); border-radius: 5px; background: var(--surface); padding: 4px 20px; margin: 18px 0; box-shadow: var(--shadow); }
+  .fix h3 { display: flex; gap: 10px; align-items: baseline; }
+  .fix h3::before {
+    content: "FIX"; font-family: "IBM Plex Mono", monospace; font-size: 10px; letter-spacing: .1em;
+    background: var(--keep); color: var(--surface); padding: 3px 6px; border-radius: 3px; position: relative; top: -2px;
+  }
+
+  .divider { border: none; border-top: 1px solid var(--hair); margin: 52px 0 0; }
+  .endnote { margin-top: 40px; font-size: .88rem; color: var(--muted); line-height: 1.55; }
+  .kicker {
+    font-family: "IBM Plex Mono", monospace; font-size: 10.5px; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--accent-ink); margin: 0 0 5px;
+  }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
+</style>
+
+<div class="wrap">
+  <p class="eyebrow">Decision read &middot; internal &middot; sibling to the strategy note</p>
+  <h1>GW4 Wildcard read</h1>
+  <p class="standfirst">Three model fixes later &mdash; the appearance model no longer buries new signings or promoted-club starters, mid-window transfers don't carry the old club's role, and team strength blends toward the season's own results &mdash; here is where the numbers land for the actual squad, and where the model and the manager's Wildcard ideas now agree.</p>
+  <p class="meta">
+    <span><b>Release:</b> web_release_c4dd8743 &middot; v2, tuned &middot; shadow</span>
+    <span><b>Horizon:</b> GW4&ndash;GW8</span>
+    <span><b>Free transfers:</b> 3</span>
+    <span><b>Chips:</b> Wildcard + Free Hit available</span>
+  </p>
+
+  <div class="verdict">
+    <span class="tag">Bottom line</span>
+    <p><strong>Use your three free transfers. Don't Wildcard.</strong> Over GW4&ndash;GW8 the tuned model has the Wildcard worth only <strong>+3 xPts over simply using your 3 FT</strong> (318.8 vs 315.5). That is inside the noise, the option value of holding the chip is not counted, and a keep-B.Fernandes build that isn't even the model's own squad already matches the Wildcard number.</p>
+    <p>Clear the two dead slots now (Tzolis, Jacquet; Dubravka is a fine non-playing GK2), keep the Wildcard for a real fixture swing or injury crisis, and reassess weekly.</p>
+  </div>
+
+  <div class="tablewrap">
+    <table>
+      <caption>Your actual squad &mdash; what these numbers are scored against</caption>
+      <thead><tr><th>Pos</th><th>Players (no Wildcard applied)</th></tr></thead>
+      <tbody>
+        <tr><td>GK</td><td>Raya, Dubravka</td></tr>
+        <tr><td>DEF</td><td>Gabriel, Maguire, Kayode, Jacquet, Diop</td></tr>
+        <tr><td>MID</td><td>B.Fernandes, Mbeumo, Semenyo, Gakpo, Tzolis</td></tr>
+        <tr><td>FWD</td><td>Jo&atilde;o Pedro, Isak, Thomas-Asante</td></tr>
+      </tbody>
+      <tfoot><tr><td colspan="2">3 free transfers, &pound;0.0 in the bank. &Oslash;degaard, Palmer, Rogers, Haaland etc. below are <strong>Wildcard-draft candidates you raised</strong> &mdash; none are in this squad.</td></tr></tfoot>
+    </table>
+  </div>
+
+  <h2><span class="n">01</span>What the three model fixes changed</h2>
+  <p class="dek">Each was a case of "wait until GW3 for a form-informed model" that the model still couldn't act on. All three now carry visible flags.</p>
+
+  <div class="fix">
+    <h3>Empty-history players are no longer dead weight</h3>
+    <p>A player with an all-zero previous-season workbook row (promoted, new signing, returning) was blended toward a <em>hard 0.0 start probability</em> at ~62% weight. <strong>Tzolis went 0.38 &rarr; 0.80 start probability, Jacquet 0.38 &rarr; 0.80</strong> &mdash; both had started every game. Their 5-GW projections roughly doubled (Tzolis 6.5 &rarr; 15.0). They are now "playing but low-ceiling", which is the honest read.</p>
+  </div>
+  <div class="fix">
+    <h3>Deadline-day signings are flagged as rotation risks</h3>
+    <p>The model rated <strong>Enzo and Ndiaye at 0.98&ndash;0.99 start probability</strong> on the strength of their <em>old club's</em> 35+ starts &mdash; both signed for City on 1 Sep and have one City start each. Now <strong>0.67</strong>, carrying <code>CHANGED_CLUBS_SINCE_SEASON_START</code>. This matches your read: adding Enzo and Ndiaye to a forward line that already rotates Doku / Semenyo / Foden / Cherki is a genuine minutes risk. A settled summer signing (Rogers, Mbeumo, 3/3 starts) keeps full weight.</p>
+  </div>
+  <div class="fix">
+    <h3>Team strength now sees the first three Gameweeks</h3>
+    <p>Every defensive projection was on the <em>preseason</em> team prior &mdash; the model still thought Spurs had a top-four defence. It now blends toward the season's own team-level xG for and against (five-match pseudo-count). <strong>Spurs' defensive-weakness ratio moved 0.89 &rarr; 1.01</strong> (top-four &rarr; league average), Arsenal 0.60 &rarr; 0.45 (elite, confirmed). Van Hecke fell from ~24 to <strong>18.9</strong> over five GW. With only three games the shift is partial &mdash; trust your own read of Spurs over the residual.</p>
+  </div>
+
+  <h2><span class="n">02</span>The three paths, GW4&ndash;GW8</h2>
+  <p class="dek">Cumulative best-XI + captain xPts, tuned v2 release, 3 free transfers. Frozen at the release timestamp; re-run weekly.</p>
+  <div class="paths">
+    <div class="path">
+      <h4>Hold</h4>
+      <div class="big">280.7</div>
+      <div class="sub">roll every week &middot; bank to 5 FT</div>
+      <div class="delta zero">baseline</div>
+    </div>
+    <div class="path pick">
+      <h4>Use 3 FT <span class="badge">RECOMMENDED</span></h4>
+      <div class="big">315.5</div>
+      <div class="sub">roll / 1&ndash;2 moves per GW &middot; ends on 1 FT</div>
+      <div class="delta">+34.8 vs hold</div>
+    </div>
+    <div class="path">
+      <h4>Wildcard + roll</h4>
+      <div class="big">318.8</div>
+      <div class="sub">WC at GW4, roll GW5&ndash;7 &middot; ends on 4&ndash;5 FT</div>
+      <div class="delta">+38.1 vs hold &middot; +3.3 vs 3 FT</div>
+    </div>
+  </div>
+  <p>The <strong>Hold &rarr; Use 3 FT gap is +35</strong> &mdash; that is the value, and it comes almost entirely from replacing the dead slots. <strong>Wildcard adds only +3 on top of that</strong>, for the cost of the chip. That is not a Wildcard case.</p>
+
+  <h2><span class="n">03</span>Where the model and your judgement now stand</h2>
+  <p class="dek">Squad players (top block) and the Wildcard-draft candidates you raised (lower block).</p>
+  <div class="tablewrap">
+    <table>
+      <caption>The calls &mdash; after the fixes</caption>
+      <thead><tr><th>Player</th><th>Your read</th><th>Model now</th><th>Verdict</th></tr></thead>
+      <tbody>
+        <tr><td>Tzolis <span style="color:var(--keep)">(own)</span></td><td>bullish (2 assists, holding off Trossard)</td><td>15.0 &mdash; plays, low ceiling</td><td>model moved your way; still a bench/differential &mdash; fine to transfer out</td></tr>
+        <tr><td>Jacquet <span style="color:var(--keep)">(own)</span></td><td>&mdash;</td><td>11.6 &mdash; no attacking threat</td><td class="hi">agree &mdash; transfer out</td></tr>
+        <tr><td>Isak <span style="color:var(--keep)">(own)</span></td><td>nailed &mdash; Ekitike out to Nov</td><td>15.5, start prob 0.69</td><td class="lo">diverges &mdash; model can't see the injury; real value ~22&ndash;25, <strong>keep</strong></td></tr>
+        <tr><td>B.Fernandes <span style="color:var(--keep)">(own)</span></td><td>&mdash; (raised dropping in a WC)</td><td>34.3 &mdash; top mid on the board</td><td>keep &mdash; the one call the model won't forgive</td></tr>
+        <tr><td>Enzo / Ndiaye <span style="color:var(--muted)">(WC idea)</span></td><td>City rotation risk, "kinda mad"</td><td>0.67 start prob, flagged</td><td class="hi">now agree &mdash; don't draft either</td></tr>
+        <tr><td>&Oslash;degaard <span style="color:var(--muted)">(WC idea)</span></td><td>elite form, "blown everyone away"</td><td>18.1, neutral prior</td><td class="lo">model blind &mdash; zero-history, no form signal; real value ~24&ndash;26 if you draft him</td></tr>
+        <tr><td>Van Hecke / Spurs def <span style="color:var(--muted)">(WC idea)</span></td><td>bad environment, bad shape</td><td>18.9, Spurs pulled to average</td><td class="hi">now agree &mdash; partial; trust your read on Spurs</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2><span class="n">04</span>Wildcard drafts vs the model</h2>
+  <p class="dek">These are hypothetical Wildcard squads &mdash; the drafts you sketched (keep B.Fernandes, spread the defence, Palmer or Rogers, &Oslash;degaard for the third Arsenal slot) against the model's own. Haaland captain, tuned release, £104.0m. "OVER" = trivially fixable by one downgrade. <strong>Only relevant if you decide to Wildcard &mdash; which the model says you shouldn't.</strong></p>
+  <div class="tablewrap">
+    <table>
+      <caption>5-GW cumulative XI + captain xPts</caption>
+      <thead><tr><th>Build</th><th class="num">£m</th><th class="num">5-GW</th><th>note</th></tr></thead>
+      <tbody>
+        <tr><td>Model's own WC XV</td><td class="num">103.6</td><td class="num">326.5</td><td>Palmer + Calafiori, captains Haaland &mdash; the ceiling</td></tr>
+        <tr class="pick-row"><td>Keep B.Fernandes, spread DEF, no &Oslash;degaard</td><td class="num">105.1</td><td class="num">319.1</td><td>matches the Wildcard; &pound;1.1m over &rarr; one downgrade</td></tr>
+        <tr><td>Keep B.Fern + Palmer, spread DEF</td><td class="num">107.1</td><td class="num">320.7</td><td>&pound;3.1m over &mdash; needs real trimming</td></tr>
+        <tr><td>Keep B.Fern + &Oslash;degaard, cheapest DEF</td><td class="num">105.2</td><td class="num">313.5</td><td>&Oslash;degaard's broken number costs it ~6 here</td></tr>
+        <tr class="row-drop"><td>No B.Fernandes (Ode + Rogers + Gro&szlig;)</td><td class="num">99.7</td><td class="num">302.1</td><td>the B.Fern drop costs ~17 raw &mdash; the expensive call</td></tr>
+      </tbody>
+      <tfoot><tr><td colspan="4">&Oslash;degaard's real value is ~24&ndash;26, not the 18.1 the model shows &mdash; add ~6 to every build that owns him. Isak's real value is ~22&ndash;25, not 15.5. With those corrections the keep-B.Fern builds land at ~325&ndash;327, level with the model's own XV.</td></tr></tfoot>
+    </table>
+  </div>
+  <p class="mono" style="font-size:12px;color:var(--muted)">B.Fernandes 34.3 &nbsp; Haaland 32.1 &nbsp; Gabriel 31.4 &nbsp; Mbeumo 27.4 &nbsp; Thiago 26.1 &nbsp; Jo&atilde;o Pedro 25.8 &nbsp; Palmer 25.5 &nbsp; Gu&eacute;hi 24.9 &nbsp; Rogers 23.7 &nbsp; Tavernier 23.6 &nbsp; Anderson 23.2 &nbsp; Calafiori 22.7 &nbsp; Tarkowski 21.8 &nbsp; Thiaw 20.4 &nbsp; Stach 20.7 &nbsp; Gro&szlig; 19.7 &nbsp; Van Hecke 18.9 &nbsp; Gonzalo 18.7 &nbsp; &Oslash;degaard 18.1* &nbsp; Richards 18.1 &nbsp; Isak 15.5*</p>
+
+  <div class="caveat">
+    <span class="tag">The one call to reconsider</span>
+    <p>Dropping <strong>B.Fernandes</strong> entirely costs ~17 raw points over five Gameweeks &mdash; his 34.3 is the single highest midfielder on the board and Man Utd's GW4&ndash;8 run (MCI, then FUL / TOT / LEE / BOU) is soft. "United not that good" is a team-quality read; the model is pricing his individual rate and the fixtures, and both are strong. Keeping him + Mbeumo and spreading cheaper elsewhere loses you far less than dropping him does.</p>
+  </div>
+
+  <h2><span class="n">05</span>If you use the 3 free transfers &mdash; on your actual squad</h2>
+  <p class="dek">The model's own 3-FT plan opens Isak &rarr; Thiago + Maguire &rarr; Gu&eacute;hi in GW4. Overriding the Isak call:</p>
+  <ul>
+    <li><strong>OUT: Tzolis</strong> (15.0, a fringe/differential at best) and <strong>Jacquet</strong> (11.6, no attacking threat, Liverpool CB depth). The two the model is unambiguously right about.</li>
+    <li><strong>IN:</strong> a nailed, no-Europe mid &mdash; <span class="mono">Tavernier (BOU, 23.6)</span>, <span class="mono">Stach (LEE, 20.7)</span>, or <span class="mono">Gro&szlig; (BHA, 19.7)</span> &mdash; and a nailed cheap defender &mdash; <span class="mono">Gu&eacute;hi (MCI, 24.9)</span>, <span class="mono">Tarkowski (EVE, 21.8)</span>, or <span class="mono">Thiaw (NEW, 20.4)</span>. Both are clear upgrades on what leaves.</li>
+    <li><strong>Third transfer:</strong> hold it. The model spends it on Maguire &rarr; a defender or Gakpo &rarr; a mid; neither is urgent, and you're back to 3 FT next week. Keeps flexibility for team news.</li>
+    <li><strong>Keep Isak.</strong> The model's Isak &rarr; Thiago is driven by the start-probability blind spot, not his football &mdash; with Ekitike out he is nailed.</li>
+    <li><strong>Never start Dubravka.</strong> A &pound;4.0 non-playing GK2 is the correct structure (Raya + dead keeper beats Raya + a &pound;4.5 backup, per the set-and-forget check) &mdash; just never field him.</li>
+  </ul>
+  <p>That is <strong>+30&ndash;35 xPts over five Gameweeks</strong> from two moves, no hit, Wildcard and the third transfer both still in hand.</p>
+
+  <div class="caveat">
+    <span class="tag">Before the deadline</span>
+    <p>Frozen 7 Sep. Re-run after Friday's press conferences: Isak's role confirmation, any new injury, and the GW4 lineups move these numbers. The Wildcard's edge over "use 3 FT" is 3 points &mdash; one piece of team news erases or doubles it.</p>
+  </div>
+
+  <hr class="divider">
+  <p class="endnote">
+    <span class="kicker">Provenance</span>
+    Figures from <code>web/release.json</code> (<code>inseason_baseline_v2</code> with the transfer-aware appearance model and in-season team strength, GW4&ndash;GW8) via <code>compare_wildcard</code> and the initial-squad optimiser. The actual squad (Raya, Dubravka / Gabriel, Maguire, Kayode, Jacquet, Diop / B.Fernandes, Mbeumo, Semenyo, Gakpo, Tzolis / Jo&atilde;o Pedro, Isak, Thomas-Asante) is read from the GW4 screenshot; 3 free transfers, no chip. &Oslash;degaard / Palmer / Rogers / Haaland appear only in the manager's own Wildcard-draft sketches, not the squad. GW1&ndash;3 actuals from <code>player_gameweek_stat</code> on final, data-checked event-live runs. Starred (*) values are known model blind spots &mdash; &Oslash;degaard has no previous-season row (neutral prior), Isak's start probability does not reflect Ekitike's injury. All model reads are research/shadow: the tuned v2 policy still owes an out-of-sample evaluation. Re-run before the deadline.
+  </p>
+</div>

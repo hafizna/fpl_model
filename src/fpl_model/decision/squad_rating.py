@@ -89,10 +89,10 @@ def empirical_percentile(value: float, population: tuple[float, ...]) -> float:
 def _pool_maps(
     pools: tuple[GameweekProjectionPool, ...],
 ) -> tuple[tuple[dict[int, TransferTarget], ...], tuple[int, ...]]:
-    if len(pools) != 3:
-        raise ValueError("squad benchmark requires exactly three Gameweek pools")
+    if not 1 <= len(pools) <= 5:
+        raise ValueError("squad benchmark requires one to five Gameweek pools")
     gameweeks = tuple(pool.gameweek for pool in pools)
-    if gameweeks != tuple(range(gameweeks[0], gameweeks[0] + 3)):
+    if gameweeks != tuple(range(gameweeks[0], gameweeks[0] + len(pools))):
         raise ValueError("squad benchmark Gameweeks must be consecutive")
     maps = tuple({row.player.fpl_id: row for row in pool.players} for pool in pools)
     if any(len(rows) != len(pool.players) for rows, pool in zip(maps, pools, strict=True)):
@@ -405,7 +405,7 @@ def build_squad_benchmark(
                     squad,
                     tuple(maps[index][fpl_id].projection for fpl_id in fpl_ids),
                 ).total_xpts
-                for index in range(3)
+                for index in range(len(maps))
             ),
         )
     )
